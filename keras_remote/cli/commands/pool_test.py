@@ -215,6 +215,8 @@ class PoolAddUpdateFailureTest(absltest.TestCase):
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("Pulumi update encountered an issue", result.output)
+    self.assertIn("Pool Update Failed", result.output)
+    self.assertNotIn("Pool Added", result.output)
 
 
 class PoolRemoveUpdateFailureTest(absltest.TestCase):
@@ -239,6 +241,8 @@ class PoolRemoveUpdateFailureTest(absltest.TestCase):
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("Pulumi update encountered an issue", result.output)
+    self.assertIn("Pool Update Failed", result.output)
+    self.assertNotIn("Pool Removed", result.output)
 
 
 class PoolAddNoStackTest(absltest.TestCase):

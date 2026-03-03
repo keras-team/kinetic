@@ -89,7 +89,11 @@ def _load_pools(project, zone, cluster_name):
 
 
 def _apply_pool_update(project, zone, cluster_name, node_pools):
-  """Run a Pulumi update with the given node pool list."""
+  """Run a Pulumi update with the given node pool list.
+
+  Returns:
+    True if the update succeeded, False if it encountered an error.
+  """
   config = InfraConfig(
     project=project,
     zone=zone,
@@ -104,9 +108,11 @@ def _apply_pool_update(project, zone, cluster_name, node_pools):
     result = stack.up(on_output=print)
     console.print()
     success(f"Pulumi update complete. {result.summary.resource_changes}")
+    return True
   except auto.errors.CommandError as e:
     console.print()
     warning(f"Pulumi update encountered an issue: {e}")
+    return False
 
 
 @pool.command("add")
@@ -148,10 +154,18 @@ def pool_add(project, zone, cluster_name, accelerator, yes):
   if not yes:
     click.confirm("Proceed?", abort=True)
 
-  _apply_pool_update(project, zone, cluster_name, all_pools)
+  update_succeeded = _apply_pool_update(project, zone, cluster_name, all_pools)
 
   console.print()
-  banner("Pool Added")
+  if update_succeeded:
+    banner("Pool Added")
+  else:
+    banner("Pool Update Failed")
+    console.print()
+    console.print(
+      "You may re-run the command to retry, or use"
+      " [bold]keras-remote pool list[/bold] to check current state."
+    )
   console.print()
 
 
@@ -181,10 +195,18 @@ def pool_remove(project, zone, cluster_name, pool_name, yes):
   if not yes:
     click.confirm("Proceed?", abort=True)
 
-  _apply_pool_update(project, zone, cluster_name, remaining)
+  update_succeeded = _apply_pool_update(project, zone, cluster_name, remaining)
 
   console.print()
-  banner("Pool Removed")
+  if update_succeeded:
+    banner("Pool Removed")
+  else:
+    banner("Pool Update Failed")
+    console.print()
+    console.print(
+      "You may re-run the command to retry, or use"
+      " [bold]keras-remote pool list[/bold] to check current state."
+    )
   console.print()
 
 
