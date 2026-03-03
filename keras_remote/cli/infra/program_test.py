@@ -5,6 +5,11 @@ from unittest import mock
 from absl.testing import absltest, parameterized
 
 from keras_remote.cli.config import NodePoolConfig
+from keras_remote.cli.constants import (
+  MAX_CLUSTER_CPU,
+  MAX_CLUSTER_MEMORY_GB,
+  NODE_MAX_RUN_DURATION_SECONDS,
+)
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
 # Patch the pulumi_gcp module before importing program, so the module-level
@@ -307,10 +312,10 @@ class TestClusterAutoscalingAndNAP(absltest.TestCase):
       )
 
       gcp_mock.container.ClusterClusterAutoscalingResourceLimitArgs.assert_any_call(
-        resource_type="cpu", maximum=1000
+        resource_type="cpu", maximum=MAX_CLUSTER_CPU
       )
       gcp_mock.container.ClusterClusterAutoscalingResourceLimitArgs.assert_any_call(
-        resource_type="memory", maximum=64000
+        resource_type="memory", maximum=MAX_CLUSTER_MEMORY_GB
       )
 
 
@@ -373,7 +378,10 @@ class TestScaleToZeroNodePools(parameterized.TestCase):
     node_config_kwargs = (
       gcp_mock.container.NodePoolNodeConfigArgs.call_args.kwargs
     )
-    self.assertEqual(node_config_kwargs.get("max_run_duration"), "86400s")
+    self.assertEqual(
+      node_config_kwargs.get("max_run_duration"),
+      f"{NODE_MAX_RUN_DURATION_SECONDS}s",
+    )
 
 
 if __name__ == "__main__":

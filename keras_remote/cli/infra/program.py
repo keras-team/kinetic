@@ -7,7 +7,13 @@ Artifact Registry, GKE cluster, and optional accelerator node pools.
 import pulumi
 import pulumi_gcp as gcp
 
-from keras_remote.cli.constants import REQUIRED_APIS, RESOURCE_NAME_PREFIX
+from keras_remote.cli.constants import (
+  MAX_CLUSTER_CPU,
+  MAX_CLUSTER_MEMORY_GB,
+  NODE_MAX_RUN_DURATION_SECONDS,
+  REQUIRED_APIS,
+  RESOURCE_NAME_PREFIX,
+)
 from keras_remote.constants import zone_to_ar_location, zone_to_region
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
@@ -125,11 +131,11 @@ def create_program(config):
         resource_limits=[
           gcp.container.ClusterClusterAutoscalingResourceLimitArgs(
             resource_type="cpu",
-            maximum=1000,
+            maximum=MAX_CLUSTER_CPU,
           ),
           gcp.container.ClusterClusterAutoscalingResourceLimitArgs(
             resource_type="memory",
-            maximum=64000,
+            maximum=MAX_CLUSTER_MEMORY_GB,
           ),
         ],
       ),
@@ -230,7 +236,7 @@ def _create_gpu_node_pool(cluster, gpu: GpuConfig, zone, project_id, pool_name):
         ),
       ],
       labels={RESOURCE_NAME_PREFIX: "true"},
-      max_run_duration="86400s",  # 24 hours
+      max_run_duration=f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
     ),
   )
 
@@ -269,7 +275,7 @@ def _create_tpu_node_pool(cluster, tpu: TpuConfig, zone, project_id, pool_name):
       machine_type=tpu.machine_type,
       oauth_scopes=_BASE_OAUTH_SCOPES,
       labels={RESOURCE_NAME_PREFIX: "true"},
-      max_run_duration="86400s",  # 24 hours
+      max_run_duration=f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
     ),
     placement_policy=placement,
   )

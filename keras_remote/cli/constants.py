@@ -28,3 +28,8 @@ NVIDIA_DRIVER_DAEMONSET_URL = (
 )
 
 LWS_INSTALL_URL = "https://github.com/kubernetes-sigs/lws/releases/download/v0.5.1/manifests.yaml"
+
+# Autoscaling upper bounds
+MAX_CLUSTER_CPU = 1000
+MAX_CLUSTER_MEMORY_GB = 64000
+NODE_MAX_RUN_DURATION_SECONDS = 24 * 60 * 60  # 24 hours

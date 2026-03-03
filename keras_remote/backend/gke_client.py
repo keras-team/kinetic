@@ -447,8 +447,13 @@ def _check_node_pool_exists_cached(selector_items) -> bool:
       if all(pool_labels.get(k) == str(v) for k, v in selector.items()):
         return True
     return False
-  except Exception:
-    # Degrade gracefully
+  except Exception as e:
+    # Degrade gracefully, but inform the user that the check failed.
+    logging.warning(
+      "Could not verify node pool existence via `gcloud`. "
+      "Proceeding with assumption that it exists. Error: %s",
+      e,
+    )
     return True
 
 
