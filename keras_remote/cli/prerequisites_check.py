@@ -2,8 +2,7 @@
 
 Delegates common credential checks (gcloud, auth plugin, ADC) to
 :mod:`keras_remote.credentials` and converts ``RuntimeError`` into
-``click.ClickException``.  CLI-only tool checks (Pulumi, kubectl) remain
-here.
+``click.ClickException``.  CLI-only tool checks (kubectl) remain here.
 """
 
 import shutil
@@ -19,14 +18,6 @@ def check_gcloud():
     credentials.ensure_gcloud()
   except RuntimeError as e:
     raise click.ClickException(str(e))  # noqa: B904
-
-
-def check_pulumi():
-  """Verify Pulumi CLI is installed (required by Automation API)."""
-  if not shutil.which("pulumi"):
-    raise click.ClickException(
-      "Pulumi CLI not found. Install from: https://www.pulumi.com/docs/install/"
-    )
 
 
 def check_kubectl():
@@ -56,7 +47,6 @@ def check_gcloud_auth():
 def check_all():
   """Run all prerequisite checks."""
   check_gcloud()
-  check_pulumi()
   check_kubectl()
   check_gke_auth_plugin()
   check_gcloud_auth()

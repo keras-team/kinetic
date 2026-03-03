@@ -8,6 +8,7 @@ from keras_remote.core.accelerators import (
   TPUS,
   GpuConfig,
   TpuConfig,
+  generate_pool_name,
   get_category,
   parse_accelerator,
 )
@@ -179,6 +180,31 @@ class TestGetCategory(absltest.TestCase):
 
   def test_tpu(self):
     self.assertEqual(get_category("v5litepod"), "tpu")
+
+
+class TestGeneratePoolName(absltest.TestCase):
+  def test_gpu_prefix(self):
+    gpu = GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4")
+    name = generate_pool_name(gpu)
+    self.assertTrue(name.startswith("gpu-l4-"), name)
+
+  def test_tpu_prefix(self):
+    tpu = TpuConfig("v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2)
+    name = generate_pool_name(tpu)
+    self.assertTrue(name.startswith("tpu-v5p-"), name)
+
+  def test_suffix_is_4_hex_chars(self):
+    gpu = GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4")
+    name = generate_pool_name(gpu)
+    suffix = name.split("-")[-1]
+    self.assertLen(suffix, 4)
+    # Verify it's valid hex.
+    int(suffix, 16)
+
+  def test_unique_across_calls(self):
+    gpu = GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4")
+    names = {generate_pool_name(gpu) for _ in range(50)}
+    self.assertGreater(len(names), 1)
 
 
 class TestRegistryIntegrity(absltest.TestCase):

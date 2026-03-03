@@ -4,6 +4,7 @@ from unittest import mock
 
 from absl.testing import absltest, parameterized
 
+from keras_remote.cli.config import NodePoolConfig
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
 # Patch the pulumi_gcp module before importing program, so the module-level
@@ -44,7 +45,9 @@ class TestCreateTpuNodePool(parameterized.TestCase):
     cluster = mock.MagicMock()
     cluster.name = "test-cluster"
 
-    program._create_tpu_node_pool(cluster, tpu, "us-central2-b", "my-project")
+    program._create_tpu_node_pool(
+      cluster, tpu, "us-central2-b", "my-project", f"tpu-{tpu.name}-abcd"
+    )
 
     call_kwargs = gcp_mock.container.NodePool.call_args
     placement = call_kwargs.kwargs.get(
@@ -66,7 +69,9 @@ class TestCreateTpuNodePool(parameterized.TestCase):
     cluster = mock.MagicMock()
     cluster.name = "test-cluster"
 
-    program._create_tpu_node_pool(cluster, tpu, "us-central2-b", "my-project")
+    program._create_tpu_node_pool(
+      cluster, tpu, "us-central2-b", "my-project", "tpu-v5p-abcd"
+    )
 
     # Due to multi-host TPU workaround, initial_node_count is equal to num_nodes
     call_kwargs = gcp_mock.container.NodePool.call_args.kwargs
@@ -78,30 +83,42 @@ class TestCreateTpuNodePool(parameterized.TestCase):
     self.assertEqual(autoscaling_kwargs.get("min_node_count"), 4)
 
   @mock.patch.object(program, "gcp")
-  def test_pool_name_includes_tpu_name(self, gcp_mock):
+  def test_pool_name_passed_through(self, gcp_mock):
     tpu = TpuConfig("v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2)
     cluster = mock.MagicMock()
     cluster.name = "test-cluster"
 
-    program._create_tpu_node_pool(cluster, tpu, "us-central2-b", "my-project")
+    program._create_tpu_node_pool(
+      cluster, tpu, "us-central2-b", "my-project", "tpu-v5p-f1a2"
+    )
 
     positional_args = gcp_mock.container.NodePool.call_args[0]
-    self.assertEqual(positional_args[0], "tpu-v5p-pool")
+    self.assertEqual(positional_args[0], "tpu-v5p-f1a2")
 
 
-def _make_config(accelerator=None):
+class TestCreateGpuNodePool(absltest.TestCase):
+  @mock.patch.object(program, "gcp")
+  def test_pool_name_passed_through(self, gcp_mock):
+    gpu = GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4")
+    cluster = mock.MagicMock()
+    cluster.name = "test-cluster"
+
+    program._create_gpu_node_pool(
+      cluster, gpu, "us-central1-a", "my-project", "gpu-l4-a3f2"
+    )
+
+    positional_args = gcp_mock.container.NodePool.call_args[0]
+    self.assertEqual(positional_args[0], "gpu-l4-a3f2")
+
+
+def _make_config(node_pools=None):
   """Create a mock InfraConfig for testing."""
   config = mock.MagicMock()
   config.project = "test-project"
   config.zone = "us-central1-a"
   config.cluster_name = "test-cluster"
-  config.accelerator = accelerator
+  config.node_pools = node_pools or []
   return config
-
-
-def _resolve_apply(fn):
-  """Simulate Pulumi Output.apply() by invoking the callback immediately."""
-  return fn(None)
 
 
 def _run_program_and_get_exports(config):
@@ -120,8 +137,11 @@ def _run_program_and_get_exports(config):
 
     gcp_mock.container.NodePool.side_effect = _make_node_pool
     gcp_mock.artifactregistry.Repository.return_value.name.apply.side_effect = (
-      _resolve_apply
+      lambda fn: fn(None)
     )
+    # Make Output.all() simply collect resolved values into a list.
+    pulumi_mock.Output.all.side_effect = lambda *args: list(args)
+
     program_fn = program.create_program(config)
     program_fn()
     return {
@@ -134,36 +154,58 @@ class TestAcceleratorExports(absltest.TestCase):
 
   def test_gpu_exports(self):
     gpu = GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4")
-    exports = _run_program_and_get_exports(_make_config(gpu))
+    node_pools = [NodePoolConfig("gpu-l4-a3f2", gpu)]
+    exports = _run_program_and_get_exports(_make_config(node_pools))
 
-    self.assertIn("accelerator", exports)
-    accel = exports["accelerator"]
+    self.assertIn("accelerators", exports)
+    accel_list = exports["accelerators"]
+    self.assertLen(accel_list, 1)
+    accel = accel_list[0]
     self.assertEqual(accel["type"], "GPU")
     self.assertEqual(accel["name"], "l4")
     self.assertEqual(accel["count"], 1)
     self.assertEqual(accel["machine_type"], "g2-standard-4")
-    self.assertEqual(accel["node_pool"], "gpu-pool")
+    self.assertEqual(accel["node_pool"], "gpu-l4-a3f2")
     self.assertEqual(accel["node_count"], 1)
 
   def test_tpu_exports(self):
     tpu = TpuConfig("v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2)
-    exports = _run_program_and_get_exports(_make_config(tpu))
+    node_pools = [NodePoolConfig("tpu-v5p-b7e1", tpu)]
+    exports = _run_program_and_get_exports(_make_config(node_pools))
 
-    self.assertIn("accelerator", exports)
-    accel = exports["accelerator"]
+    self.assertIn("accelerators", exports)
+    accel_list = exports["accelerators"]
+    self.assertLen(accel_list, 1)
+    accel = accel_list[0]
     self.assertEqual(accel["type"], "TPU")
     self.assertEqual(accel["name"], "v5p")
     self.assertEqual(accel["chips"], 8)
     self.assertEqual(accel["topology"], "2x2x2")
     self.assertEqual(accel["machine_type"], "ct5p-hightpu-4t")
-    self.assertEqual(accel["node_pool"], "tpu-v5p-pool")
+    self.assertEqual(accel["node_pool"], "tpu-v5p-b7e1")
     self.assertEqual(accel["node_count"], 2)
 
-  def test_cpu_only_exports_none(self):
-    exports = _run_program_and_get_exports(_make_config(None))
+  def test_cpu_only_exports_empty_list(self):
+    exports = _run_program_and_get_exports(_make_config([]))
 
-    self.assertIn("accelerator", exports)
-    self.assertIsNone(exports["accelerator"])
+    self.assertIn("accelerators", exports)
+    self.assertEqual(exports["accelerators"], [])
+
+  def test_multiple_pools(self):
+    gpu = GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4")
+    tpu = TpuConfig("v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2)
+    node_pools = [
+      NodePoolConfig("gpu-l4-a3f2", gpu),
+      NodePoolConfig("tpu-v5p-b7e1", tpu),
+    ]
+    exports = _run_program_and_get_exports(_make_config(node_pools))
+
+    accel_list = exports["accelerators"]
+    self.assertLen(accel_list, 2)
+    self.assertEqual(accel_list[0]["type"], "GPU")
+    self.assertEqual(accel_list[0]["node_pool"], "gpu-l4-a3f2")
+    self.assertEqual(accel_list[1]["type"], "TPU")
+    self.assertEqual(accel_list[1]["node_pool"], "tpu-v5p-b7e1")
 
 
 class TestExportsDependOnResources(parameterized.TestCase):
@@ -177,32 +219,36 @@ class TestExportsDependOnResources(parameterized.TestCase):
   @parameterized.named_parameters(
     dict(
       testcase_name="gpu",
-      accelerator=GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4"),
+      node_pools=[
+        NodePoolConfig(
+          "gpu-l4-a3f2",
+          GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4"),
+        )
+      ],
     ),
     dict(
       testcase_name="tpu",
-      accelerator=TpuConfig(
-        "v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2
-      ),
+      node_pools=[
+        NodePoolConfig(
+          "tpu-v5p-b7e1",
+          TpuConfig("v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2),
+        )
+      ],
     ),
   )
-  def test_accelerator_export_depends_on_node_pool(self, accelerator):
+  def test_accelerator_export_depends_on_node_pool(self, node_pools):
     """The accelerator export must be produced via NodePool.name.apply()."""
     with (
       mock.patch.object(program, "pulumi") as pulumi_mock,
       mock.patch.object(program, "gcp") as gcp_mock,
     ):
-      program.create_program(_make_config(accelerator))()
+      program.create_program(_make_config(node_pools))()
 
-      # The export value should be the return value of pool.name.apply().
+      # The export value should use Output.all() which depends on
+      # pool.name.apply() calls.
       node_pool_mock = gcp_mock.container.NodePool.return_value
       node_pool_mock.name.apply.assert_called_once()
-      exported = {
-        c.args[0]: c.args[1] for c in pulumi_mock.export.call_args_list
-      }
-      self.assertIs(
-        exported["accelerator"], node_pool_mock.name.apply.return_value
-      )
+      pulumi_mock.Output.all.assert_called_once()
 
   def test_ar_registry_export_depends_on_repository(self):
     """The ar_registry export must be produced via Repository.name.apply()."""
@@ -210,7 +256,7 @@ class TestExportsDependOnResources(parameterized.TestCase):
       mock.patch.object(program, "pulumi") as pulumi_mock,
       mock.patch.object(program, "gcp") as gcp_mock,
     ):
-      program.create_program(_make_config(None))()
+      program.create_program(_make_config([]))()
 
       repo_mock = gcp_mock.artifactregistry.Repository.return_value
       repo_mock.name.apply.assert_called_once()
@@ -219,20 +265,20 @@ class TestExportsDependOnResources(parameterized.TestCase):
       }
       self.assertIs(exported["ar_registry"], repo_mock.name.apply.return_value)
 
-  def test_cpu_only_accelerator_export_is_none(self):
-    """CPU-only config should export accelerator as None (no dependency)."""
+  def test_cpu_only_accelerator_export_is_empty_list(self):
+    """CPU-only config should export accelerators as empty list."""
     with (
       mock.patch.object(program, "pulumi") as pulumi_mock,
       mock.patch.object(program, "gcp") as gcp_mock,
     ):
-      program.create_program(_make_config(None))()
+      program.create_program(_make_config([]))()
 
       # No node pool created, so NodePool should not be called.
       gcp_mock.container.NodePool.assert_not_called()
       exported = {
         c.args[0]: c.args[1] for c in pulumi_mock.export.call_args_list
       }
-      self.assertIsNone(exported["accelerator"])
+      self.assertEqual(exported["accelerators"], [])
 
 
 class TestClusterAutoscalingAndNAP(absltest.TestCase):

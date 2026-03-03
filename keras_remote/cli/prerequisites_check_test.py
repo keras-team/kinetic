@@ -3,56 +3,31 @@
 from unittest import mock
 
 import click
-from absl.testing import absltest, parameterized
+from absl.testing import absltest
 
 from keras_remote.cli.prerequisites_check import (
   check_gcloud,
   check_gcloud_auth,
   check_gke_auth_plugin,
   check_kubectl,
-  check_pulumi,
 )
 
 _MODULE = "keras_remote.cli.prerequisites_check"
 
 
-class TestToolChecks(parameterized.TestCase):
-  """Tests for CLI-only tool checks (pulumi, kubectl)."""
+class TestToolChecks(absltest.TestCase):
+  """Tests for CLI-only tool checks (kubectl)."""
 
-  @parameterized.named_parameters(
-    dict(
-      testcase_name="pulumi",
-      check_fn=check_pulumi,
-      error_match="Pulumi CLI not found",
-    ),
-    dict(
-      testcase_name="kubectl",
-      check_fn=check_kubectl,
-      error_match="kubectl not found",
-    ),
-  )
-  def test_present(self, check_fn, error_match):
-    with mock.patch("shutil.which", return_value="/usr/bin/tool"):
-      check_fn()
+  def test_kubectl_present(self):
+    with mock.patch("shutil.which", return_value="/usr/bin/kubectl"):
+      check_kubectl()
 
-  @parameterized.named_parameters(
-    dict(
-      testcase_name="pulumi",
-      check_fn=check_pulumi,
-      error_match="Pulumi CLI not found",
-    ),
-    dict(
-      testcase_name="kubectl",
-      check_fn=check_kubectl,
-      error_match="kubectl not found",
-    ),
-  )
-  def test_missing(self, check_fn, error_match):
+  def test_kubectl_missing(self):
     with (
       mock.patch("shutil.which", return_value=None),
-      self.assertRaisesRegex(click.ClickException, error_match),
+      self.assertRaisesRegex(click.ClickException, "kubectl not found"),
     ):
-      check_fn()
+      check_kubectl()
 
 
 class TestDelegatedChecks(absltest.TestCase):

@@ -5,7 +5,7 @@ import subprocess
 import click
 import pulumi.automation as auto
 
-from keras_remote.cli.config import InfraConfig
+from keras_remote.cli.config import InfraConfig, NodePoolConfig
 from keras_remote.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from keras_remote.cli.infra.post_deploy import (
   configure_kubectl,
@@ -13,7 +13,10 @@ from keras_remote.cli.infra.post_deploy import (
   install_lws,
 )
 from keras_remote.cli.infra.program import create_program
-from keras_remote.cli.infra.stack_manager import get_stack
+from keras_remote.cli.infra.stack_manager import (
+  get_current_node_pools,
+  get_stack,
+)
 from keras_remote.cli.output import (
   banner,
   config_summary,
@@ -24,7 +27,7 @@ from keras_remote.cli.output import (
 from keras_remote.cli.prerequisites_check import check_all
 from keras_remote.cli.prompts import prompt_accelerator, resolve_project
 from keras_remote.core import accelerators
-from keras_remote.core.accelerators import GpuConfig
+from keras_remote.core.accelerators import GpuConfig, generate_pool_name
 
 
 @click.command()
@@ -77,12 +80,29 @@ def up(project, zone, accelerator, cluster_name, yes):
   else:
     accel_config = prompt_accelerator()
 
-  config = InfraConfig(
-    project=project,
-    zone=zone,
-    cluster_name=cluster_name,
-    accelerator=accel_config,
-  )
+  # If a stack already exists, preserve its node pools as-is.
+  # Users should manage pools via `keras-remote pool add/remove` after
+  # initial setup.
+  config = InfraConfig(project=project, zone=zone, cluster_name=cluster_name)
+  existing_pools = []
+  try:
+    program = create_program(config)
+    stack = get_stack(program, config)
+    stack.refresh(on_output=print)
+    existing_pools = get_current_node_pools(stack)
+  except auto.errors.CommandError:
+    pass  # First run or no stack yet — start with empty list.
+
+  if existing_pools:
+    config.node_pools = list(existing_pools)
+    console.print(
+      f"\nFound {len(existing_pools)} existing node pool(s)."
+      "\nUse 'keras-remote pool add/remove/list' to manage node pools.\n"
+    )
+  elif accel_config is not None:
+    config.node_pools.append(
+      NodePoolConfig(generate_pool_name(accel_config), accel_config)
+    )
 
   # Show summary and confirm
   config_summary(config)
@@ -125,7 +145,7 @@ def up(project, zone, accelerator, cluster_name, yes):
     ),
     ("LWS CRD installation", install_lws),
   ]
-  if isinstance(accel_config, GpuConfig):
+  if any(isinstance(np.accelerator, GpuConfig) for np in config.node_pools):
     steps.append(("GPU driver installation", install_gpu_drivers))
 
   failures = []

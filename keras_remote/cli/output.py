@@ -69,26 +69,52 @@ def infrastructure_state(outputs):
     if key in outputs:
       table.add_row(label, str(outputs[key].value))
 
-  if "accelerator" not in outputs:
+  # New format: "accelerators" (list of dicts)
+  if "accelerators" in outputs:
+    accel_list = outputs["accelerators"].value
+    if not accel_list:
+      table.add_row("Accelerators", "CPU only (no accelerator pools)")
+    else:
+      table.add_row("", "")
+      table.add_row(f"Accelerator Pools ({len(accel_list)})", "")
+      for i, accel in enumerate(accel_list, 1):
+        _render_accelerator(table, accel, index=i)
+
+  # Legacy format: "accelerator" (single dict or None)
+  elif "accelerator" in outputs:
+    if outputs["accelerator"].value is None:
+      table.add_row("Accelerator", "CPU only")
+    else:
+      accel = outputs["accelerator"].value
+      accel_type = accel.get("type", "Unknown")
+      table.add_row("", "")
+      table.add_row("Accelerator", accel_type)
+      labels = _GPU_LABELS if accel_type == "GPU" else _TPU_LABELS
+      for key, label in labels.items():
+        if key in accel:
+          table.add_row(f"  {label}", str(accel[key]))
+
+  else:
     table.add_row(
       "Accelerator",
       "[dim]Unknown (run 'keras-remote up' to refresh)[/dim]",
     )
-  elif outputs["accelerator"].value is None:
-    table.add_row("Accelerator", "CPU only")
-  else:
-    accel = outputs["accelerator"].value
-    accel_type = accel.get("type", "Unknown")
-    table.add_row("", "")
-    table.add_row("Accelerator", accel_type)
-    labels = _GPU_LABELS if accel_type == "GPU" else _TPU_LABELS
-    for key, label in labels.items():
-      if key in accel:
-        table.add_row(f"  {label}", str(accel[key]))
 
   console.print()
   console.print(table)
   console.print()
+
+
+def _render_accelerator(table, accel, index=None):
+  """Render a single accelerator pool entry in the status table."""
+  accel_type = accel.get("type", "Unknown")
+  pool_name = accel.get("node_pool", "")
+  prefix = f"  Pool {index}" if index else "  Pool"
+  table.add_row(f"{prefix}: {accel_type}", pool_name)
+  labels = _GPU_LABELS if accel_type == "GPU" else _TPU_LABELS
+  for key, label in labels.items():
+    if key in accel and key != "node_pool":
+      table.add_row(f"    {label}", str(accel[key]))
 
 
 def config_summary(config):
@@ -101,16 +127,17 @@ def config_summary(config):
   table.add_row("Zone", config.zone)
   table.add_row("Cluster Name", config.cluster_name)
 
-  accel = config.accelerator
-  if accel is None:
-    table.add_row("Accelerator", "CPU only")
-  elif isinstance(accel, GpuConfig):
-    table.add_row("Accelerator", f"GPU ({accel.gke_label})")
-  elif isinstance(accel, TpuConfig):
-    table.add_row(
-      "Accelerator",
-      f"TPU ({accel.name}, topology: {accel.topology})",
-    )
+  if not config.node_pools:
+    table.add_row("Accelerators", "CPU only")
+  else:
+    accel_strs = []
+    for np in config.node_pools:
+      accel = np.accelerator
+      if isinstance(accel, GpuConfig):
+        accel_strs.append(f"GPU ({accel.gke_label})")
+      elif isinstance(accel, TpuConfig):
+        accel_strs.append(f"TPU ({accel.name}, {accel.topology})")
+    table.add_row("Accelerators", ", ".join(accel_strs))
 
   console.print()
   console.print(table)

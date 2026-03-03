@@ -14,8 +14,8 @@ keras_remote/
 ├── runner/         # Remote worker entrypoint (runs inside container)
 ├── utils/          # Serialization (packager) and Cloud Storage helpers
 ├── cli/            # CLI for infrastructure provisioning (Pulumi-based)
-│   ├── commands/   # up, down, status, config
-│   └── infra/      # Pulumi programs and stack management
+│   ├── commands/   # up, down, status, config, pool (add/remove/list)
+│   └── infra/      # Pulumi programs, stack management, post-deploy steps
 ├── credentials.py  # Credential verification & auto-setup (shared by core & CLI)
 └── constants.py    # Zone/region utilities
 ```
@@ -49,6 +49,9 @@ keras_remote/
 | `utils/packager.py`          | `save_payload()` (cloudpickle), `zip_working_dir()`                              |
 | `utils/storage.py`           | GCS upload/download/cleanup for job artifacts                                    |
 | `runner/remote_runner.py`    | Runs inside container: deserialize, execute, upload result                       |
+| `cli/commands/pool.py`       | Node pool add/remove/list commands                                               |
+| `cli/infra/post_deploy.py`   | kubectl, LWS CRD, GPU driver setup after stack.up()                              |
+| `cli/constants.py`           | CLI defaults, paths, API list                                                    |
 | `cli/main.py`                | CLI entry point (`keras-remote` command)                                         |
 
 ## Key Abstractions
@@ -56,7 +59,7 @@ keras_remote/
 - **`JobContext`** (`backend/execution.py`): Mutable dataclass carrying all job state through the pipeline — inputs, generated IDs, artifact paths, image URI.
 - **`BaseK8sBackend`** (`backend/execution.py`): Base class with `submit_job`, `wait_for_job`, `cleanup_job`. Subclassed by `GKEBackend` and `PathwaysBackend`.
 - **`GpuConfig` / `TpuConfig`** (`core/accelerators.py`): Frozen dataclasses for accelerator metadata. Single source of truth used by runtime, container builder, and CLI.
-- **`InfraConfig`** (`cli/config.py`): CLI provisioning configuration (project, zone, cluster, accelerator).
+- **`InfraConfig` / `NodePoolConfig`** (`cli/config.py`): CLI provisioning configuration. `InfraConfig` holds project, zone, cluster name, and a list of `NodePoolConfig` entries. `NodePoolConfig` pairs a unique pool name (e.g., `gpu-l4-a3f2`) with a `GpuConfig` or `TpuConfig`.
 
 ## Conventions
 
@@ -74,14 +77,39 @@ Every customizable resource name must follow the same resolution model across al
 - **CLI commands**: `--flag` (with `envvar=`) → env var → interactive prompt or default
 - **`config show`**: displays current value and source for every configurable name
 
-| Env Var | `@run()` param | CLI flag | `config show` | Default |
-| --- | --- | --- | --- | --- |
-| `KERAS_REMOTE_PROJECT` | `project=` | `--project` | Yes | *(required)* |
-| `KERAS_REMOTE_ZONE` | `zone=` | `--zone` | Yes | `us-central1-a` |
-| `KERAS_REMOTE_CLUSTER` | `cluster=` | `--cluster` | Yes | `keras-remote-cluster` |
-| `KERAS_REMOTE_GKE_NAMESPACE` | `namespace=` | *(runtime only)* | Yes | `default` |
+| Env Var                      | `@run()` param | CLI flag         | `config show` | Default                |
+| ---------------------------- | -------------- | ---------------- | ------------- | ---------------------- |
+| `KERAS_REMOTE_PROJECT`       | `project=`     | `--project`      | Yes           | _(required)_           |
+| `KERAS_REMOTE_ZONE`          | `zone=`        | `--zone`         | Yes           | `us-central1-a`        |
+| `KERAS_REMOTE_CLUSTER`       | `cluster=`     | `--cluster`      | Yes           | `keras-remote-cluster` |
+| `KERAS_REMOTE_GKE_NAMESPACE` | `namespace=`   | _(runtime only)_ | Yes           | `default`              |
 
 When adding a new configurable resource name, ensure it is wired into **all three paths** (decorator, CLI flags on every relevant command, and `config show`). The `GOOGLE_CLOUD_PROJECT` env var is also accepted as a fallback for project ID (after `KERAS_REMOTE_PROJECT`).
+
+Additional CLI-only env vars:
+
+| Env Var                  | Default                  | Description                  |
+| ------------------------ | ------------------------ | ---------------------------- |
+| `KERAS_REMOTE_STATE_DIR` | `~/.keras-remote/pulumi` | Pulumi local state directory |
+
+### CLI State Management
+
+The CLI manages three layers of state: in-memory config (`InfraConfig`), Pulumi local state files (`~/.keras-remote/pulumi/`), and GCP cloud resources. Each GCP project gets its own Pulumi stack (stack name = project ID).
+
+Every mutating command (`up`, `pool add`, `pool remove`, etc.) follows this reconciliation pattern:
+
+1. `stack.refresh()` — pull cloud reality into local state
+2. `get_current_node_pools()` — read current pools from stack exports
+3. Build new `InfraConfig` — merge existing pools with desired changes
+4. `create_program(config)` — generate Pulumi program from desired state
+5. `stack.up()` — diff desired vs current, apply only changes
+
+Key behaviors:
+
+- **`up` re-runs** preserve existing pools and ignore `--accelerator` (defer to `pool add/remove`)
+- **All commands are idempotent** — safe to re-run after partial failure
+- **Graceful degradation** — partial failures (refresh, post-deploy steps) log warnings but don't abort the operation
+- **Pool state round-trips** through Pulumi stack exports (`accelerators` key) as a list of dicts, reconstructed via `_export_to_node_pool()`
 
 ### Testing
 

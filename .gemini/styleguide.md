@@ -120,22 +120,55 @@ This prevents confusing situations where a user sets an env var that works in on
 
 ---
 
+## CLI commands must be idempotent and follow the reconciliation pattern.
+
+Every mutating CLI command (`up`, `pool add`, `pool remove`, etc.) must follow the refresh-read-merge-apply pattern:
+
+1. `stack.refresh()` — sync local state with cloud reality
+2. `get_current_node_pools()` — read current pools from stack exports
+3. Build `InfraConfig` — merge existing state with desired changes
+4. `stack.up()` — apply only the diff
+
+This ensures:
+
+- Re-running after partial failure is always safe
+- Existing resources are never accidentally recreated (Pulumi tracks by URN)
+- External drift is detected and corrected
+
+When adding a new CLI command that modifies infrastructure, follow this pattern rather than directly creating or deleting resources.
+
+---
+
+## Prefer graceful degradation over hard failures in CLI operations.
+
+Partial failures in multi-step CLI operations should not abort the entire flow:
+
+- If `stack.refresh()` fails, log a warning and continue with stale state
+- If `stack.up()` fails, set a failure flag but still run post-deploy steps
+- If a post-deploy step fails (kubectl, LWS, GPU drivers), log a warning and continue with remaining steps
+
+The user can always re-run the same command to recover, since all operations are idempotent.
+
+---
+
 ## Don't neglect error messages, docstrings, and documentation.
 
 - **Catch user errors early.** Validate GCP project existence and quota before starting a long build.
 - **Provide detailed feedback.**
-    - Bad: `Error: 403 Forbidden`
-    - Good: `Permission denied. Please ensure your account 'user@example.com' has the 'Storage Object Admin' role on bucket 'gs://my-bucket'.`
+  - Bad: `Error: 403 Forbidden`
+  - Good: `Permission denied. Please ensure your account 'user@example.com' has the 'Storage Object Admin' role on bucket 'gs://my-bucket'.`
 - **Show, don't tell.** Documentation should show code examples of running functions, not just list arguments.
 
 ### Error messages: a case study
 
 Bad:
+
 ```
 RuntimeError: Job failed.
 ```
 
 Good:
+
 ```
 RuntimeError: The remote job failed with exit code 1.
 Logs from the worker:

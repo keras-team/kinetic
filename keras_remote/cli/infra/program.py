@@ -48,7 +48,7 @@ def create_program(config):
     zone = config.zone
     ar_location = zone_to_ar_location(zone)
     cluster_name = config.cluster_name
-    accelerator = config.accelerator
+    node_pools = config.node_pools
 
     # 1. Enable GCP APIs
     enabled_apis = []
@@ -136,16 +136,22 @@ def create_program(config):
       opts=pulumi.ResourceOptions(depends_on=enabled_apis),
     )
 
-    # 5. Accelerator node pool (conditional)
-    accelerator_pool = None
-    if isinstance(accelerator, GpuConfig):
-      accelerator_pool = _create_gpu_node_pool(
-        cluster, accelerator, zone, project_id
-      )
-    elif isinstance(accelerator, TpuConfig):
-      accelerator_pool = _create_tpu_node_pool(
-        cluster, accelerator, zone, project_id
-      )
+    # 5. Accelerator node pools (zero or more)
+    pool_entries = []
+    for np in node_pools:
+      accel = np.accelerator
+      pool_name = np.name
+      if isinstance(accel, GpuConfig):
+        pool = _create_gpu_node_pool(
+          cluster, accel, zone, project_id, pool_name
+        )
+      elif isinstance(accel, TpuConfig):
+        pool = _create_tpu_node_pool(
+          cluster, accel, zone, project_id, pool_name
+        )
+      else:
+        continue
+      pool_entries.append((accel, pool))
 
     # 6. Stack exports
     # Exports that reference resource outputs (e.g. cluster.name,
@@ -162,47 +168,46 @@ def create_program(config):
       ),
     )
 
-    # 7. Accelerator node pool exports
-    if isinstance(accelerator, GpuConfig):
-      pulumi.export(
-        "accelerator",
-        accelerator_pool.name.apply(
-          lambda pool_name: {
-            "type": "GPU",
-            "name": accelerator.name,
-            "count": accelerator.count,
-            "machine_type": accelerator.machine_type,
-            "node_pool": pool_name,
-            "node_count": 1,
-          }
-        ),
-      )
-    elif isinstance(accelerator, TpuConfig):
-      pulumi.export(
-        "accelerator",
-        accelerator_pool.name.apply(
-          lambda pool_name: {
-            "type": "TPU",
-            "name": accelerator.name,
-            "chips": accelerator.chips,
-            "topology": accelerator.topology,
-            "machine_type": accelerator.machine_type,
-            "node_pool": pool_name,
-            "node_count": accelerator.num_nodes,
-          }
-        ),
-      )
+    # 7. Accelerator node pool exports (list of dicts)
+    if not pool_entries:
+      pulumi.export("accelerators", [])
     else:
-      pulumi.export("accelerator", None)
+      export_outputs = []
+      for accel, pool in pool_entries:
+        if isinstance(accel, GpuConfig):
+          entry = pool.name.apply(
+            lambda pn, a=accel: {
+              "type": "GPU",
+              "name": a.name,
+              "count": a.count,
+              "machine_type": a.machine_type,
+              "node_pool": pn,
+              "node_count": 1,
+            }
+          )
+        else:  # TpuConfig
+          entry = pool.name.apply(
+            lambda pn, a=accel: {
+              "type": "TPU",
+              "name": a.name,
+              "chips": a.chips,
+              "topology": a.topology,
+              "machine_type": a.machine_type,
+              "node_pool": pn,
+              "node_count": a.num_nodes,
+            }
+          )
+        export_outputs.append(entry)
+      pulumi.export("accelerators", pulumi.Output.all(*export_outputs))
 
   return pulumi_program
 
 
-def _create_gpu_node_pool(cluster, gpu: GpuConfig, zone, project_id):
+def _create_gpu_node_pool(cluster, gpu: GpuConfig, zone, project_id, pool_name):
   """Create a GPU-accelerated GKE node pool."""
   return gcp.container.NodePool(
-    "gpu-pool",
-    name="gpu-pool",
+    pool_name,
+    name=pool_name,
     cluster=cluster.name,
     location=zone,
     project=project_id,
@@ -230,9 +235,8 @@ def _create_gpu_node_pool(cluster, gpu: GpuConfig, zone, project_id):
   )
 
 
-def _create_tpu_node_pool(cluster, tpu: TpuConfig, zone, project_id):
+def _create_tpu_node_pool(cluster, tpu: TpuConfig, zone, project_id, pool_name):
   """Create a TPU GKE node pool."""
-  pool_name = f"tpu-{tpu.name}-pool"
   # Single-host TPU slices (1 node) must not specify placement_policy;
   # multi-host slices require COMPACT placement with an explicit topology.
   placement = (

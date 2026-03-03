@@ -8,6 +8,8 @@ from click.testing import CliRunner
 from pulumi.automation import errors as pulumi_errors
 
 from keras_remote.cli.commands.up import up
+from keras_remote.cli.config import NodePoolConfig
+from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
 # Shared CLI args that skip interactive prompts.
 _CLI_ARGS = [
@@ -27,6 +29,10 @@ _BASE_PATCHES = {
     "keras_remote.cli.commands.up.create_program",
   ),
   "get_stack": mock.patch("keras_remote.cli.commands.up.get_stack"),
+  "get_current_node_pools": mock.patch(
+    "keras_remote.cli.commands.up.get_current_node_pools",
+    return_value=[],
+  ),
   "configure_kubectl": mock.patch(
     "keras_remote.cli.commands.up.configure_kubectl",
   ),
@@ -144,6 +150,118 @@ class UpCommandGpuDriverTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 0, result.output)
     self.mocks["install_gpu_drivers"].assert_called_once()
     self.assertIn("GPU driver installation", result.output)
+
+
+class UpCommandPoolPreservationTest(absltest.TestCase):
+  """Tests that `up` preserves existing node pools and defers to pool commands."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    self.mocks = _start_patches(self)
+
+    mock_stack = mock.MagicMock()
+    mock_stack.up.return_value.summary.resource_changes = {"create": 1}
+    self.mocks["get_stack"].return_value = mock_stack
+    self.mock_stack = mock_stack
+
+  def test_preserves_existing_pools_ignores_accelerator_flag(self):
+    """Re-running `up` with --accelerator keeps only existing pools."""
+    existing = NodePoolConfig(
+      "gpu-a100-1234",
+      GpuConfig("a100", 1, "nvidia-tesla-a100", "a2-highgpu-1g"),
+    )
+    self.mocks["get_current_node_pools"].return_value = [existing]
+
+    args = [
+      "--project",
+      "test-project",
+      "--zone",
+      "us-central1-a",
+      "--accelerator",
+      "t4",
+      "--yes",
+    ]
+    result = self.runner.invoke(up, args)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    final_call = self.mocks["create_program"].call_args_list[-1]
+    config = final_call[0][0]
+    self.assertLen(config.node_pools, 1)
+    self.assertEqual(config.node_pools[0].name, "gpu-a100-1234")
+    self.assertIn("pool add/remove", result.output)
+
+  def test_cpu_rerun_preserves_existing_pools(self):
+    """Re-running `up --accelerator cpu` preserves all existing pools."""
+    existing = [
+      NodePoolConfig(
+        "gpu-t4-abcd",
+        GpuConfig("t4", 1, "nvidia-tesla-t4", "n1-standard-4"),
+      ),
+      NodePoolConfig(
+        "tpu-v5p-1234",
+        TpuConfig("v5p", 8, "2x2x2", "tpu-v5p-slice", "ct5p-hightpu-4t", 2),
+      ),
+    ]
+    self.mocks["get_current_node_pools"].return_value = existing
+
+    args = [
+      "--project",
+      "test-project",
+      "--zone",
+      "us-central1-a",
+      "--accelerator",
+      "cpu",
+      "--yes",
+    ]
+    result = self.runner.invoke(up, args)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    final_call = self.mocks["create_program"].call_args_list[-1]
+    config = final_call[0][0]
+    self.assertLen(config.node_pools, 2)
+    self.assertIn("pool add/remove", result.output)
+
+  def test_first_run_creates_pool_from_flag(self):
+    """First run with --accelerator creates the requested pool."""
+    self.mocks["get_current_node_pools"].return_value = []
+
+    args = [
+      "--project",
+      "test-project",
+      "--zone",
+      "us-central1-a",
+      "--accelerator",
+      "t4",
+      "--yes",
+    ]
+    result = self.runner.invoke(up, args)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    final_call = self.mocks["create_program"].call_args_list[-1]
+    config = final_call[0][0]
+    self.assertLen(config.node_pools, 1)
+
+  def test_first_run_no_existing_stack(self):
+    """First run — CommandError during refresh is caught, proceeds normally."""
+    self.mock_stack.refresh.side_effect = pulumi_errors.CommandError(
+      "stack not found"
+    )
+    self.mocks["get_current_node_pools"].return_value = []
+
+    args = [
+      "--project",
+      "test-project",
+      "--zone",
+      "us-central1-a",
+      "--accelerator",
+      "t4",
+      "--yes",
+    ]
+    result = self.runner.invoke(up, args)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    self.assertIn("Setup Complete", result.output)
 
 
 if __name__ == "__main__":
