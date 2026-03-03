@@ -69,8 +69,14 @@ def _load_pools(project, zone, cluster_name):
   base_config = InfraConfig(
     project=project, zone=zone, cluster_name=cluster_name
   )
-  program = create_program(base_config)
-  stack = get_stack(program, base_config)
+  try:
+    program = create_program(base_config)
+    stack = get_stack(program, base_config)
+  except auto.errors.CommandError as e:
+    raise click.ClickException(
+      f"No Pulumi stack found for project '{project}': {e}\n"
+      "Run 'keras-remote up' to provision infrastructure first."
+    ) from e
 
   console.print("\nRefreshing state...\n")
   try:

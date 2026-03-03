@@ -13,7 +13,10 @@ from keras_remote.cli.infra.post_deploy import (
   install_lws,
 )
 from keras_remote.cli.infra.program import create_program
-from keras_remote.cli.infra.stack_manager import get_stack
+from keras_remote.cli.infra.stack_manager import (
+  get_current_node_pools,
+  get_stack,
+)
 from keras_remote.cli.output import (
   banner,
   config_summary,
@@ -77,19 +80,29 @@ def up(project, zone, accelerator, cluster_name, yes):
   else:
     accel_config = prompt_accelerator()
 
-  # Build node pool list
-  node_pools = []
-  if accel_config is not None:
-    node_pools.append(
+  # If a stack already exists, preserve its node pools as-is.
+  # Users should manage pools via `keras-remote pool add/remove` after
+  # initial setup.
+  config = InfraConfig(project=project, zone=zone, cluster_name=cluster_name)
+  existing_pools = []
+  try:
+    program = create_program(config)
+    stack = get_stack(program, config)
+    stack.refresh(on_output=print)
+    existing_pools = get_current_node_pools(stack)
+  except auto.errors.CommandError:
+    pass  # First run or no stack yet — start with empty list.
+
+  if existing_pools:
+    config.node_pools = list(existing_pools)
+    console.print(
+      f"\nFound {len(existing_pools)} existing node pool(s)."
+      "\nUse 'keras-remote pool add/remove/list' to manage node pools.\n"
+    )
+  elif accel_config is not None:
+    config.node_pools.append(
       NodePoolConfig(generate_pool_name(accel_config), accel_config)
     )
-
-  config = InfraConfig(
-    project=project,
-    zone=zone,
-    cluster_name=cluster_name,
-    node_pools=node_pools,
-  )
 
   # Show summary and confirm
   config_summary(config)
