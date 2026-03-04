@@ -101,7 +101,9 @@ class Data:
     return f"Data({self._raw_path!r})"
 
 
-def _make_data_ref(gcs_uri, is_dir, mount_path=None):
+def _make_data_ref(
+  gcs_uri: str, is_dir: bool, mount_path: str | None = None
+) -> dict[str, object]:
   """Create a serializable data reference dict.
 
   These dicts replace Data objects in the payload before serialization.
@@ -115,6 +117,6 @@ def _make_data_ref(gcs_uri, is_dir, mount_path=None):
   }
 
 
-def is_data_ref(obj):
+def is_data_ref(obj: object) -> bool:
   """Check if an object is a serialized data reference."""
   return isinstance(obj, dict) and obj.get("__data_ref__") is True

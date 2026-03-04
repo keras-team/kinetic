@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 from absl.testing import absltest, parameterized
 
 from keras_remote.data import Data
+from keras_remote.infra.infra import get_default_project
 from keras_remote.utils.storage import (
   _compute_total_size,
-  _get_project,
   _upload_directory,
   cleanup_artifacts,
   download_result,
@@ -140,7 +140,7 @@ class TestGetProject(parameterized.TestCase):
     if gc_project:
       env["GOOGLE_CLOUD_PROJECT"] = gc_project
     with mock.patch.dict(os.environ, env, clear=True):
-      self.assertEqual(_get_project(), expected)
+      self.assertEqual(get_default_project(), expected)
 
 
 class TestUploadData(_GcsTestBase):

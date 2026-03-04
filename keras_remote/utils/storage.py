@@ -1,22 +1,24 @@
 """Cloud Storage operations for keras_remote."""
 
+from __future__ import annotations
+
 import os
 import tempfile
 
 from absl import logging
 from google.cloud import storage
 
-
-def _get_project():
-  """Get project ID from environment or default gcloud config."""
-  return os.environ.get("KERAS_REMOTE_PROJECT") or os.environ.get(
-    "GOOGLE_CLOUD_PROJECT"
-  )
+from keras_remote.data import Data
+from keras_remote.infra.infra import get_default_project
 
 
 def upload_artifacts(
-  bucket_name, job_id, payload_path, context_path, project=None
-):
+  bucket_name: str,
+  job_id: str,
+  payload_path: str,
+  context_path: str,
+  project: str | None = None,
+) -> None:
   """Upload execution artifacts to Cloud Storage.
 
   Args:
@@ -26,7 +28,7 @@ def upload_artifacts(
       context_path: Local path to context.zip
       project: GCP project ID (optional, uses env vars if not provided)
   """
-  project = project or _get_project()
+  project = project or get_default_project()
 
   client = storage.Client(project=project)
   bucket = client.bucket(bucket_name)
@@ -55,7 +57,9 @@ def upload_artifacts(
   )
 
 
-def download_result(bucket_name, job_id, project=None):
+def download_result(
+  bucket_name: str, job_id: str, project: str | None = None
+) -> str:
   """Download result from Cloud Storage.
 
   Args:
@@ -66,7 +70,7 @@ def download_result(bucket_name, job_id, project=None):
   Returns:
       Local path to downloaded result file
   """
-  project = project or _get_project()
+  project = project or get_default_project()
   client = storage.Client(project=project)
   bucket = client.bucket(bucket_name)
 
@@ -80,7 +84,9 @@ def download_result(bucket_name, job_id, project=None):
   return local_path
 
 
-def cleanup_artifacts(bucket_name, job_id, project=None):
+def cleanup_artifacts(
+  bucket_name: str, job_id: str, project: str | None = None
+) -> None:
   """Clean up job artifacts from Cloud Storage.
 
   Args:
@@ -88,7 +94,7 @@ def cleanup_artifacts(bucket_name, job_id, project=None):
       job_id: Unique job identifier
       project: GCP project ID (optional, uses env vars if not provided)
   """
-  project = project or _get_project()
+  project = project or get_default_project()
   client = storage.Client(project=project)
   bucket = client.bucket(bucket_name)
 
@@ -108,7 +114,12 @@ def cleanup_artifacts(bucket_name, job_id, project=None):
     )
 
 
-def upload_data(bucket_name, data, project=None, namespace_prefix="default"):
+def upload_data(
+  bucket_name: str,
+  data: Data,
+  project: str | None = None,
+  namespace_prefix: str = "default",
+) -> str:
   """Upload a Data object to GCS with content-based caching.
 
   For GCS Data: returns the original URI (no upload).
@@ -130,7 +141,7 @@ def upload_data(bucket_name, data, project=None, namespace_prefix="default"):
   content_hash = data.content_hash()
   cache_prefix = f"{namespace_prefix}/data-cache/{content_hash}"
 
-  project = project or _get_project()
+  project = project or get_default_project()
   client = storage.Client(project=project)
   bucket = client.bucket(bucket_name)
 
@@ -178,7 +189,7 @@ def upload_data(bucket_name, data, project=None, namespace_prefix="default"):
   return f"gs://{bucket_name}/{cache_prefix}"
 
 
-def _compute_total_size(path):
+def _compute_total_size(path: str) -> int:
   """Compute total size in bytes of a file or directory."""
   if os.path.isfile(path):
     return os.path.getsize(path)
@@ -189,7 +200,9 @@ def _compute_total_size(path):
   return total
 
 
-def _upload_directory(bucket, local_dir, gcs_prefix):
+def _upload_directory(
+  bucket: storage.Bucket, local_dir: str, gcs_prefix: str
+) -> None:
   """Upload a local directory to GCS preserving structure."""
   for root, _dirs, files in os.walk(local_dir):
     for fname in files:

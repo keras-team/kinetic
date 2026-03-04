@@ -19,6 +19,7 @@ from keras_remote.backend import gke_client, pathways_client
 from keras_remote.constants import get_default_zone, zone_to_region
 from keras_remote.credentials import ensure_credentials
 from keras_remote.infra import container_builder
+from keras_remote.infra.infra import get_default_project
 from keras_remote.utils import packager, storage
 
 
@@ -73,9 +74,7 @@ class JobContext:
     if not zone:
       zone = get_default_zone()
     if not project:
-      project = os.environ.get("KERAS_REMOTE_PROJECT") or os.environ.get(
-        "GOOGLE_CLOUD_PROJECT"
-      )
+      project = get_default_project()
       if not project:
         raise ValueError(
           "project must be specified or set KERAS_REMOTE_PROJECT"
