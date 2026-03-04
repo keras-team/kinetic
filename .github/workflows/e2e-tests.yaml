@@ -61,4 +61,4 @@ jobs:
           KERAS_REMOTE_PROJECT: ${{ secrets.GCP_PROJECT }}
           KERAS_REMOTE_ZONE: ${{ secrets.GKE_ZONE }}
           KERAS_REMOTE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
-        run: python -m unittest discover -s tests/e2e -p "*_test.py" -v
+        run: python -m pytest tests/e2e/ -v -n auto
