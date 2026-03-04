@@ -6,6 +6,7 @@ nonce) so that content-hash cache misses are guaranteed on the first use
 and cache hits are guaranteed on re-use within the same run.
 """
 
+import json
 import logging
 import os
 import pathlib
@@ -62,8 +63,6 @@ class TestDataAsArg(absltest.TestCase):
 
     @keras_remote.run(accelerator="cpu")
     def read_file(config_path):
-      import json
-
       with open(config_path) as f:
         return json.load(f)
 
@@ -107,8 +106,6 @@ class TestDataCaching(absltest.TestCase):
 
     @keras_remote.run(accelerator="cpu")
     def read_config(path):
-      import json
-
       with open(path) as f:
         return json.load(f)
 
@@ -218,33 +215,27 @@ class TestVolumes(absltest.TestCase):
     data_dir = tmp / "dataset"
     data_dir.mkdir()
     data_file = data_dir / "info.txt"
-    data_file.write_text(f"vol_v1,{_RUN_NONCE}")
 
-    @keras_remote.run(
-      accelerator="cpu",
-      volumes={"/vol": Data(str(data_dir))},
-    )
-    def read_vol():
-      with open("/vol/info.txt") as f:
-        return f.read()
-
-    r1 = read_vol()
-    self.assertIn("vol_v1", r1)
-
-    # Modify volume data — new hash
-    data_file.write_text(f"vol_v2,{_RUN_NONCE}")
-    logger = logging.getLogger("absl")
-    with self.assertLogs(logger, level="INFO") as cm:
-
+    def run_read_vol():
       @keras_remote.run(
         accelerator="cpu",
         volumes={"/vol": Data(str(data_dir))},
       )
-      def read_vol_v2():
+      def read_vol():
         with open("/vol/info.txt") as f:
           return f.read()
 
-      r2 = read_vol_v2()
+      return read_vol()
+
+    data_file.write_text(f"vol_v1,{_RUN_NONCE}")
+    r1 = run_read_vol()
+    self.assertIn("vol_v1", r1)
+
+    # Modify volume data — new hash triggers a fresh upload.
+    data_file.write_text(f"vol_v2,{_RUN_NONCE}")
+    logger = logging.getLogger("absl")
+    with self.assertLogs(logger, level="INFO") as cm:
+      r2 = run_read_vol()
 
     log_output = "\n".join(cm.output)
     self.assertIn("Uploading data", log_output)
@@ -300,8 +291,6 @@ class TestMixed(absltest.TestCase):
       volumes={"/weights": Data(str(weights_dir))},
     )
     def train(config_path, lr=0.001):
-      import json
-
       with open(config_path) as f:
         cfg = json.load(f)
       has_weights = os.path.isdir("/weights")
