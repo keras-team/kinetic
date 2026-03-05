@@ -309,8 +309,8 @@ class TestMixed(absltest.TestCase):
     self.assertTrue(result["has_weights"])
     self.assertEqual(result["weight_files"], ["model.bin"])
 
-  def test_volume_data_passed_as_arg(self):
-    """Volume-mounted Data passed as a function arg resolves to mount path."""
+  def test_volume_data_also_passed_as_arg(self):
+    """Data used as both volume and arg resolves to a path in both cases."""
     tmp = _make_test_dir(self)
     data_dir = tmp / "dataset"
     data_dir.mkdir()
@@ -321,17 +321,24 @@ class TestMixed(absltest.TestCase):
       accelerator="cpu",
       volumes={"/mnt/data": vol_data},
     )
-    def read_via_arg(data_path):
-      # data_path should be the string "/mnt/data", not a dict
+    def read_both(data_path):
+      # data_path must resolve to a string, not a dict
       assert isinstance(data_path, str), (
         f"Expected str path, got {type(data_path)}: {data_path}"
       )
+      # Read from the arg path (downloaded copy)
       with open(f"{data_path}/train.csv") as f:
-        return f.read()
+        arg_content = f.read()
+      # Read from the volume mount
+      with open("/mnt/data/train.csv") as f:
+        vol_content = f.read()
+      return {"arg": arg_content, "vol": vol_content}
 
-    result = read_via_arg(vol_data)
+    result = read_both(vol_data)
 
-    self.assertIn(_RUN_NONCE, result)
+    self.assertIn(_RUN_NONCE, result["arg"])
+    self.assertIn(_RUN_NONCE, result["vol"])
+    self.assertEqual(result["arg"], result["vol"])
 
 
 @skip_unless_e2e()
