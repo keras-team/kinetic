@@ -309,6 +309,30 @@ class TestMixed(absltest.TestCase):
     self.assertTrue(result["has_weights"])
     self.assertEqual(result["weight_files"], ["model.bin"])
 
+  def test_volume_data_passed_as_arg(self):
+    """Volume-mounted Data passed as a function arg resolves to mount path."""
+    tmp = _make_test_dir(self)
+    data_dir = tmp / "dataset"
+    data_dir.mkdir()
+    (data_dir / "train.csv").write_text(f"id,value\n1,{_RUN_NONCE}\n")
+    vol_data = Data(str(data_dir))
+
+    @keras_remote.run(
+      accelerator="cpu",
+      volumes={"/mnt/data": vol_data},
+    )
+    def read_via_arg(data_path):
+      # data_path should be the string "/mnt/data", not a dict
+      assert isinstance(data_path, str), (
+        f"Expected str path, got {type(data_path)}: {data_path}"
+      )
+      with open(f"{data_path}/train.csv") as f:
+        return f.read()
+
+    result = read_via_arg(vol_data)
+
+    self.assertIn(_RUN_NONCE, result)
+
 
 @skip_unless_e2e()
 class TestNestedData(absltest.TestCase):
