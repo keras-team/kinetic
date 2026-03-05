@@ -312,6 +312,34 @@ class TestExtractDataRefs(absltest.TestCase):
     refs = extract_data_refs((1, "hello"), {"lr": 0.01})
     self.assertEqual(len(refs), 0)
 
+  def test_nested_in_set(self):
+    tmp = _make_temp_path(self)
+    f = tmp / "data.csv"
+    f.write_text("data")
+    d = Data(str(f))
+
+    refs = extract_data_refs(({d, "other"},), {})
+    self.assertEqual(len(refs), 1)
+    self.assertIs(refs[0][0], d)
+
+  def test_nested_in_frozenset(self):
+    tmp = _make_temp_path(self)
+    f = tmp / "data.csv"
+    f.write_text("data")
+    d = Data(str(f))
+
+    refs = extract_data_refs((frozenset({d}),), {})
+    self.assertEqual(len(refs), 1)
+    self.assertIs(refs[0][0], d)
+
+  def test_circular_reference_does_not_recurse(self):
+    """Circular structures in args should not cause infinite recursion."""
+    circular = {"key": "value"}
+    circular["self"] = circular
+
+    refs = extract_data_refs((circular,), {})
+    self.assertEqual(len(refs), 0)
+
 
 class TestReplaceDataWithRefs(absltest.TestCase):
   def test_replaces_direct_arg(self):
@@ -356,6 +384,38 @@ class TestReplaceDataWithRefs(absltest.TestCase):
     )
     self.assertEqual(new_args, (1, "hello", [1, 2]))
     self.assertEqual(new_kwargs, {"x": 3})
+
+  def test_replaces_in_set(self):
+    tmp = _make_temp_path(self)
+    f = tmp / "data.csv"
+    f.write_text("data")
+    d = Data(str(f))
+    ref = {"__data_ref__": True, "gcs_uri": "gs://b/p"}
+    ref_map = {id(d): ref}
+
+    new_args, _ = replace_data_with_refs(({d},), {}, ref_map)
+    self.assertIsInstance(new_args[0], list)
+    self.assertIn(ref, new_args[0])
+
+  def test_replaces_in_frozenset(self):
+    tmp = _make_temp_path(self)
+    f = tmp / "data.csv"
+    f.write_text("data")
+    d = Data(str(f))
+    ref = {"__data_ref__": True, "gcs_uri": "gs://b/p"}
+    ref_map = {id(d): ref}
+
+    new_args, _ = replace_data_with_refs((frozenset({d}),), {}, ref_map)
+    self.assertIsInstance(new_args[0], list)
+    self.assertIn(ref, new_args[0])
+
+  def test_circular_reference_does_not_recurse(self):
+    """Circular structures should not cause infinite recursion."""
+    circular = [1, 2]
+    circular.append(circular)
+
+    new_args, _ = replace_data_with_refs((circular,), {}, {})
+    self.assertIsInstance(new_args[0], list)
 
 
 if __name__ == "__main__":
