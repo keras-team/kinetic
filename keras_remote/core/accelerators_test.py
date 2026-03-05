@@ -44,6 +44,12 @@ class TestParseGpuMultiCount(absltest.TestCase):
     self.assertEqual(result.name, "a100-80gb")
     self.assertEqual(result.count, 4)
 
+  def test_l4_dash_2(self):
+    result = parse_accelerator("l4-2")
+    self.assertIsInstance(result, GpuConfig)
+    self.assertEqual(result.name, "l4")
+    self.assertEqual(result.count, 2)
+
 
 class TestParseGpuAlias(absltest.TestCase):
   def test_nvidia_tesla_t4(self):
@@ -60,9 +66,9 @@ class TestParseGpuAlias(absltest.TestCase):
 
 
 class TestParseGpuErrors(absltest.TestCase):
-  def test_l4x8_invalid_count(self):
+  def test_l4x16_invalid_count(self):
     with self.assertRaisesRegex(ValueError, "not supported"):
-      parse_accelerator("l4x8")
+      parse_accelerator("l4x16")
 
 
 class TestParseTpuBare(parameterized.TestCase):
@@ -153,6 +159,68 @@ class TestParseTpuConfigFields(absltest.TestCase):
 class TestParseCpu(absltest.TestCase):
   def test_cpu(self):
     self.assertIsNone(parse_accelerator("cpu"))
+
+  def test_cpu_with_count(self):
+    self.assertIsNone(parse_accelerator("cpu-8"))
+
+class TestParseGenericAliases(absltest.TestCase):
+  def test_gpu_bare(self):
+    result = parse_accelerator("gpu")
+    self.assertIsInstance(result, GpuConfig)
+    self.assertEqual(result.name, "l4")
+    self.assertEqual(result.count, 1)
+
+  def test_tpu_bare(self):
+    result = parse_accelerator("tpu")
+    self.assertIsInstance(result, TpuConfig)
+    self.assertEqual(result.name, "v5litepod")
+    self.assertEqual(result.chips, 4)
+
+  def test_gpu_with_count(self):
+    result = parse_accelerator("gpu-4")
+    self.assertIsInstance(result, GpuConfig)
+    self.assertEqual(result.name, "l4")
+    self.assertEqual(result.count, 4)
+
+  def test_tpu_with_count(self):
+    result = parse_accelerator("tpu-8")
+    self.assertIsInstance(result, TpuConfig)
+    self.assertEqual(result.name, "v5litepod")
+    self.assertEqual(result.chips, 8)
+
+  def test_gpu_with_dynamic_count(self):
+    # l4 supports up to 8 now. 16 should fall back to a100.
+    result = parse_accelerator("gpu-16")
+    self.assertIsInstance(result, GpuConfig)
+    self.assertIn(result.name, ["a100", "a100-80gb"])
+    self.assertEqual(result.count, 16)
+
+  def test_tpu_with_dynamic_count(self):
+    # v5litepod supports up to 256. 4096 should fall back to v4.
+    result = parse_accelerator("tpu-4096")
+    self.assertIsInstance(result, TpuConfig)
+    self.assertEqual(result.name, "v4")
+    self.assertEqual(result.chips, 4096)
+    
+  def test_v5e_alias(self):
+    result = parse_accelerator("v5e-8")
+    self.assertIsInstance(result, TpuConfig)
+    self.assertEqual(result.name, "v5litepod")
+    self.assertEqual(result.chips, 8)
+
+  def test_ghostlite_alias(self):
+    result = parse_accelerator("ghostlite-16")
+    self.assertIsInstance(result, TpuConfig)
+    self.assertEqual(result.name, "v5litepod")
+    self.assertEqual(result.chips, 16)
+
+  def test_gpu_unsupported_count(self):
+    with self.assertRaisesRegex(ValueError, "No GPU supports count 32"):
+      parse_accelerator("gpu-32")
+      
+  def test_tpu_unsupported_count(self):
+    with self.assertRaisesRegex(ValueError, "No TPU supports 8192 chips"):
+      parse_accelerator("tpu-8192")
 
 
 class TestParseNormalizationAndErrors(absltest.TestCase):

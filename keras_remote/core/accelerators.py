@@ -63,12 +63,14 @@ class TpuSpec:
 
 
 GPUS: dict[str, GpuSpec] = {
-  "l4": GpuSpec("nvidia-l4", "g2-standard-4", (1, 2, 4)),
+  "l4": GpuSpec("nvidia-l4", "g2-standard-4", (1, 2, 4, 8)),
   "t4": GpuSpec("nvidia-tesla-t4", "n1-standard-4", (1, 2, 4)),
   "v100": GpuSpec("nvidia-tesla-v100", "n1-standard-8", (1, 2, 4, 8)),
-  "a100": GpuSpec("nvidia-tesla-a100", "a2-highgpu-1g", (1, 2, 4, 8)),
-  "a100-80gb": GpuSpec("nvidia-a100-80gb", "a2-ultragpu-1g", (1, 2, 4, 8)),
+  "a100": GpuSpec("nvidia-tesla-a100", "a2-highgpu-1g", (1, 2, 4, 8, 16)),
+  "a100-80gb": GpuSpec("nvidia-a100-80gb", "a2-ultragpu-1g", (1, 2, 4, 8, 16)),
   "h100": GpuSpec("nvidia-h100-80gb", "a3-highgpu-1g", (1, 2, 4, 8)),
+  "p4": GpuSpec("nvidia-tesla-p4", "n1-standard-4", (1, 2, 4)),
+  "p100": GpuSpec("nvidia-tesla-p100", "n1-standard-4", (1, 2, 4)),
 }
 
 _GPU_ALIASES: dict[str, str] = {
@@ -88,6 +90,10 @@ TPUS: dict[str, TpuSpec] = {
       4: TpuTopologySpec("2x2", "ct2-hightpu-4t", 1),
       16: TpuTopologySpec("4x4", "ct2-hightpu-4t", 4),
       32: TpuTopologySpec("4x8", "ct2-hightpu-4t", 8),
+      64: TpuTopologySpec("8x8", "ct2-hightpu-4t", 16),
+      128: TpuTopologySpec("8x16", "ct2-hightpu-4t", 32),
+      256: TpuTopologySpec("16x16", "ct2-hightpu-4t", 64),
+      512: TpuTopologySpec("16x32", "ct2-hightpu-4t", 128),
     },
   ),
   "v3": TpuSpec(
@@ -97,6 +103,29 @@ TPUS: dict[str, TpuSpec] = {
       4: TpuTopologySpec("2x2", "ct3-hightpu-4t", 1),
       16: TpuTopologySpec("4x4", "ct3p-hightpu-4t", 4),
       32: TpuTopologySpec("4x8", "ct3p-hightpu-4t", 8),
+      64: TpuTopologySpec("8x8", "ct3p-hightpu-4t", 16),
+      128: TpuTopologySpec("8x16", "ct3p-hightpu-4t", 32),
+      256: TpuTopologySpec("16x16", "ct3p-hightpu-4t", 64),
+      512: TpuTopologySpec("16x32", "ct3p-hightpu-4t", 128),
+      1024: TpuTopologySpec("32x32", "ct3p-hightpu-4t", 256),
+      2048: TpuTopologySpec("32x64", "ct3p-hightpu-4t", 512),
+    },
+  ),
+  "v4": TpuSpec(
+    "tpu-v4-podslice",
+    4,
+    {
+      4: TpuTopologySpec("2x2x1", "ct4p-hightpu-4t", 1),
+      8: TpuTopologySpec("2x2x2", "ct4p-hightpu-4t", 2),
+      16: TpuTopologySpec("2x2x4", "ct4p-hightpu-4t", 4),
+      32: TpuTopologySpec("2x4x4", "ct4p-hightpu-4t", 8),
+      64: TpuTopologySpec("4x4x4", "ct4p-hightpu-4t", 16),
+      128: TpuTopologySpec("4x4x8", "ct4p-hightpu-4t", 32),
+      256: TpuTopologySpec("4x8x8", "ct4p-hightpu-4t", 64),
+      512: TpuTopologySpec("8x8x8", "ct4p-hightpu-4t", 128),
+      1024: TpuTopologySpec("8x8x16", "ct4p-hightpu-4t", 256),
+      2048: TpuTopologySpec("8x16x16", "ct4p-hightpu-4t", 512),
+      4096: TpuTopologySpec("16x16x16", "ct4p-hightpu-4t", 1024),
     },
   ),
   "v5litepod": TpuSpec(
@@ -106,6 +135,11 @@ TPUS: dict[str, TpuSpec] = {
       1: TpuTopologySpec("1x1", "ct5lp-hightpu-1t", 1),
       4: TpuTopologySpec("2x2", "ct5lp-hightpu-4t", 1),
       8: TpuTopologySpec("2x4", "ct5lp-hightpu-8t", 1),
+      16: TpuTopologySpec("4x4", "ct5lp-hightpu-4t", 4),
+      32: TpuTopologySpec("4x8", "ct5lp-hightpu-4t", 8),
+      64: TpuTopologySpec("8x8", "ct5lp-hightpu-4t", 16),
+      128: TpuTopologySpec("8x16", "ct5lp-hightpu-4t", 32),
+      256: TpuTopologySpec("16x16", "ct5lp-hightpu-4t", 64),
     },
   ),
   "v5p": TpuSpec(
@@ -126,14 +160,25 @@ TPUS: dict[str, TpuSpec] = {
   ),
 }
 
+_TPU_ALIASES: dict[str, str] = {
+  "v5e": "v5litepod",
+  "ghostlite": "v5litepod",
+}
+
 
 # ── Parser ────────────────────────────────────────────────────────
 
-_MULTI_GPU_RE = re.compile(r"^(.+?)x(\d+)$")  # "a100x4"
-_TPU_CHIPS_RE = re.compile(r"^(v\d+\w*)-(\d+)$")  # "v3-8"
+_MULTI_GPU_RE = re.compile(r"^(.+?)(?:x|-)(\d+)$")  # "a100x4", "l4-2"
+_TPU_CHIPS_RE = re.compile(r"^([a-z0-9_]+)-(\d+)$")  # "v3-8", "ghostlite-16"
 _TPU_TOPO_RE = re.compile(
-  r"^(v\d+\w*)-(\d+x\d+(?:x\d+)?)$"
+  r"^([a-z0-9_]+)-(\d+x\d+(?:x\d+)?)$"
 )  # "v5litepod-2x2", "v5p-2x2x2"
+
+DEFAULT_GPU = "l4"
+DEFAULT_TPU = "v5litepod"
+
+_PREFERRED_GPUS = ["h100", "a100-80gb", "a100", "l4", "v100", "t4", "p100", "p4"]
+_PREFERRED_TPUS = ["v6e", "v5p", "v5litepod", "v4", "v3", "v2"]
 
 
 def parse_accelerator(accel_str: str) -> Accelerator:
@@ -142,14 +187,44 @@ def parse_accelerator(accel_str: str) -> Accelerator:
   Returns GpuConfig, TpuConfig, or None (for "cpu").
 
   Accepted formats:
-      GPU:  "l4", "nvidia-l4", "a100x4", "a100-80gbx8"
-      TPU:  "v3-8" (chip count), "v5litepod-2x2" (topology), "v5litepod" (default)
-      CPU:  "cpu"
+      GPU:  "l4", "gpu", "gpu-4", "a100x4", "l4-2", "a100-80gbx8"
+      TPU:  "v3-8", "tpu", "tpu-8", "v5litepod-2x2", "v5litepod"
+      CPU:  "cpu", "cpu-8"
   """
   s = accel_str.strip().lower()
 
-  if s == "cpu":
+  if s == "cpu" or (s.startswith("cpu-") and s[4:].isdigit()):
     return None
+
+  if s == "gpu":
+    return make_gpu(DEFAULT_GPU, 1)
+
+  if s == "tpu":
+    return make_tpu(DEFAULT_TPU, TPUS[DEFAULT_TPU].default_chips)
+
+  if s.startswith("gpu-") and s[4:].isdigit():
+    count = int(s[4:])
+    if count in GPUS[DEFAULT_GPU].counts:
+      return make_gpu(DEFAULT_GPU, count)
+    for gpu_name in _PREFERRED_GPUS:
+      if gpu_name in GPUS and count in GPUS[gpu_name].counts:
+        return make_gpu(gpu_name, count)
+    valid_counts = sorted(set(c for spec in GPUS.values() for c in spec.counts))
+    raise ValueError(
+      f"No GPU supports count {count}. Supported counts across all GPUs: {valid_counts}"
+    )
+
+  if s.startswith("tpu-") and s[4:].isdigit():
+    chips = int(s[4:])
+    if chips in TPUS[DEFAULT_TPU].topologies:
+      return make_tpu(DEFAULT_TPU, chips)
+    for tpu_name in _PREFERRED_TPUS:
+      if tpu_name in TPUS and chips in TPUS[tpu_name].topologies:
+        return make_tpu(tpu_name, chips)
+    valid_chips = sorted(set(c for spec in TPUS.values() for c in spec.topologies))
+    raise ValueError(
+      f"No TPU supports {chips} chips. Supported chip counts across all TPUs: {valid_chips}"
+    )
 
   # Direct GPU name: "l4", "a100-80gb"
   if s in GPUS:
@@ -171,25 +246,35 @@ def parse_accelerator(accel_str: str) -> Accelerator:
   # Direct TPU name (bare): "v5litepod" → default chips
   if s in TPUS:
     return make_tpu(s, TPUS[s].default_chips)
+  if s in _TPU_ALIASES:
+    name = _TPU_ALIASES[s]
+    return make_tpu(name, TPUS[name].default_chips)
 
   # TPU with topology string: "v5litepod-2x2", "v5p-2x2x2"
   m = _TPU_TOPO_RE.match(s)
-  if m and m.group(1) in TPUS:
+  if m:
     name = m.group(1)
-    topo_str = m.group(2)
-    for chips, topo_spec in TPUS[name].topologies.items():
-      if topo_spec.topology == topo_str:
-        return make_tpu(name, chips)
-    valid = [ts.topology for ts in TPUS[name].topologies.values()]
-    raise ValueError(
-      f"Topology '{topo_str}' not supported for '{name}'. "
-      f"Supported: {', '.join(valid)}."
-    )
+    if name in _TPU_ALIASES:
+      name = _TPU_ALIASES[name]
+    if name in TPUS:
+      topo_str = m.group(2)
+      for chips, topo_spec in TPUS[name].topologies.items():
+        if topo_spec.topology == topo_str:
+          return make_tpu(name, chips)
+      valid = [ts.topology for ts in TPUS[name].topologies.values()]
+      raise ValueError(
+        f"Topology '{topo_str}' not supported for '{name}'. "
+        f"Supported: {', '.join(valid)}."
+      )
 
   # TPU with chip count: "v3-8", "v5litepod-4"
   m = _TPU_CHIPS_RE.match(s)
-  if m and m.group(1) in TPUS:
-    return make_tpu(m.group(1), int(m.group(2)))
+  if m:
+    name = m.group(1)
+    if name in _TPU_ALIASES:
+      name = _TPU_ALIASES[name]
+    if name in TPUS:
+      return make_tpu(name, int(m.group(2)))
 
   raise ValueError(
     f"Unknown accelerator: '{accel_str}'. "
