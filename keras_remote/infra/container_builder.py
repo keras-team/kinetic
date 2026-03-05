@@ -7,6 +7,7 @@ import string
 import tarfile
 import tempfile
 import time
+import uuid
 
 from absl import logging
 from google.api_core import exceptions as google_exceptions
@@ -310,7 +311,7 @@ def _upload_build_source(tarball_path, bucket_name, project):
   bucket = client.bucket(bucket_name)
 
   # Upload tarball
-  blob_name = f"source-{int(time.time())}.tar.gz"
+  blob_name = f"source-{int(time.time())}-{uuid.uuid4().hex[:8]}.tar.gz"
   blob = bucket.blob(blob_name)
   blob.upload_from_filename(tarball_path)
 

@@ -323,9 +323,10 @@ class TestMixed(absltest.TestCase):
     )
     def read_both(data_path):
       # data_path must resolve to a string, not a dict
-      assert isinstance(data_path, str), (
-        f"Expected str path, got {type(data_path)}: {data_path}"
-      )
+      if not isinstance(data_path, str):
+        raise TypeError(
+          f"Expected str path, got {type(data_path)}: {data_path}"
+        )
       # Read from the arg path (downloaded copy)
       with open(f"{data_path}/train.csv") as f:
         arg_content = f.read()
