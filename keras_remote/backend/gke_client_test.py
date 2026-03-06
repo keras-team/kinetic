@@ -6,6 +6,7 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 from absl.testing import absltest, parameterized
+from kubernetes.client.rest import ApiException
 from kubernetes.config import ConfigException
 
 from keras_remote.backend.gke_client import (
@@ -14,6 +15,7 @@ from keras_remote.backend.gke_client import (
   _create_job_spec,
   _load_kube_config,
   _parse_accelerator,
+  check_quota,
   wait_for_job,
 )
 
@@ -564,6 +566,108 @@ class TestCheckPodScheduling(parameterized.TestCase):
     _check_pod_scheduling(
       mock_core, "job-1", "default", set()
     )  # should not raise
+
+
+class TestServiceAccountInJobSpec(absltest.TestCase):
+  def _make_gpu_config(self):
+    return {
+      "node_selector": {"cloud.google.com/gke-accelerator": "nvidia-l4"},
+      "resource_limits": {"nvidia.com/gpu": "1"},
+      "resource_requests": {"nvidia.com/gpu": "1"},
+      "tolerations": [
+        {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+      ],
+      "jax_platform": "gpu",
+    }
+
+  def test_default_namespace_no_service_account(self):
+    job = _create_job_spec(
+      job_name="j",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j1",
+      bucket_name="b",
+      gcs_prefix="default/j1",
+      namespace="default",
+    )
+    self.assertIsNone(job.spec.template.spec.service_account_name)
+
+  def test_custom_namespace_sets_service_account(self):
+    job = _create_job_spec(
+      job_name="j",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j1",
+      bucket_name="b",
+      gcs_prefix="team-nlp/j1",
+      namespace="team-nlp",
+    )
+    self.assertEqual(
+      job.spec.template.spec.service_account_name, "team-nlp-runner"
+    )
+
+
+class TestCheckQuota(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    self.enterContext(
+      mock.patch("keras_remote.backend.gke_client._load_kube_config")
+    )
+    self.mock_core = self.enterContext(
+      mock.patch("keras_remote.backend.gke_client.client.CoreV1Api")
+    ).return_value
+
+  def _make_quota(self, hard, used):
+    quota = MagicMock()
+    quota.status.hard = hard
+    quota.status.used = used
+    self.mock_core.list_namespaced_resource_quota.return_value.items = [quota]
+
+  def test_default_namespace_skips(self):
+    check_quota("default", "l4")
+    self.mock_core.list_namespaced_resource_quota.assert_not_called()
+
+  def test_gpu_sufficient(self):
+    self._make_quota(
+      {"requests.nvidia.com/gpu": "8"}, {"requests.nvidia.com/gpu": "2"}
+    )
+    check_quota("team-nlp", "l4")  # requests 1 GPU, 2/8 used → ok
+
+  def test_gpu_exceeded(self):
+    self._make_quota(
+      {"requests.nvidia.com/gpu": "8"}, {"requests.nvidia.com/gpu": "6"}
+    )
+    with self.assertRaisesRegex(RuntimeError, "GPU quota exceeded.*6/8.*4"):
+      check_quota("team-nlp", "a100x4")
+
+  def test_tpu_exceeded(self):
+    self._make_quota(
+      {"requests.google.com/tpu": "8"}, {"requests.google.com/tpu": "6"}
+    )
+    with self.assertRaisesRegex(RuntimeError, "TPU quota exceeded.*6/8.*4"):
+      check_quota("team-nlp", "v3-4")
+
+  def test_job_count_exceeded(self):
+    self._make_quota({"count/jobs.batch": "10"}, {"count/jobs.batch": "10"})
+    with self.assertRaisesRegex(
+      RuntimeError, "Job count quota exceeded.*10/10"
+    ):
+      check_quota("team-nlp", "l4")
+
+  def test_no_quota_passes(self):
+    self.mock_core.list_namespaced_resource_quota.return_value.items = []
+    check_quota("team-nlp", "l4")  # should not raise
+
+  def test_403_warns_not_blocks(self):
+    self.mock_core.list_namespaced_resource_quota.side_effect = ApiException(
+      status=403, reason="Forbidden"
+    )
+    with mock.patch(
+      "keras_remote.backend.gke_client.logging.warning"
+    ) as mock_warn:
+      check_quota("team-nlp", "l4")  # should not raise
+    mock_warn.assert_called_once()
+    self.assertIn("permission denied", mock_warn.call_args[0][0])
 
 
 if __name__ == "__main__":

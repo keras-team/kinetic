@@ -134,7 +134,7 @@ class GKEBackend(BaseK8sBackend):
   """Backend adapter for standard GKE Jobs."""
 
   def validate_preflight(self, ctx: JobContext) -> None:
-    """Check if the required node pool exists for the accelerator."""
+    """Check if the required node pool exists and quota is sufficient."""
     gke_client.validate_preflight(
       accelerator=ctx.accelerator,
       project=ctx.project,
@@ -142,6 +142,7 @@ class GKEBackend(BaseK8sBackend):
       zone=ctx.zone,
       namespace=self.namespace,
     )
+    gke_client.check_quota(self.namespace, ctx.accelerator)
 
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit job to GKE cluster."""
@@ -170,8 +171,7 @@ class PathwaysBackend(BaseK8sBackend):
   """Backend adapter for ML Pathways using LeaderWorkerSet."""
 
   def validate_preflight(self, ctx: JobContext) -> None:
-    """Preflight checks for Pathways (currently same as GKE)."""
-    # Pathways also runs on GKE nodes with specific labels
+    """Preflight checks for Pathways: node pool and quota."""
     gke_client.validate_preflight(
       accelerator=ctx.accelerator,
       project=ctx.project,
@@ -179,6 +179,7 @@ class PathwaysBackend(BaseK8sBackend):
       zone=ctx.zone,
       namespace=self.namespace,
     )
+    pathways_client.check_quota(self.namespace, ctx.accelerator)
 
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit LWS job to GKE cluster."""

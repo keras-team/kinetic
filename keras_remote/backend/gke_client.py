@@ -231,6 +231,83 @@ def validate_preflight(
     logging.warning("Preflight check: Failed to query nodes: %s", e.reason)
 
 
+def check_quota(namespace, accelerator):
+  """Check K8s ResourceQuota usage before submitting a job.
+
+  For the default namespace this is a no-op.  For non-default namespaces
+  the function reads the ResourceQuota status and compares requested
+  resources against hard limits and current usage.
+
+  Raises:
+      RuntimeError: If the job would exceed the namespace quota.
+  """
+  if namespace == "default":
+    return
+
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+
+  try:
+    quotas = core_v1.list_namespaced_resource_quota(namespace)
+  except ApiException as e:
+    if e.status == 403:
+      logging.warning(
+        "Quota pre-check: permission denied reading ResourceQuota "
+        "in namespace '%s'. Proceeding without quota check.",
+        namespace,
+      )
+      return
+    raise
+
+  if not quotas.items:
+    return  # No quota configured for this namespace
+
+  accel_config = _parse_accelerator(accelerator)
+
+  for quota in quotas.items:
+    hard = quota.status.hard or {}
+    used = quota.status.used or {}
+
+    # GPU check
+    gpu_key = "requests.nvidia.com/gpu"
+    requested_gpus = int(
+      accel_config["resource_requests"].get("nvidia.com/gpu", "0")
+    )
+    if gpu_key in hard and requested_gpus > 0:
+      limit = int(hard[gpu_key])
+      in_use = int(used.get(gpu_key, "0"))
+      if in_use + requested_gpus > limit:
+        raise RuntimeError(
+          f"GPU quota exceeded in namespace '{namespace}': "
+          f"{in_use}/{limit} GPUs in use, your job requests {requested_gpus}"
+        )
+
+    # TPU check
+    tpu_key = "requests.google.com/tpu"
+    requested_tpus = int(
+      accel_config["resource_requests"].get("google.com/tpu", "0")
+    )
+    if tpu_key in hard and requested_tpus > 0:
+      limit = int(hard[tpu_key])
+      in_use = int(used.get(tpu_key, "0"))
+      if in_use + requested_tpus > limit:
+        raise RuntimeError(
+          f"TPU quota exceeded in namespace '{namespace}': "
+          f"{in_use}/{limit} TPUs in use, your job requests {requested_tpus}"
+        )
+
+    # Job count check
+    job_key = "count/jobs.batch"
+    if job_key in hard:
+      limit = int(hard[job_key])
+      in_use = int(used.get(job_key, "0"))
+      if in_use >= limit:
+        raise RuntimeError(
+          f"Job count quota exceeded in namespace '{namespace}': "
+          f"{in_use}/{limit} jobs running"
+        )
+
+
 def _parse_accelerator(accelerator):
   """Convert accelerator string to GKE pod spec fields."""
   parsed = accelerators.parse_accelerator(accelerator)
@@ -368,6 +445,9 @@ def _create_job_spec(
   # Only set node_selector if non-empty (for GPU nodes)
   if accel_config.get("node_selector"):
     pod_spec_kwargs["node_selector"] = accel_config["node_selector"]
+  # Set service account for non-default namespaces (Workload Identity)
+  if namespace != "default":
+    pod_spec_kwargs["service_account_name"] = f"{namespace}-runner"
 
   pod_template = client.V1PodTemplateSpec(
     metadata=client.V1ObjectMeta(

@@ -12,6 +12,7 @@ from keras_remote.backend.pathways_client import (
   LWS_VERSION,
   _create_lws_spec,
   _get_lws_version,
+  check_quota,
   cleanup_job,
   submit_pathways_job,
   wait_for_job,
@@ -448,6 +449,105 @@ class TestCleanupJob(absltest.TestCase):
       ApiException(status=500, reason="Server Error")
     )
     cleanup_job("my-job")  # should not raise
+
+
+class TestServiceAccountInLwsSpec(absltest.TestCase):
+  def _make_tpu_accel_config(self):
+    return {
+      "node_selector": {
+        "cloud.google.com/gke-tpu-accelerator": "tpu-v5-lite-podslice",
+        "cloud.google.com/gke-tpu-topology": "2x2",
+      },
+      "resource_limits": {"google.com/tpu": "4"},
+      "resource_requests": {"google.com/tpu": "4"},
+      "tolerations": [
+        {"key": "google.com/tpu", "operator": "Exists", "effect": "NoSchedule"}
+      ],
+      "jax_platform": "tpu",
+    }
+
+  def test_default_namespace_no_service_account(self):
+    spec = _create_lws_spec(
+      job_name="j",
+      container_uri="img",
+      accel_config=self._make_tpu_accel_config(),
+      job_id="j1",
+      bucket_name="b",
+      gcs_prefix="default/j1",
+      num_workers=0,
+      namespace="default",
+    )
+    pod_spec = spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"]["spec"]
+    self.assertNotIn("serviceAccountName", pod_spec)
+
+  def test_custom_namespace_sets_service_account(self):
+    spec = _create_lws_spec(
+      job_name="j",
+      container_uri="img",
+      accel_config=self._make_tpu_accel_config(),
+      job_id="j1",
+      bucket_name="b",
+      gcs_prefix="team-nlp/j1",
+      num_workers=0,
+      namespace="team-nlp",
+    )
+    leader_spec = spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"]["spec"]
+    worker_spec = spec["spec"]["leaderWorkerTemplate"]["workerTemplate"]["spec"]
+    self.assertEqual(leader_spec["serviceAccountName"], "team-nlp-runner")
+    self.assertEqual(worker_spec["serviceAccountName"], "team-nlp-runner")
+
+
+class TestCheckQuota(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    self.enterContext(mock.patch(f"{_MODULE}._load_kube_config"))
+    self.mock_core = self.enterContext(
+      mock.patch(f"{_MODULE}.client.CoreV1Api")
+    ).return_value
+
+  def _make_quota(self, hard, used):
+    quota = MagicMock()
+    quota.status.hard = hard
+    quota.status.used = used
+    self.mock_core.list_namespaced_resource_quota.return_value.items = [quota]
+
+  def test_default_namespace_skips(self):
+    check_quota("default", "v3-4")
+    self.mock_core.list_namespaced_resource_quota.assert_not_called()
+
+  def test_tpu_sufficient(self):
+    self._make_quota(
+      {"requests.google.com/tpu": "8"}, {"requests.google.com/tpu": "2"}
+    )
+    check_quota("team-nlp", "v3-4")  # requests 4 TPUs, 2/8 used → ok
+
+  def test_tpu_exceeded(self):
+    self._make_quota(
+      {"requests.google.com/tpu": "8"}, {"requests.google.com/tpu": "6"}
+    )
+    with self.assertRaisesRegex(RuntimeError, "TPU quota exceeded.*6/8.*4"):
+      check_quota("team-nlp", "v3-4")
+
+  def test_lws_count_exceeded(self):
+    self._make_quota(
+      {"count/leaderworkersets.leaderworkerset.x-k8s.io": "5"},
+      {"count/leaderworkersets.leaderworkerset.x-k8s.io": "5"},
+    )
+    with self.assertRaisesRegex(RuntimeError, "LWS count quota exceeded.*5/5"):
+      check_quota("team-nlp", "v3-4")
+
+  def test_no_quota_passes(self):
+    self.mock_core.list_namespaced_resource_quota.return_value.items = []
+    check_quota("team-nlp", "v3-4")  # should not raise
+
+  def test_403_warns_not_blocks(self):
+    self.mock_core.list_namespaced_resource_quota.side_effect = ApiException(
+      status=403, reason="Forbidden"
+    )
+    with mock.patch(f"{_MODULE}.logging.warning") as mock_warn:
+      check_quota("team-nlp", "v3-4")  # should not raise
+    mock_warn.assert_called_once()
+    self.assertIn("permission denied", mock_warn.call_args[0][0])
 
 
 if __name__ == "__main__":

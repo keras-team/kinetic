@@ -241,6 +241,70 @@ def cleanup_job(job_name, namespace="default"):
       )
 
 
+def check_quota(namespace, accelerator):
+  """Check K8s ResourceQuota usage before submitting an LWS job.
+
+  For the default namespace this is a no-op.  For non-default namespaces
+  the function reads the ResourceQuota status and compares requested
+  resources against hard limits and current usage.
+
+  Raises:
+      RuntimeError: If the job would exceed the namespace quota.
+  """
+  if namespace == "default":
+    return
+
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+
+  try:
+    quotas = core_v1.list_namespaced_resource_quota(namespace)
+  except ApiException as e:
+    if e.status == 403:
+      logging.warning(
+        "Quota pre-check: permission denied reading ResourceQuota "
+        "in namespace '%s'. Proceeding without quota check.",
+        namespace,
+      )
+      return
+    raise
+
+  if not quotas.items:
+    return
+
+  accel_config = _parse_accelerator(accelerator)
+
+  for quota in quotas.items:
+    hard = quota.status.hard or {}
+    used = quota.status.used or {}
+
+    # TPU check
+    tpu_key = "requests.google.com/tpu"
+    requested_tpus = int(
+      accel_config["resource_requests"].get("google.com/tpu", "0")
+    )
+    if tpu_key in hard and requested_tpus > 0:
+      limit = int(hard[tpu_key])
+      in_use = int(used.get(tpu_key, "0"))
+      if in_use + requested_tpus > limit:
+        raise RuntimeError(
+          f"TPU quota exceeded in namespace '{namespace}': "
+          f"{in_use}/{limit} TPUs in use, your job requests "
+          f"{requested_tpus}"
+        )
+
+    # LWS count check
+    lws_key = "count/leaderworkersets.leaderworkerset.x-k8s.io"
+    if lws_key in hard:
+      limit = int(hard[lws_key])
+      in_use = int(used.get(lws_key, "0"))
+      if in_use >= limit:
+        raise RuntimeError(
+          f"LWS count quota exceeded in namespace '{namespace}': "
+          f"{in_use}/{limit} LeaderWorkerSets running"
+        )
+
+
 def _create_lws_spec(
   job_name,
   container_uri,
@@ -309,6 +373,10 @@ def _create_lws_spec(
 
   if accel_config.get("node_selector"):
     pod_template["spec"]["nodeSelector"] = accel_config["node_selector"]
+
+  # Set service account for non-default namespaces (Workload Identity)
+  if namespace != "default":
+    pod_template["spec"]["serviceAccountName"] = f"{namespace}-runner"
 
   return {
     "apiVersion": f"{LWS_GROUP}/{version}",
