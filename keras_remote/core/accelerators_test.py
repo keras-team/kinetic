@@ -209,11 +209,7 @@ class TestParseGenericAliases(absltest.TestCase):
     self.assertEqual(result.name, "v5litepod")
     self.assertEqual(result.chips, 8)
 
-  def test_ghostlite_alias(self):
-    result = parse_accelerator("ghostlite-16")
-    self.assertIsInstance(result, TpuConfig)
-    self.assertEqual(result.name, "v5litepod")
-    self.assertEqual(result.chips, 16)
+
 
   def test_gpu_unsupported_count(self):
     with self.assertRaisesRegex(ValueError, "No GPU supports count 32"):

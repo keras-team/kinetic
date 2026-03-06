@@ -162,14 +162,13 @@ TPUS: dict[str, TpuSpec] = {
 
 _TPU_ALIASES: dict[str, str] = {
   "v5e": "v5litepod",
-  "ghostlite": "v5litepod",
 }
 
 
 # ── Parser ────────────────────────────────────────────────────────
 
 _MULTI_GPU_RE = re.compile(r"^(.+?)(?:x|-)(\d+)$")  # "a100x4", "l4-2"
-_TPU_CHIPS_RE = re.compile(r"^([a-z0-9_]+)-(\d+)$")  # "v3-8", "ghostlite-16"
+_TPU_CHIPS_RE = re.compile(r"^([a-z0-9_]+)-(\d+)$")  # "v3-8", "v5litepod-16"
 _TPU_TOPO_RE = re.compile(
   r"^([a-z0-9_]+)-(\d+x\d+(?:x\d+)?)$"
 )  # "v5litepod-2x2", "v5p-2x2x2"
