@@ -236,10 +236,11 @@ class TestGetOrBuildContainer(absltest.TestCase):
         accelerator_type="l4",
         project="test-proj",
         zone="us-central1-a",
+        cluster_name="my-cluster",
       )
 
     mock_build.assert_not_called()
-    self.assertIn("us-docker.pkg.dev/test-proj/keras-remote/base:", result)
+    self.assertIn("us-docker.pkg.dev/test-proj/kr-my-cluster/base:", result)
 
   def test_builds_when_image_missing(self):
     with (
@@ -249,7 +250,7 @@ class TestGetOrBuildContainer(absltest.TestCase):
       ),
       mock.patch(
         "keras_remote.infra.container_builder._build_and_push",
-        return_value="us-docker.pkg.dev/proj/keras-remote/base:gpu-bbbbbbbbbbbb",
+        return_value="us-docker.pkg.dev/proj/kr-my-cluster/base:gpu-bbbbbbbbbbbb",
       ) as mock_build,
     ):
       result = get_or_build_container(
@@ -258,11 +259,13 @@ class TestGetOrBuildContainer(absltest.TestCase):
         accelerator_type="l4",
         project="proj",
         zone="us-central1-a",
+        cluster_name="my-cluster",
       )
 
     mock_build.assert_called_once()
     self.assertEqual(
-      result, "us-docker.pkg.dev/proj/keras-remote/base:gpu-bbbbbbbbbbbb"
+      result,
+      "us-docker.pkg.dev/proj/kr-my-cluster/base:gpu-bbbbbbbbbbbb",
     )
 
   def _get_image_uri(self, accelerator_type, project, zone):
@@ -276,13 +279,14 @@ class TestGetOrBuildContainer(absltest.TestCase):
         accelerator_type=accelerator_type,
         project=project,
         zone=zone,
+        cluster_name="my-cluster",
       )
 
   def test_image_uri_format_tpu_europe(self):
     result = self._get_image_uri("v3-4", "my-proj", "europe-west4-b")
 
     self.assertTrue(
-      result.startswith("europe-docker.pkg.dev/my-proj/keras-remote/base:")
+      result.startswith("europe-docker.pkg.dev/my-proj/kr-my-cluster/base:")
     )
     tag = result.split(":")[-1]
     self.assertRegex(tag, r"^tpu-[0-9a-f]{12}$")
@@ -291,7 +295,7 @@ class TestGetOrBuildContainer(absltest.TestCase):
     result = self._get_image_uri("a100-80gb", "proj", "us-central1-a")
 
     self.assertTrue(
-      result.startswith("us-docker.pkg.dev/proj/keras-remote/base:")
+      result.startswith("us-docker.pkg.dev/proj/kr-my-cluster/base:")
     )
     tag = result.split(":")[-1]
     self.assertRegex(tag, r"^gpu-[0-9a-f]{12}$")

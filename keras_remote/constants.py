@@ -13,6 +13,11 @@ def get_default_zone():
   return os.environ.get(ZONE_ENV_VAR, DEFAULT_ZONE)
 
 
+def get_default_cluster_name():
+  """Return cluster name from KERAS_REMOTE_CLUSTER env var, or DEFAULT_CLUSTER_NAME."""
+  return os.environ.get("KERAS_REMOTE_CLUSTER", DEFAULT_CLUSTER_NAME)
+
+
 def zone_to_region(zone):
   """Convert a GCP zone to its region (e.g. 'us-central1-a' -> 'us-central1')."""
   return zone.rsplit("-", 1)[0] if zone and "-" in zone else DEFAULT_REGION

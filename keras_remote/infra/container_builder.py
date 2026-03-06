@@ -14,7 +14,11 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import artifactregistry_v1, storage
 from google.cloud.devtools import cloudbuild_v1
 
-from keras_remote.constants import get_default_zone, zone_to_ar_location
+from keras_remote.constants import (
+  get_default_cluster_name,
+  get_default_zone,
+  zone_to_ar_location,
+)
 from keras_remote.core import accelerators
 
 REMOTE_RUNNER_FILE_NAME = "remote_runner.py"
@@ -26,7 +30,12 @@ _RUNNER_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "runner")
 
 
 def get_or_build_container(
-  base_image, requirements_path, accelerator_type, project, zone=None
+  base_image,
+  requirements_path,
+  accelerator_type,
+  project,
+  zone=None,
+  cluster_name=None,
 ):
   """Get existing container or build if requirements changed.
 
@@ -38,11 +47,13 @@ def get_or_build_container(
       accelerator_type: TPU/GPU type (e.g., 'v3-8')
       project: GCP project ID
       zone: GCP zone for region derivation (defaults to KERAS_REMOTE_ZONE)
+      cluster_name: GKE cluster name (defaults to KERAS_REMOTE_CLUSTER)
 
   Returns:
       Container image URI in Artifact Registry
   """
   ar_location = zone_to_ar_location(zone or get_default_zone())
+  cluster_name = cluster_name or get_default_cluster_name()
   category = accelerators.get_category(accelerator_type)
 
   # Generate deterministic hash from requirements + base image + category
@@ -53,8 +64,9 @@ def get_or_build_container(
   # Use category for image name (e.g., 'tpu-hash', 'gpu-hash')
   image_tag = f"{category}-{requirements_hash[:12]}"
 
-  # Use Artifact Registry
-  registry = f"{ar_location}-docker.pkg.dev/{project}/keras-remote"
+  # Use Artifact Registry (cluster-scoped repo)
+  repo_id = f"kr-{cluster_name}"
+  registry = f"{ar_location}-docker.pkg.dev/{project}/{repo_id}"
   image_uri = f"{registry}/base:{image_tag}"
 
   # Check if image exists
@@ -63,7 +75,7 @@ def get_or_build_container(
     ar_url = (
       "https://console.cloud.google.com/artifacts"
       f"/docker/{project}/{ar_location}"
-      f"/keras-remote/base?project={project}"
+      f"/{repo_id}/base?project={project}"
     )
     logging.info("View image: %s", ar_url)
     return image_uri
@@ -77,6 +89,7 @@ def get_or_build_container(
     project,
     image_uri,
     ar_location,
+    cluster_name,
   )
 
 
@@ -155,6 +168,7 @@ def _build_and_push(
   project,
   image_uri,
   ar_location="us",
+  cluster_name=None,
 ):
   """Build and push Docker image using Cloud Build.
 
@@ -200,8 +214,9 @@ def _build_and_push(
           os.path.join(tmpdir, "requirements.txt"), arcname="requirements.txt"
         )
 
-    # Upload source to GCS
-    bucket_name = f"{project}-keras-remote-builds"
+    # Upload source to GCS (cluster-scoped bucket)
+    cluster_name = cluster_name or get_default_cluster_name()
+    bucket_name = f"{project}-kr-{cluster_name}-builds"
     source_gcs = _upload_build_source(tarball_path, bucket_name, project)
 
     # Submit build to Cloud Build

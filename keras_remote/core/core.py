@@ -154,6 +154,7 @@ def _execute_on_gke(
     zone,
     project,
     env_vars,
+    cluster_name=cluster,
     volumes=volumes,
   )
   return execute_remote(ctx, GKEBackend(cluster=cluster, namespace=namespace))
@@ -187,6 +188,7 @@ def _execute_on_pathways(
     zone,
     project,
     env_vars,
+    cluster_name=cluster,
     volumes=volumes,
   )
   return execute_remote(

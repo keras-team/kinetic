@@ -33,8 +33,9 @@ def get_stack(program_fn, config):
     click.echo("Pulumi CLI not found. Installing...")
     pulumi_cmd = auto.PulumiCommand.install(root=PULUMI_ROOT)
 
-  # Use project ID as stack name so each GCP project gets its own stack
-  stack_name = config.project
+  # Each (project, cluster) pair gets its own stack, so multiple clusters
+  # within the same GCP project are fully independent.
+  stack_name = f"{config.project}-{config.cluster_name}"
 
   project_settings = auto.ProjectSettings(
     name=RESOURCE_NAME_PREFIX,

@@ -40,8 +40,9 @@ class TestJobContext(absltest.TestCase):
       container_image=None,
       zone="europe-west4-b",
       project="my-proj",
+      cluster_name="my-cluster",
     )
-    self.assertEqual(ctx.bucket_name, "my-proj-keras-remote-jobs")
+    self.assertEqual(ctx.bucket_name, "my-proj-kr-my-cluster-jobs")
     self.assertEqual(ctx.region, "europe-west4")
     self.assertTrue(ctx.display_name.startswith("keras-remote-my_train-"))
     self.assertRegex(ctx.job_id, r"^job-[0-9a-f]{8}$")
@@ -171,6 +172,7 @@ class TestExecuteRemote(absltest.TestCase):
       container_image=container_image,
       zone="us-central1-a",
       project="proj",
+      cluster_name="keras-remote-cluster",
     )
 
   def test_success_flow(self):
