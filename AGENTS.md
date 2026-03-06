@@ -10,6 +10,7 @@ Keras Remote lets users execute Keras/JAX workloads on cloud TPUs and GPUs via a
 keras_remote/
 ├── core/           # @run decorator, accelerator registry & parser
 ├── backend/        # Job execution backends (GKE, Pathways)
+├── data/           # Data class for declaring data dependencies
 ├── infra/          # Docker container building & caching
 ├── runner/         # Remote worker entrypoint (runs inside container)
 ├── utils/          # Serialization (packager) and Cloud Storage helpers
@@ -26,7 +27,7 @@ keras_remote/
 @keras_remote.run() called
   → JobContext.from_params()        # Resolve config from args/env vars
   → ensure_credentials()            # Verify/auto-configure gcloud, ADC, kubeconfig
-  → _prepare_artifacts()            # Serialize function (cloudpickle), zip working dir
+  → _prepare_artifacts()            # Upload Data, serialize function, zip working dir
   → _build_container()              # Build or retrieve cached Docker image
   → _upload_artifacts()             # Upload payload.pkl, context.zip to GCS
   → backend.submit_job()            # Create K8s Job (GKE) or LeaderWorkerSet (Pathways)
@@ -46,9 +47,10 @@ keras_remote/
 | `backend/gke_client.py`      | K8s Job creation, status polling, pod log retrieval                              |
 | `backend/pathways_client.py` | LeaderWorkerSet creation for multi-host TPUs                                     |
 | `infra/container_builder.py` | Content-hashed Docker image building via Cloud Build                             |
-| `utils/packager.py`          | `save_payload()` (cloudpickle), `zip_working_dir()`                              |
-| `utils/storage.py`           | GCS upload/download/cleanup for job artifacts                                    |
-| `runner/remote_runner.py`    | Runs inside container: deserialize, execute, upload result                       |
+| `data/data.py`               | `Data` class, content hashing, data ref serialization                            |
+| `utils/packager.py`          | `save_payload()` (cloudpickle), `zip_working_dir()`, Data ref extraction         |
+| `utils/storage.py`           | GCS upload/download/cleanup for job artifacts and Data cache                     |
+| `runner/remote_runner.py`    | Runs inside container: resolve Data refs/volumes, execute, upload result         |
 | `cli/commands/pool.py`       | Node pool add/remove/list commands                                               |
 | `cli/infra/post_deploy.py`   | kubectl, LWS CRD, GPU driver setup after stack.up()                              |
 | `cli/constants.py`           | CLI defaults, paths, API list                                                    |
@@ -59,7 +61,52 @@ keras_remote/
 - **`JobContext`** (`backend/execution.py`): Mutable dataclass carrying all job state through the pipeline — inputs, generated IDs, artifact paths, image URI.
 - **`BaseK8sBackend`** (`backend/execution.py`): Base class with `submit_job`, `wait_for_job`, `cleanup_job`. Subclassed by `GKEBackend` and `PathwaysBackend`.
 - **`GpuConfig` / `TpuConfig`** (`core/accelerators.py`): Frozen dataclasses for accelerator metadata. Single source of truth used by runtime, container builder, and CLI.
+- **`Data`** (`data/data.py`): Wraps a local path or GCS URI. Passed as a function argument or via the `volumes` decorator parameter. Resolved to a plain filesystem path on the remote pod. Content-hashed for upload caching.
 - **`InfraConfig` / `NodePoolConfig`** (`cli/config.py`): CLI provisioning configuration. `InfraConfig` holds project, zone, cluster name, and a list of `NodePoolConfig` entries. `NodePoolConfig` pairs a unique pool name (e.g., `gpu-l4-a3f2`) with a `GpuConfig` or `TpuConfig`.
+
+## Data API
+
+The `Data` class (`keras_remote.Data`) declares data dependencies for remote functions. It accepts local file/directory paths or GCS URIs (`gs://...`).
+
+### Two usage patterns
+
+**Function arguments** — `Data` objects passed as args/kwargs are uploaded to GCS, serialized as data ref dicts in the payload, and resolved to local paths on the pod:
+
+```python
+@keras_remote.run(accelerator="v3-8")
+def train(data_dir, config_path):
+    ...  # data_dir and config_path are plain strings
+
+train(Data("./dataset/"), Data("./config.json"))
+```
+
+**Volumes** — `Data` objects in the `volumes=` decorator parameter are downloaded to fixed mount paths before execution:
+
+```python
+@keras_remote.run(accelerator="v3-8", volumes={"/data": Data("./dataset/")})
+def train():
+    files = os.listdir("/data")  # available at mount path
+```
+
+Both patterns can be combined. `Data` objects can also be nested inside lists, dicts, and other containers — they are recursively discovered and resolved.
+
+### Content-addressed caching
+
+Local `Data` objects are content-hashed (SHA-256 over sorted file contents). Uploads go to `gs://{bucket}/{namespace}/data-cache/{hash}/`. A `.cache_marker` sentinel enables O(1) cache-hit checks. Identical data is uploaded only once.
+
+### Pipeline integration
+
+During `_prepare_artifacts()`:
+
+1. Upload `Data` from `volumes` and function args via `storage.upload_data()` (content-addressed)
+1. Replace `Data` objects in args/kwargs with serializable `__data_ref__` dicts
+1. Local `Data` paths inside the caller directory are auto-excluded from `context.zip`
+
+On the remote pod (`remote_runner.py`):
+
+1. `resolve_volumes()` — download volume data to mount paths
+1. `resolve_data_refs()` — recursively resolve `__data_ref__` dicts in args/kwargs to local paths
+1. Single-file `Data` resolves to the file path; directory `Data` resolves to the directory path
 
 ## Conventions
 
