@@ -248,13 +248,6 @@ def parse_accelerator(accel_str: str) -> Accelerator:
   if name in GPUS:
     return make_gpu(name, 1)
 
-  # Multi-GPU: "a100x4", "l4x2"
-  m = _MULTI_GPU_RE.match(s)
-  if m:
-    name = _resolve_gpu_alias(m.group(1))
-    if name in GPUS:
-      return make_gpu(name, int(m.group(2)))
-
   # Direct TPU name (bare): "v5litepod" → default chips
   name = _resolve_tpu_alias(s)
   if name in TPUS:
@@ -281,6 +274,13 @@ def parse_accelerator(accel_str: str) -> Accelerator:
     name = _resolve_tpu_alias(m.group(1))
     if name in TPUS:
       return make_tpu(name, int(m.group(2)))
+
+  # Multi-GPU: "a100x4", "l4x2"
+  m = _MULTI_GPU_RE.match(s)
+  if m:
+    name = _resolve_gpu_alias(m.group(1))
+    if name in GPUS:
+      return make_gpu(name, int(m.group(2)))
 
   raise ValueError(
     f"Unknown accelerator: '{accel_str}'. "

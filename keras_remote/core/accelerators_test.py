@@ -190,10 +190,10 @@ class TestParseGenericAliases(absltest.TestCase):
     self.assertEqual(result.chips, 8)
 
   def test_gpu_with_dynamic_count(self):
-    # h100 supports up to 8. 16 should fall back to a100.
+    # h100 supports up to 8. 16 should fall back to a100-80gb.
     result = parse_accelerator("gpu-16")
     self.assertIsInstance(result, GpuConfig)
-    self.assertIn(result.name, ["a100", "a100-80gb"])
+    self.assertEqual(result.name, "a100-80gb")
     self.assertEqual(result.count, 16)
 
   def test_tpu_with_dynamic_count(self):
