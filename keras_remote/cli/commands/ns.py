@@ -107,7 +107,9 @@ def _load_state(project, zone, cluster_name):
   return project, zone, cluster_name, existing_pools, existing_namespaces
 
 
-def _apply_update(project, zone, cluster_name, node_pools, namespaces):
+def _apply_update(
+  project, zone, cluster_name, node_pools, namespaces, skip_iam=False
+):
   """Run a Pulumi update with the given config.
 
   Returns:
@@ -120,13 +122,15 @@ def _apply_update(project, zone, cluster_name, node_pools, namespaces):
     node_pools=node_pools,
     namespaces=namespaces,
   )
-  program = create_program(config)
+  program = create_program(config, skip_iam=skip_iam)
   stack = get_stack(program, config)
 
   # Auto-import shared resources that exist in GCP but not in state.
   to_import = detect_resources_to_import(stack, project, zone)
   if to_import:
-    program = create_program(config, resources_to_import=to_import)
+    program = create_program(
+      config, resources_to_import=to_import, skip_iam=skip_iam
+    )
     stack = get_stack(program, config)
 
   console.print("\n[bold]Updating infrastructure...[/bold]\n")
@@ -192,25 +196,34 @@ def ns_create(
     _load_state(project, zone, cluster_name)
   )
 
-  # Check for duplicate
-  if any(ns.name == name for ns in existing_namespaces):
+  # Check for duplicate — allow retry with --ignore-iam-errors so the user
+  # can reconcile resources that failed on a previous attempt.
+  already_exists = any(ns.name == name for ns in existing_namespaces)
+  if already_exists and not ignore_iam_errors:
     raise click.ClickException(
       f"Namespace '{name}' already exists. "
-      "Use 'keras-remote ns add-member' to add members."
+      "Use 'keras-remote ns add-member' to add members, "
+      "or re-run with --ignore-iam-errors to retry resource creation."
     )
 
-  new_ns = NamespaceConfig(
-    name=name,
-    members=member_list,
-    gpus=gpus,
-    tpus=tpus,
-    cpu=cpu,
-    memory=memory,
-    max_jobs=max_jobs,
-    max_lws=max_lws,
-  )
-
-  all_namespaces = existing_namespaces + [new_ns]
+  if already_exists:
+    warning(
+      f"Namespace '{name}' already in state — "
+      "retrying resource creation for missing resources."
+    )
+    all_namespaces = existing_namespaces
+  else:
+    new_ns = NamespaceConfig(
+      name=name,
+      members=member_list,
+      gpus=gpus,
+      tpus=tpus,
+      cpu=cpu,
+      memory=memory,
+      max_jobs=max_jobs,
+      max_lws=max_lws,
+    )
+    all_namespaces = existing_namespaces + [new_ns]
 
   console.print(f"\nCreating namespace [bold]{name}[/bold]")
   if member_list:
@@ -224,36 +237,62 @@ def ns_create(
   if not yes:
     click.confirm("Proceed?", abort=True)
 
-  ok = _apply_update(
-    project, zone, cluster_name, existing_pools, all_namespaces
-  )
+  if ignore_iam_errors:
+    # Phase 1: Create K8s resources only (skip IAM to avoid 403 aborting
+    # the entire update).
+    console.print("[bold]Phase 1:[/bold] Creating K8s resources...\n")
+    k8s_ok = _apply_update(
+      project,
+      zone,
+      cluster_name,
+      existing_pools,
+      all_namespaces,
+      skip_iam=True,
+    )
+    if not k8s_ok:
+      console.print()
+      banner("Namespace Creation Failed")
+      return
 
-  console.print()
-  if ok:
-    banner("Namespace Created")
-    console.print(
-      f"\nMembers can now use: "
-      f'[bold]@keras_remote.run(namespace="{name}")[/bold]'
+    # Phase 2: Attempt IAM resources. Failure here is non-fatal.
+    console.print("\n[bold]Phase 2:[/bold] Attempting IAM resources...\n")
+    iam_ok = _apply_update(
+      project,
+      zone,
+      cluster_name,
+      existing_pools,
+      all_namespaces,
     )
-    console.print(
-      f"Or set: [bold]export KERAS_REMOTE_NAMESPACE={name}[/bold]\n"
-    )
-  elif ignore_iam_errors:
-    banner("Namespace Created With Warnings")
-    warning(
-      "Some IAM resources failed to provision (see errors above).\n"
-      "  K8s namespace and isolation resources were created.\n"
-      "  Re-run without --ignore-iam-errors once permissions are fixed."
-    )
-    console.print(
-      f"\nMembers can now use: "
-      f'[bold]@keras_remote.run(namespace="{name}")[/bold]'
-    )
-    console.print(
-      f"Or set: [bold]export KERAS_REMOTE_NAMESPACE={name}[/bold]\n"
-    )
+
+    console.print()
+    if iam_ok:
+      banner("Namespace Created")
+    else:
+      banner("Namespace Created With Warnings")
+      warning(
+        "Some IAM resources failed to provision (see errors above).\n"
+        "  K8s namespace and isolation resources were created.\n"
+        "  Re-run without --ignore-iam-errors once permissions are fixed."
+      )
   else:
-    banner("Namespace Creation Failed")
+    ok = _apply_update(
+      project,
+      zone,
+      cluster_name,
+      existing_pools,
+      all_namespaces,
+    )
+    console.print()
+    if not ok:
+      banner("Namespace Creation Failed")
+      return
+
+    banner("Namespace Created")
+
+  console.print(
+    f'\nMembers can now use: [bold]@keras_remote.run(namespace="{name}")[/bold]'
+  )
+  console.print(f"Or set: [bold]export KERAS_REMOTE_NAMESPACE={name}[/bold]\n")
 
 
 @ns.command("delete")

@@ -87,28 +87,10 @@ class TestNsCreate(absltest.TestCase):
       self.assertEqual(namespaces[0].gpus, 8)
       self.assertEqual(namespaces[0].max_jobs, 10)
 
-  def test_rejects_duplicate(self):
-    """Verify ns create rejects duplicate namespace names."""
-    from keras_remote.cli.config import NamespaceConfig
-
-    existing = [NamespaceConfig(name="team-nlp")]
-    with mock.patch(
-      "keras_remote.cli.commands.ns._load_state",
-      return_value=("proj", "us-central1-a", "cluster", [], existing),
-    ):
-      from click.testing import CliRunner
-
-      from keras_remote.cli.commands.ns import ns
-
-      runner = CliRunner()
-      result = runner.invoke(ns, ["create", "team-nlp", "-y"])
-      self.assertNotEqual(result.exit_code, 0)
-      self.assertIn("already exists", result.output)
-
 
 class TestNsCreateIgnoreIamErrors(absltest.TestCase):
-  def test_partial_success_with_flag(self):
-    """When --ignore-iam-errors is set and update fails, report partial success."""
+  def test_k8s_ok_iam_fails_shows_warnings(self):
+    """Phase 1 (K8s) succeeds, phase 2 (IAM) fails → Created With Warnings."""
     with (
       mock.patch(
         "keras_remote.cli.commands.ns._load_state",
@@ -116,8 +98,8 @@ class TestNsCreateIgnoreIamErrors(absltest.TestCase):
       ),
       mock.patch(
         "keras_remote.cli.commands.ns._apply_update",
-        return_value=False,
-      ),
+        side_effect=[True, False],  # K8s ok, IAM fails
+      ) as mock_update,
     ):
       from click.testing import CliRunner
 
@@ -130,7 +112,39 @@ class TestNsCreateIgnoreIamErrors(absltest.TestCase):
       )
       self.assertEqual(result.exit_code, 0, msg=result.output)
       self.assertIn("Created With Warnings", result.output)
-      self.assertIn("namespace", result.output.lower())
+
+      # Phase 1 called with skip_iam=True, phase 2 without
+      self.assertEqual(mock_update.call_count, 2)
+      self.assertTrue(mock_update.call_args_list[0].kwargs["skip_iam"])
+      self.assertFalse(
+        mock_update.call_args_list[1].kwargs.get("skip_iam", False)
+      )
+
+  def test_k8s_fails_aborts(self):
+    """Phase 1 (K8s) fails → Creation Failed, no phase 2."""
+    with (
+      mock.patch(
+        "keras_remote.cli.commands.ns._load_state",
+        return_value=("proj", "us-central1-a", "cluster", [], []),
+      ),
+      mock.patch(
+        "keras_remote.cli.commands.ns._apply_update",
+        return_value=False,
+      ) as mock_update,
+    ):
+      from click.testing import CliRunner
+
+      from keras_remote.cli.commands.ns import ns
+
+      runner = CliRunner()
+      result = runner.invoke(
+        ns,
+        ["create", "team-nlp", "--ignore-iam-errors", "-y"],
+      )
+      self.assertEqual(result.exit_code, 0, msg=result.output)
+      self.assertIn("Creation Failed", result.output)
+      # Only phase 1 was attempted
+      self.assertEqual(mock_update.call_count, 1)
 
   def test_hard_failure_without_flag(self):
     """Without --ignore-iam-errors, update failure reports hard failure."""
@@ -156,8 +170,8 @@ class TestNsCreateIgnoreIamErrors(absltest.TestCase):
       self.assertEqual(result.exit_code, 0, msg=result.output)
       self.assertIn("Creation Failed", result.output)
 
-  def test_normal_success_with_flag(self):
-    """When --ignore-iam-errors is set but update succeeds, report normal success."""
+  def test_both_phases_succeed(self):
+    """Both phases succeed → normal Namespace Created."""
     with (
       mock.patch(
         "keras_remote.cli.commands.ns._load_state",
@@ -180,6 +194,57 @@ class TestNsCreateIgnoreIamErrors(absltest.TestCase):
       self.assertEqual(result.exit_code, 0, msg=result.output)
       self.assertIn("Namespace Created", result.output)
       self.assertNotIn("Warnings", result.output)
+
+  def test_retry_existing_namespace_with_flag(self):
+    """When namespace exists in state and --ignore-iam-errors is set, retry."""
+    from keras_remote.cli.config import NamespaceConfig
+
+    existing = [NamespaceConfig(name="team-nlp", members=["alice@co.com"])]
+    with (
+      mock.patch(
+        "keras_remote.cli.commands.ns._load_state",
+        return_value=("proj", "us-central1-a", "cluster", [], existing),
+      ),
+      mock.patch(
+        "keras_remote.cli.commands.ns._apply_update",
+        return_value=True,
+      ) as mock_update,
+    ):
+      from click.testing import CliRunner
+
+      from keras_remote.cli.commands.ns import ns
+
+      runner = CliRunner()
+      result = runner.invoke(
+        ns,
+        ["create", "team-nlp", "--ignore-iam-errors", "-y"],
+      )
+      self.assertEqual(result.exit_code, 0, msg=result.output)
+      self.assertIn("Namespace Created", result.output)
+      self.assertIn("retrying", result.output.lower())
+
+      # Should reuse existing config, not add a duplicate
+      namespaces = mock_update.call_args[0][4]
+      self.assertLen(namespaces, 1)
+      self.assertEqual(namespaces[0].name, "team-nlp")
+
+  def test_reject_existing_namespace_without_flag(self):
+    """When namespace exists in state without --ignore-iam-errors, reject."""
+    from keras_remote.cli.config import NamespaceConfig
+
+    existing = [NamespaceConfig(name="team-nlp")]
+    with mock.patch(
+      "keras_remote.cli.commands.ns._load_state",
+      return_value=("proj", "us-central1-a", "cluster", [], existing),
+    ):
+      from click.testing import CliRunner
+
+      from keras_remote.cli.commands.ns import ns
+
+      runner = CliRunner()
+      result = runner.invoke(ns, ["create", "team-nlp", "-y"])
+      self.assertNotEqual(result.exit_code, 0)
+      self.assertIn("already exists", result.output)
 
 
 class TestNsDelete(absltest.TestCase):

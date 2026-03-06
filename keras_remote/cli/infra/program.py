@@ -41,7 +41,7 @@ _DEFAULT_POOL_OAUTH_SCOPES = _BASE_OAUTH_SCOPES + [
 ]
 
 
-def create_program(config, resources_to_import=None):
+def create_program(config, resources_to_import=None, skip_iam=False):
   """Create a Pulumi inline program function closed over the config.
 
   Args:
@@ -49,6 +49,9 @@ def create_program(config, resources_to_import=None):
       resources_to_import: Optional dict mapping Pulumi logical resource
           name to GCP import ID, for adopting pre-existing cloud
           resources into Pulumi state.
+      skip_iam: If True, skip GCP IAM resource declarations so that
+          only K8s resources are managed. Useful when the caller lacks
+          IAM permissions (403).
 
   Returns:
       A callable suitable for pulumi.automation.create_or_select_stack().
@@ -206,6 +209,7 @@ def create_program(config, resources_to_import=None):
         builds_bucket_name,
         k8s_provider,
         enabled_apis,
+        skip_iam=skip_iam,
       )
 
     # 7. Stack exports
@@ -323,6 +327,7 @@ def _create_namespace_resources(
   builds_bucket_name,
   k8s_provider,
   depends_on,
+  skip_iam=False,
 ):
   """Create all K8s and GCP resources for a non-default namespace."""
   ns_name = ns_config.name
@@ -537,10 +542,11 @@ def _create_namespace_resources(
     )
   )
 
+  if skip_iam:
+    return
+
   # GCP Service Account — depends on all K8s resources so that namespace
-  # isolation is fully established before IAM is attempted.  This lets
-  # --ignore-iam-errors guarantee that K8s objects exist even when IAM
-  # calls fail with 403.
+  # isolation is fully established before IAM is attempted.
   namespace_sa = gcp.serviceaccount.Account(
     f"sa-gcp-{ns_name}",
     account_id=f"kr-{ns_name}",
