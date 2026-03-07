@@ -33,6 +33,7 @@ def configure_kubectl(cluster_name, zone, project):
       f"--project={project}",
     ],
     check=True,
+    capture_output=True,
     env=env,
   )
 
@@ -46,6 +47,7 @@ def install_gpu_drivers():
   subprocess.run(
     ["kubectl", "apply", "-f", NVIDIA_DRIVER_DAEMONSET_URL],
     check=True,
+    capture_output=True,
   )
 
 
@@ -57,4 +59,5 @@ def install_lws():
   subprocess.run(
     ["kubectl", "apply", "--server-side", "-f", LWS_INSTALL_URL],
     check=True,
+    capture_output=True,
   )
