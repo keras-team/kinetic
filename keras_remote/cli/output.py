@@ -17,7 +17,6 @@ _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 
 _SUBTITLE_MESSAGES = (
   # Fun phrases and helpful tips, interleaved.
-  # Keep messages <=70 chars to avoid truncation on 80-column terminals.
   "Painting the pods",
   "Tip: Pass Data('./dataset/') as a function arg to upload data",
   "Winding all the butterflies",
@@ -73,13 +72,20 @@ class LiveOutputPanel:
   """
 
   def __init__(
-    self, title, *, max_lines=7, target_console=None, transient=False
+    self,
+    title,
+    *,
+    max_lines=7,
+    target_console=None,
+    transient=False,
+    show_subtitle=True,
   ):
     self._title = title
     self._max_lines = max_lines
     self._lines = []
     self._has_error = False
     self._transient = transient
+    self._show_subtitle = show_subtitle
     self._console = target_console or console
     self._live = None
     self._start_time = None
@@ -152,7 +158,9 @@ class LiveOutputPanel:
     return Panel(
       content,
       title=self._title,
-      subtitle=self._make_subtitle() if not self._has_error else None,
+      subtitle=self._make_subtitle()
+      if self._show_subtitle and not self._has_error
+      else None,
       border_style=style,
     )
 

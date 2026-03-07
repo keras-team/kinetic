@@ -45,6 +45,7 @@ def _stream_pod_logs(core_v1, pod_name, namespace):
       title,
       max_lines=_MAX_DISPLAY_LINES,
       target_console=Console(),
+      show_subtitle=False,
     ) as panel:
       buffer = ""
       for chunk in resp.stream(decode_content=True):
