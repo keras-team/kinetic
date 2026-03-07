@@ -80,7 +80,6 @@ def load_state(
       "Run 'keras-remote up' to provision infrastructure first."
     ) from e
 
-  console.print("\nRefreshing state...\n")
   refresh_failed = False
   with LiveOutputPanel("Refreshing state", transient=True) as panel:
     try:
@@ -114,7 +113,6 @@ def apply_update(config):
   program = create_program(config)
   stack = get_stack(program, config)
 
-  console.print("\n[bold]Updating infrastructure...[/bold]\n")
   ok = True
   with LiveOutputPanel("Updating infrastructure", transient=True) as panel:
     try:
@@ -145,7 +143,6 @@ def apply_destroy(config):
   program = create_program(config)
   stack = get_stack(program, config)
 
-  console.print("\n[bold]Destroying infrastructure...[/bold]\n")
   ok = True
   with LiveOutputPanel("Destroying infrastructure", transient=True) as panel:
     try:

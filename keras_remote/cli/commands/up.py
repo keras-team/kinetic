@@ -89,8 +89,6 @@ def up(project, zone, accelerator, cluster_name, yes):
 
   console.print()
 
-  # Run Pulumi
-  console.print("[bold]Provisioning infrastructure...[/bold]\n")
   pulumi_ok = apply_update(config)
   pulumi_failed = not pulumi_ok
 
