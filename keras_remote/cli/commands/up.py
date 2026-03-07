@@ -120,6 +120,11 @@ def up(project, zone, accelerator, cluster_name, yes):
       except subprocess.CalledProcessError as e:
         failures.append(name)
         panel.on_output(f"{name} failed: {e}")
+        if e.stderr:
+          stderr_text = e.stderr.decode("utf-8", errors="replace").strip()
+          if stderr_text:
+            for line in stderr_text.splitlines():
+              panel.on_output(f"  {line}")
         panel.mark_error()
 
   # Final summary

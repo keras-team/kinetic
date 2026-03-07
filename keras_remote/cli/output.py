@@ -2,7 +2,6 @@
 
 import random
 import time
-from collections import deque
 
 from rich.console import Console
 from rich.live import Live
@@ -77,7 +76,8 @@ class LiveOutputPanel:
     self, title, *, max_lines=7, target_console=None, transient=False
   ):
     self._title = title
-    self._lines = deque(maxlen=max_lines)
+    self._max_lines = max_lines
+    self._lines = []
     self._has_error = False
     self._transient = transient
     self._console = target_console or console
@@ -100,11 +100,13 @@ class LiveOutputPanel:
       self._console.rule(self._title, style="blue")
     return self
 
-  def __exit__(self, *args):
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    if exc_type is not None:
+      self._has_error = True
     if self._live:
       if self._transient and not self._has_error:
         self._live.update(Text(""))
-      self._live.__exit__(*args)
+      self._live.__exit__(exc_type, exc_val, exc_tb)
     else:
       style = "yellow" if self._has_error else "blue"
       self._console.rule(style=style)
@@ -139,12 +141,18 @@ class LiveOutputPanel:
     return f"[italic]{spinner} {message}{suffix}[/italic]"
 
   def _make_panel(self):
-    content = "\n".join(self._lines) if self._lines else "Waiting..."
+    if self._lines:
+      visible = (
+        self._lines if self._has_error else self._lines[-self._max_lines :]
+      )
+      content = "\n".join(visible)
+    else:
+      content = "Waiting..."
     style = "yellow" if self._has_error else "blue"
     return Panel(
       content,
       title=self._title,
-      subtitle=self._make_subtitle(),
+      subtitle=self._make_subtitle() if not self._has_error else None,
       border_style=style,
     )
 
