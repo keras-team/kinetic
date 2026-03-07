@@ -1,12 +1,78 @@
 """Rich console output helpers for the keras-remote CLI."""
 
+from collections import deque
+
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
 console = Console()
+
+
+class LiveOutputPanel:
+  """Context manager that displays streaming output in a Rich Live panel.
+
+  Shows the last `max_lines` in a bordered box. Supports error state
+  (yellow border) and optional transient mode (clears on success).
+
+  In non-interactive terminals, falls back to plain console output.
+  """
+
+  def __init__(
+    self, title, *, max_lines=7, target_console=None, transient=False
+  ):
+    self._title = title
+    self._lines = deque(maxlen=max_lines)
+    self._has_error = False
+    self._transient = transient
+    self._console = target_console or console
+    self._live = None
+
+  def __enter__(self):
+    if self._console.is_terminal:
+      self._live = Live(
+        self._make_panel(),
+        console=self._console,
+        refresh_per_second=4,
+      )
+      self._live.__enter__()
+    else:
+      self._console.rule(self._title, style="blue")
+    return self
+
+  def __exit__(self, *args):
+    if self._live:
+      if self._transient and not self._has_error:
+        self._live.update(Text(""))
+      self._live.__exit__(*args)
+    else:
+      style = "yellow" if self._has_error else "blue"
+      self._console.rule(style=style)
+    return False
+
+  def on_output(self, line):
+    """Append a line and refresh the display."""
+    stripped = line.rstrip("\n")
+    if self._live:
+      self._lines.append(stripped)
+      self._live.update(self._make_panel())
+    else:
+      self._console.print(stripped)
+
+  def mark_error(self):
+    """Turn the panel border yellow to indicate an error."""
+    self._has_error = True
+    if self._live:
+      self._live.update(self._make_panel())
+
+  def _make_panel(self):
+    content = "\n".join(self._lines) if self._lines else "Waiting..."
+    style = "yellow" if self._has_error else "blue"
+    return Panel(content, title=self._title, border_style=style)
 
 
 def banner(text):
