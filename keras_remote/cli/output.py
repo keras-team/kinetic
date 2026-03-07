@@ -1,5 +1,7 @@
 """Rich console output helpers for the keras-remote CLI."""
 
+import random
+import time
 from collections import deque
 
 from rich.console import Console
@@ -11,6 +13,25 @@ from rich.text import Text
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
 console = Console()
+
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+_LOADING_PHRASES = (
+  "Painting the pods",
+  "Winding all the butterflies",
+  "Warming the compute engine",
+  "Reticulating splines",
+  "Charging the flux capacitor",
+  "Aligning the cloud crystals",
+  "Feeding the hamsters",
+  "Consulting the oracle",
+  "Calibrating the widgets",
+  "Herding the containers",
+  "Polishing the tensors",
+  "Summoning the cluster spirits",
+  "Untangling the neural pathways",
+  "Brewing the cloud juice",
+)
 
 
 class LiveOutputPanel:
@@ -31,11 +52,16 @@ class LiveOutputPanel:
     self._transient = transient
     self._console = target_console or console
     self._live = None
+    self._start_time = None
+    self._phrase_order = None
 
   def __enter__(self):
+    self._start_time = time.monotonic()
+    self._phrase_order = list(range(len(_LOADING_PHRASES)))
+    random.shuffle(self._phrase_order)
     if self._console.is_terminal:
       self._live = Live(
-        self._make_panel(),
+        self,
         console=self._console,
         refresh_per_second=4,
       )
@@ -54,12 +80,14 @@ class LiveOutputPanel:
       self._console.rule(style=style)
     return False
 
+  def __rich__(self):
+    return self._make_panel()
+
   def on_output(self, line):
     """Append a line and refresh the display."""
     stripped = line.rstrip("\n")
     if self._live:
       self._lines.append(stripped)
-      self._live.update(self._make_panel())
     else:
       self._console.print(stripped)
 
@@ -67,12 +95,27 @@ class LiveOutputPanel:
     """Turn the panel border yellow to indicate an error."""
     self._has_error = True
     if self._live:
-      self._live.update(self._make_panel())
+      self._live.refresh()
+
+  def _make_subtitle(self):
+    if self._start_time is None or self._phrase_order is None:
+      return None
+    elapsed = time.monotonic() - self._start_time
+    spinner_idx = int(elapsed * 4) % len(_SPINNER_FRAMES)
+    spinner = _SPINNER_FRAMES[spinner_idx]
+    phrase_idx = int(elapsed / 3) % len(_LOADING_PHRASES)
+    phrase = _LOADING_PHRASES[self._phrase_order[phrase_idx]]
+    return f"[dim]{spinner} {phrase}...[/dim]"
 
   def _make_panel(self):
     content = "\n".join(self._lines) if self._lines else "Waiting..."
     style = "yellow" if self._has_error else "blue"
-    return Panel(content, title=self._title, border_style=style)
+    return Panel(
+      content,
+      title=self._title,
+      subtitle=self._make_subtitle(),
+      border_style=style,
+    )
 
 
 def banner(text):
