@@ -16,21 +16,50 @@ console = Console()
 
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
-_LOADING_PHRASES = (
+_SUBTITLE_MESSAGES = (
+  # Fun phrases and helpful tips, interleaved.
   "Painting the pods",
+  "Tip: Pass Data('./dataset/') as a function arg to auto-upload datasets",
   "Winding all the butterflies",
+  "Tip: Use volumes={'/data': Data('./my-data/')} to mount data at a fixed path",
   "Warming the compute engine",
+  "Tip: Data objects are content-hashed — identical data is uploaded only once",
   "Reticulating splines",
+  "Tip: Data() also accepts GCS URIs like Data('gs://my-bucket/dataset/')",
   "Charging the flux capacitor",
+  "Tip: Data objects can be nested in lists and dicts — they're recursively discovered",
   "Aligning the cloud crystals",
+  "Tip: Container images are cached by content hash — unchanged deps skip rebuilds",
   "Feeding the hamsters",
+  "Tip: Add a requirements.txt to auto-install dependencies in the remote container",
   "Consulting the oracle",
+  "Tip: Use --cluster to manage multiple independent clusters in the same project",
   "Calibrating the widgets",
+  "Tip: Run 'keras-remote pool add --accelerator v5litepod-8' to add a TPU pool",
   "Herding the containers",
+  "Tip: Run 'keras-remote pool list' to see all accelerator pools on your cluster",
   "Polishing the tensors",
+  "Tip: Use --yes with 'pool add' or 'pool remove' to skip the confirmation prompt",
   "Summoning the cluster spirits",
+  "Tip: Set cluster= in @run() to target a specific cluster (env: KERAS_REMOTE_CLUSTER)",
   "Untangling the neural pathways",
+  "Tip: Set zone= in @run() to pick a GCP zone (env: KERAS_REMOTE_ZONE)",
   "Brewing the cloud juice",
+  "Tip: Use capture_env_vars=['PREFIX_*'] in @run() to forward env vars to the worker",
+  "Wrangling the cloud gremlins",
+  "Tip: Multi-host TPUs (e.g. v5litepod-16) automatically use the Pathways backend",
+  "Compiling the butterfly wings",
+  "Tip: Your working directory is zipped and sent to the remote pod automatically",
+  "Tuning the hyperparameters of the universe",
+  "Tip: Remote exceptions are re-raised locally with the original traceback",
+  "Spinning up the hamster wheels",
+  "Tip: Run 'keras-remote config show' to see your current project, zone, and cluster",
+  "Negotiating with the load balancer",
+  "Tip: Use container_image= in @run() to provide a custom pre-built Docker image",
+  "Teaching the pods to dance",
+  "Tip: Set namespace= in @run() to target a K8s namespace (env: KERAS_REMOTE_GKE_NAMESPACE)",
+  "Downloading more RAM",
+  "Tip: Set KERAS_REMOTE_PROJECT or use --project to target a specific GCP project",
 )
 
 
@@ -57,7 +86,7 @@ class LiveOutputPanel:
 
   def __enter__(self):
     self._start_time = time.monotonic()
-    self._phrase_order = list(range(len(_LOADING_PHRASES)))
+    self._phrase_order = list(range(len(_SUBTITLE_MESSAGES)))
     random.shuffle(self._phrase_order)
     if self._console.is_terminal:
       self._live = Live(
@@ -103,9 +132,10 @@ class LiveOutputPanel:
     elapsed = time.monotonic() - self._start_time
     spinner_idx = int(elapsed * 4) % len(_SPINNER_FRAMES)
     spinner = _SPINNER_FRAMES[spinner_idx]
-    phrase_idx = int(elapsed / 3) % len(_LOADING_PHRASES)
-    phrase = _LOADING_PHRASES[self._phrase_order[phrase_idx]]
-    return f"[dim]{spinner} {phrase}...[/dim]"
+    msg_idx = int(elapsed / 4) % len(_SUBTITLE_MESSAGES)
+    message = _SUBTITLE_MESSAGES[self._phrase_order[msg_idx]]
+    suffix = "" if message.startswith("Tip:") else "..."
+    return f"[italic]{spinner} {message}{suffix}[/italic]"
 
   def _make_panel(self):
     content = "\n".join(self._lines) if self._lines else "Waiting..."
