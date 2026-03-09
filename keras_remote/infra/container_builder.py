@@ -83,7 +83,7 @@ def _filter_jax_requirements(requirements_content: str) -> str:
   return "".join(filtered_lines)
 
 
-def _parse_pyproject_dependencies(pyproject_path: str) -> str | None:
+def _parse_pyproject_dependencies(pyproject_path: str) -> str:
   """Extract ``[project.dependencies]`` from a pyproject.toml file.
 
   Reads only the core dependency list defined under the ``[project]`` table.
@@ -95,14 +95,15 @@ def _parse_pyproject_dependencies(pyproject_path: str) -> str | None:
 
   Returns:
       Newline-separated dependency strings in PEP 508 format suitable for
-      ``pip install``, or ``None`` if the file declares no dependencies.
+      ``pip install``, or an empty string if the file declares no
+      dependencies.
   """
   with open(pyproject_path, "rb") as f:
     data = tomllib.load(f)
 
   deps = data.get("project", {}).get("dependencies", [])
   if not deps:
-    return None
+    return ""
   return "\n".join(deps) + "\n"
 
 

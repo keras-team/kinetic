@@ -93,17 +93,17 @@ class TestParsePyprojectDependencies(absltest.TestCase):
     result = _parse_pyproject_dependencies(path)
     self.assertEqual(result, "numpy>=1.20\npandas\n")
 
-  def test_returns_none_when_no_dependencies(self):
+  def test_returns_empty_when_no_dependencies(self):
     path = self._write_toml("[project]\nname = 'foo'\n")
-    self.assertIsNone(_parse_pyproject_dependencies(path))
+    self.assertEqual(_parse_pyproject_dependencies(path), "")
 
-  def test_returns_none_when_no_project_table(self):
+  def test_returns_empty_when_no_project_table(self):
     path = self._write_toml("[tool.ruff]\nline-length = 88\n")
-    self.assertIsNone(_parse_pyproject_dependencies(path))
+    self.assertEqual(_parse_pyproject_dependencies(path), "")
 
-  def test_returns_none_for_empty_dependencies(self):
+  def test_returns_empty_for_empty_dependencies(self):
     path = self._write_toml("[project]\ndependencies = []\n")
-    self.assertIsNone(_parse_pyproject_dependencies(path))
+    self.assertEqual(_parse_pyproject_dependencies(path), "")
 
   def test_ignores_optional_dependencies(self):
     path = self._write_toml(
