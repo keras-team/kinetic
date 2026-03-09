@@ -17,6 +17,8 @@ from absl import logging
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
 
+_DOWNLOAD_BATCH_SIZE = 10000
+
 # Base temp directory for remote execution artifacts
 TEMP_DIR = tempfile.gettempdir()
 DATA_DIR = os.path.join(TEMP_DIR, "data")
@@ -195,27 +197,39 @@ def _download_data(ref, target_dir, storage_client):
   bucket = storage_client.bucket(bucket_name)
 
   blobs = bucket.list_blobs(prefix=prefix + "/")
-  blob_names = []
+  total_downloaded = 0
+  batch = []
   for blob in blobs:
     if blob.name.endswith("/") or blob.name.endswith(".cache_marker"):
       continue
-    blob_names.append(blob.name[len(prefix) + 1 :])
+    batch.append(blob.name[len(prefix) + 1 :])
+    if len(batch) >= _DOWNLOAD_BATCH_SIZE:
+      transfer_manager.download_many_to_path(
+        bucket,
+        batch,
+        destination_directory=target_dir,
+        blob_name_prefix=prefix + "/",
+        worker_type=transfer_manager.THREAD,
+        raise_exception=True,
+      )
+      total_downloaded += len(batch)
+      batch = []
 
-  if not blob_names:
-    return
+  if batch:
+    transfer_manager.download_many_to_path(
+      bucket,
+      batch,
+      destination_directory=target_dir,
+      blob_name_prefix=prefix + "/",
+      worker_type=transfer_manager.THREAD,
+      raise_exception=True,
+    )
+    total_downloaded += len(batch)
 
-  transfer_manager.download_many_to_path(
-    bucket,
-    blob_names,
-    destination_directory=target_dir,
-    blob_name_prefix=prefix + "/",
-    worker_type=transfer_manager.THREAD,
-    raise_exception=True,
-  )
-
-  logging.info(
-    "Downloaded %d files from %s to %s", len(blob_names), gcs_uri, target_dir
-  )
+  if total_downloaded:
+    logging.info(
+      "Downloaded %d files from %s to %s", total_downloaded, gcs_uri, target_dir
+    )
 
 
 def _download_from_gcs(client, gcs_path, local_path):

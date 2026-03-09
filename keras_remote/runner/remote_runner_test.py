@@ -13,6 +13,7 @@ import cloudpickle
 from absl.testing import absltest
 
 from keras_remote.runner.remote_runner import (
+  _DOWNLOAD_BATCH_SIZE,
   _download_data,
   _download_from_gcs,
   _upload_to_gcs,
@@ -156,6 +157,36 @@ class TestDownloadData(absltest.TestCase):
 
     blob_names = self.mock_download.call_args[0][1]
     self.assertEqual(blob_names, ["sub/deep.csv"])
+
+  def test_large_listing_downloads_in_batches(self):
+    tmp = _make_temp_path(self)
+    target = tmp / "output"
+
+    mock_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+
+    num_blobs = _DOWNLOAD_BATCH_SIZE + 5
+    blobs = []
+    for i in range(num_blobs):
+      blob = MagicMock()
+      blob.name = f"prefix/hash/file_{i}.csv"
+      blobs.append(blob)
+    mock_bucket.list_blobs.return_value = blobs
+
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://bucket/prefix/hash",
+      "is_dir": True,
+    }
+
+    _download_data(ref, str(target), mock_client)
+
+    self.assertEqual(self.mock_download.call_count, 2)
+    first_batch = self.mock_download.call_args_list[0][0][1]
+    second_batch = self.mock_download.call_args_list[1][0][1]
+    self.assertEqual(len(first_batch), _DOWNLOAD_BATCH_SIZE)
+    self.assertEqual(len(second_batch), 5)
 
   def test_empty_listing_is_noop(self):
     tmp = _make_temp_path(self)
