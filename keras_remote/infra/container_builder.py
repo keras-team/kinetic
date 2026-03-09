@@ -73,7 +73,7 @@ def _filter_jax_requirements(requirements_content: str) -> str:
           "Filtered '%s' from requirements — JAX is installed "
           "automatically with the correct accelerator backend. "
           "To override, add '# kr:keep' to the line.",
-          stripped,
+          m.group(1),
         )
         continue
 
