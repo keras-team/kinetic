@@ -5,16 +5,14 @@ background daemon thread. Used by both GKE and Pathways backends during
 job execution.
 """
 
-import sys
 import threading
-from collections import deque
 
 import urllib3
 from absl import logging
 from kubernetes.client.rest import ApiException
 from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
+
+from keras_remote.cli.output import LiveOutputPanel
 
 _MAX_DISPLAY_LINES = 25
 
@@ -27,14 +25,13 @@ def _stream_pod_logs(core_v1, pod_name, namespace):
 
   In interactive terminals, logs are displayed in a Rich Live panel.
   In non-interactive contexts (piped output, CI), logs are streamed
-  as raw lines with Rich Rule delimiters.
+  as plain lines with Rule delimiters.
 
   Args:
       core_v1: Kubernetes CoreV1Api client.
       pod_name: Name of the pod to stream logs from.
       namespace: Kubernetes namespace.
   """
-  console = Console()
   resp = None
   try:
     resp = core_v1.read_namespaced_pod_log(
@@ -43,10 +40,22 @@ def _stream_pod_logs(core_v1, pod_name, namespace):
       follow=True,
       _preload_content=False,
     )
-    if console.is_terminal:
-      _render_live_panel(resp, pod_name, console)
-    else:
-      _render_plain(resp, pod_name, console)
+    title = f"Remote logs \u2022 {pod_name}"
+    with LiveOutputPanel(
+      title,
+      max_lines=_MAX_DISPLAY_LINES,
+      target_console=Console(),
+      show_subtitle=False,
+    ) as panel:
+      buffer = ""
+      for chunk in resp.stream(decode_content=True):
+        buffer += chunk.decode("utf-8", errors="replace")
+        while "\n" in buffer:
+          line, buffer = buffer.split("\n", 1)
+          panel.on_output(line)
+      # Flush remaining partial line
+      if buffer.strip():
+        panel.on_output(buffer)
   except ApiException:
     pass  # Pod deleted or not found
   except urllib3.exceptions.ProtocolError:
@@ -58,45 +67,6 @@ def _stream_pod_logs(core_v1, pod_name, namespace):
   finally:
     if resp is not None:
       resp.release_conn()
-
-
-def _render_live_panel(resp, pod_name, console):
-  """Render streaming logs inside a Rich Live panel."""
-  lines = deque(maxlen=_MAX_DISPLAY_LINES)
-  title = f"Remote logs \u2022 {pod_name}"
-  buffer = ""
-
-  with Live(
-    _make_log_panel(lines, title),
-    console=console,
-    refresh_per_second=4,
-  ) as live:
-    for chunk in resp.stream(decode_content=True):
-      buffer += chunk.decode("utf-8", errors="replace")
-      while "\n" in buffer:
-        line, buffer = buffer.split("\n", 1)
-        lines.append(line)
-      live.update(_make_log_panel(lines, title))
-
-    # Flush remaining partial line
-    if buffer.strip():
-      lines.append(buffer)
-      live.update(_make_log_panel(lines, title))
-
-
-def _render_plain(resp, pod_name, console):
-  """Render streaming logs as raw lines with Rule delimiters."""
-  console.rule(f"Remote logs ({pod_name})", style="blue")
-  for chunk in resp.stream(decode_content=True):
-    sys.stdout.write(chunk.decode("utf-8", errors="replace"))
-    sys.stdout.flush()
-  console.rule("End remote logs", style="blue")
-
-
-def _make_log_panel(lines, title):
-  """Build a Panel renderable from accumulated log lines."""
-  content = "\n".join(lines) if lines else "Waiting for output..."
-  return Panel(content, title=title, border_style="blue")
 
 
 class LogStreamer:

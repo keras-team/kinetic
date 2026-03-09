@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import shutil
 import string
 import tarfile
@@ -14,7 +15,11 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import artifactregistry_v1, storage
 from google.cloud.devtools import cloudbuild_v1
 
-from keras_remote.constants import get_default_zone, zone_to_ar_location
+from keras_remote.constants import (
+  get_default_cluster_name,
+  get_default_zone,
+  zone_to_ar_location,
+)
 from keras_remote.core import accelerators
 
 REMOTE_RUNNER_FILE_NAME = "remote_runner.py"
@@ -24,10 +29,67 @@ _PACKAGE_ROOT = os.path.normpath(
 )
 _RUNNER_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "runner")
 
+# JAX-related packages managed by the Dockerfile template.
+# User requirements containing these are filtered out to prevent overriding
+# the accelerator-specific JAX installation (e.g., jax[tpu], jax[cuda12]).
+_JAX_PACKAGE_NAMES = frozenset({"jax", "jaxlib", "libtpu", "libtpu-nightly"})
+_PACKAGE_NAME_RE = re.compile(r"^([a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?)")
+_KEEP_MARKER = "# kr:keep"
+
+
+def _filter_jax_requirements(requirements_content: str) -> str:
+  """Remove JAX-related packages from requirements content.
+
+  Strips lines that would override the accelerator-specific JAX installation
+  managed by the Dockerfile template. Logs a warning for each filtered line.
+
+  To preserve a JAX line, append ``# kr:keep`` to it in requirements.txt.
+
+  Args:
+      requirements_content: Raw text of a requirements.txt file.
+
+  Returns:
+      Filtered requirements text with JAX-related lines removed.
+  """
+  filtered_lines = []
+  for line in requirements_content.splitlines(keepends=True):
+    stripped = line.strip()
+    # Preserve blanks, comments, and pip flags (-e, --index-url, etc.)
+    if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+      filtered_lines.append(line)
+      continue
+
+    # Allow users to bypass the filter with an inline marker.
+    if _KEEP_MARKER in line:
+      filtered_lines.append(line)
+      continue
+
+    m = _PACKAGE_NAME_RE.match(stripped)
+    if m:
+      # PEP 503 normalization: lowercase, collapse [-_.] to '-'
+      normalized = re.sub(r"[-_.]+", "-", m.group(1)).lower()
+      if normalized in _JAX_PACKAGE_NAMES:
+        logging.warning(
+          "Filtered '%s' from requirements — JAX is installed "
+          "automatically with the correct accelerator backend. "
+          "To override, add '# kr:keep' to the line.",
+          m.group(1),
+        )
+        continue
+
+    filtered_lines.append(line)
+
+  return "".join(filtered_lines)
+
 
 def get_or_build_container(
-  base_image, requirements_path, accelerator_type, project, zone=None
-):
+  base_image: str,
+  requirements_path: str | None,
+  accelerator_type: str,
+  project: str,
+  zone: str | None = None,
+  cluster_name: str | None = None,
+) -> str:
   """Get existing container or build if requirements changed.
 
   Uses content-based hashing to detect requirement changes.
@@ -38,23 +100,32 @@ def get_or_build_container(
       accelerator_type: TPU/GPU type (e.g., 'v3-8')
       project: GCP project ID
       zone: GCP zone for region derivation (defaults to KERAS_REMOTE_ZONE)
+      cluster_name: GKE cluster name (defaults to KERAS_REMOTE_CLUSTER)
 
   Returns:
       Container image URI in Artifact Registry
   """
   ar_location = zone_to_ar_location(zone or get_default_zone())
+  cluster_name = cluster_name or get_default_cluster_name()
   category = accelerators.get_category(accelerator_type)
+
+  # Read and filter requirements once, reuse for hashing and building.
+  filtered_requirements = None
+  if requirements_path and os.path.exists(requirements_path):
+    with open(requirements_path, "r") as f:
+      filtered_requirements = _filter_jax_requirements(f.read())
 
   # Generate deterministic hash from requirements + base image + category
   requirements_hash = _hash_requirements(
-    requirements_path, category, base_image
+    filtered_requirements, category, base_image
   )
 
   # Use category for image name (e.g., 'tpu-hash', 'gpu-hash')
   image_tag = f"{category}-{requirements_hash[:12]}"
 
-  # Use Artifact Registry
-  registry = f"{ar_location}-docker.pkg.dev/{project}/keras-remote"
+  # Use Artifact Registry (cluster-scoped repo)
+  repo_id = f"kr-{cluster_name}"
+  registry = f"{ar_location}-docker.pkg.dev/{project}/{repo_id}"
   image_uri = f"{registry}/base:{image_tag}"
 
   # Check if image exists
@@ -63,7 +134,7 @@ def get_or_build_container(
     ar_url = (
       "https://console.cloud.google.com/artifacts"
       f"/docker/{project}/{ar_location}"
-      f"/keras-remote/base?project={project}"
+      f"/{repo_id}/base?project={project}"
     )
     logging.info("View image: %s", ar_url)
     return image_uri
@@ -72,19 +143,22 @@ def get_or_build_container(
   logging.info("Building new container (requirements changed): %s", image_uri)
   return _build_and_push(
     base_image,
-    requirements_path,
+    filtered_requirements,
     category,
     project,
     image_uri,
     ar_location,
+    cluster_name,
   )
 
 
-def _hash_requirements(requirements_path, category, base_image):
+def _hash_requirements(
+  filtered_requirements: str | None, category: str, base_image: str
+) -> str:
   """Create deterministic hash from requirements + category + remote_runner + base image.
 
   Args:
-      requirements_path: Path to requirements.txt (or None)
+      filtered_requirements: Pre-filtered requirements content (or None)
       category: Accelerator category ('cpu', 'gpu', 'tpu')
       base_image: Base Docker image (e.g., 'python:3.12-slim')
 
@@ -93,9 +167,8 @@ def _hash_requirements(requirements_path, category, base_image):
   """
   content = f"base_image={base_image}\ncategory={category}\n"
 
-  if requirements_path and os.path.exists(requirements_path):
-    with open(requirements_path, "r") as f:
-      content += f.read()
+  if filtered_requirements:
+    content += filtered_requirements
 
   # Include remote_runner.py in the hash so container rebuilds when it changes
   remote_runner_path = os.path.join(_RUNNER_DIR, REMOTE_RUNNER_FILE_NAME)
@@ -112,7 +185,7 @@ def _hash_requirements(requirements_path, category, base_image):
   return hashlib.sha256(content.encode()).hexdigest()
 
 
-def _image_exists(image_uri, project):
+def _image_exists(image_uri: str, project: str) -> bool:
   """Check if image exists in Artifact Registry.
 
   Args:
@@ -149,18 +222,19 @@ def _image_exists(image_uri, project):
 
 
 def _build_and_push(
-  base_image,
-  requirements_path,
-  category,
-  project,
-  image_uri,
-  ar_location="us",
-):
+  base_image: str,
+  filtered_requirements: str | None,
+  category: str,
+  project: str,
+  image_uri: str,
+  ar_location: str = "us",
+  cluster_name: str | None = None,
+) -> str:
   """Build and push Docker image using Cloud Build.
 
   Args:
       base_image: Base Docker image
-      requirements_path: Path to requirements.txt (or None)
+      filtered_requirements: Pre-filtered requirements content (or None)
       category: Accelerator category ('cpu', 'gpu', 'tpu')
       project: GCP project ID
       image_uri: Target image URI
@@ -173,7 +247,7 @@ def _build_and_push(
     # Generate Dockerfile
     dockerfile_content = _generate_dockerfile(
       base_image=base_image,
-      requirements_path=requirements_path,
+      has_requirements=filtered_requirements is not None,
       category=category,
     )
 
@@ -181,9 +255,10 @@ def _build_and_push(
     with open(dockerfile_path, "w") as f:
       f.write(dockerfile_content)
 
-    # Copy requirements.txt if it exists
-    if requirements_path and os.path.exists(requirements_path):
-      shutil.copy(requirements_path, os.path.join(tmpdir, "requirements.txt"))
+    # Write pre-filtered requirements.txt
+    if filtered_requirements is not None:
+      with open(os.path.join(tmpdir, "requirements.txt"), "w") as f:
+        f.write(filtered_requirements)
 
     # Copy remote_runner.py
     remote_runner_src = os.path.join(_RUNNER_DIR, REMOTE_RUNNER_FILE_NAME)
@@ -195,13 +270,14 @@ def _build_and_push(
     with tarfile.open(tarball_path, "w:gz") as tar:
       tar.add(dockerfile_path, arcname="Dockerfile")
       tar.add(remote_runner_dst, arcname=REMOTE_RUNNER_FILE_NAME)
-      if requirements_path and os.path.exists(requirements_path):
+      if filtered_requirements is not None:
         tar.add(
           os.path.join(tmpdir, "requirements.txt"), arcname="requirements.txt"
         )
 
-    # Upload source to GCS
-    bucket_name = f"{project}-keras-remote-builds"
+    # Upload source to GCS (cluster-scoped bucket)
+    cluster_name = cluster_name or get_default_cluster_name()
+    bucket_name = f"{project}-kr-{cluster_name}-builds"
     source_gcs = _upload_build_source(tarball_path, bucket_name, project)
 
     # Submit build to Cloud Build
@@ -256,12 +332,14 @@ def _build_and_push(
       raise RuntimeError(f"Build failed with status: {result.status}")
 
 
-def _generate_dockerfile(base_image, requirements_path, category):
+def _generate_dockerfile(
+  base_image: str, has_requirements: bool, category: str
+) -> str:
   """Generate Dockerfile content based on configuration.
 
   Args:
       base_image: Base Docker image
-      requirements_path: Path to requirements.txt (or None)
+      has_requirements: Whether filtered requirements content is available
       category: Accelerator category ('cpu', 'gpu', 'tpu')
 
   Returns:
@@ -279,7 +357,7 @@ def _generate_dockerfile(base_image, requirements_path, category):
     jax_install = "RUN python3 -m pip install 'jax[cuda12]'"
 
   requirements_section = ""
-  if requirements_path and os.path.exists(requirements_path):
+  if has_requirements:
     requirements_section = (
       "COPY requirements.txt /tmp/requirements.txt\n"
       "RUN python3 -m pip install -r /tmp/requirements.txt\n"
@@ -296,7 +374,9 @@ def _generate_dockerfile(base_image, requirements_path, category):
   )
 
 
-def _upload_build_source(tarball_path, bucket_name, project):
+def _upload_build_source(
+  tarball_path: str, bucket_name: str, project: str
+) -> str:
   """Upload build source tarball to Cloud Storage.
 
   Args:

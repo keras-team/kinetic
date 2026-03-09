@@ -1,12 +1,168 @@
 """Rich console output helpers for the keras-remote CLI."""
 
+import random
+import time
+
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
 
 console = Console()
+
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+_SUBTITLE_MESSAGES = (
+  # Fun phrases and helpful tips, interleaved.
+  "Painting the pods",
+  "Tip: Pass Data('./dataset/') as a function arg to upload data",
+  "Winding all the butterflies",
+  "Tip: Use volumes={'/mnt': Data('./data/')} to mount data on the pod",
+  "Warming the compute engine",
+  "Tip: Data is content-hashed — identical data is uploaded only once",
+  "Reticulating splines",
+  "Tip: Data() accepts GCS URIs too, e.g. Data('gs://bucket/path/')",
+  "Charging the flux capacitor",
+  "Tip: Data objects nested in lists/dicts are recursively discovered",
+  "Aligning the cloud crystals",
+  "Tip: Container images are content-hashed — unchanged deps skip rebuilds",
+  "Feeding the hamsters",
+  "Tip: Add a requirements.txt to auto-install deps on the remote pod",
+  "Consulting the oracle",
+  "Tip: Use --cluster to manage multiple clusters in the same project",
+  "Calibrating the widgets",
+  "Tip: Run 'keras-remote pool add --accelerator v5p-8' to add a TPU pool",
+  "Herding the containers",
+  "Tip: Run 'keras-remote pool list' to see all accelerators on your cluster",
+  "Polishing the tensors",
+  "Tip: Pass --yes to 'pool add/remove' to skip the confirmation prompt",
+  "Summoning the cluster spirits",
+  "Tip: Use cluster= in @run() to pick a cluster (or env KERAS_REMOTE_CLUSTER)",
+  "Untangling the neural pathways",
+  "Tip: Set zone= in @run() to pick a GCP zone (or env KERAS_REMOTE_ZONE)",
+  "Brewing the cloud juice",
+  "Tip: Use capture_env_vars=['PREFIX_*'] in @run() to forward env vars to the worker",
+  "Wrangling the cloud gremlins",
+  "Tip: Multi-host TPUs (e.g. v6e-4x4) auto-select the Pathways backend",
+  "Compiling the butterfly wings",
+  "Tip: Your working directory is auto-zipped and sent to the pod",
+  "Tuning the hyperparameters of the universe",
+  "Tip: Remote exceptions are re-raised locally with original traceback",
+  "Spinning up the hamster wheels",
+  "Tip: Run 'keras-remote config show' to check your current settings",
+  "Negotiating with the load balancer",
+  "Tip: Use container_image= in @run() to bring your own Docker image",
+  "Teaching the pods to dance",
+  "Tip: Use namespace= in @run() to pick a K8s namespace",
+  "Downloading more RAM",
+  "Tip: Set KERAS_REMOTE_PROJECT or --project to pick a specific GCP project",
+)
+
+
+class LiveOutputPanel:
+  """Context manager that displays streaming output in a Rich Live panel.
+
+  Shows the last `max_lines` in a bordered box. Supports error state
+  (yellow border) and optional transient mode (clears on success).
+
+  In non-interactive terminals, falls back to plain console output.
+  """
+
+  def __init__(
+    self,
+    title,
+    *,
+    max_lines=7,
+    target_console=None,
+    transient=False,
+    show_subtitle=True,
+  ):
+    self._title = title
+    self._max_lines = max_lines
+    self._lines = []
+    self._has_error = False
+    self._transient = transient
+    self._show_subtitle = show_subtitle
+    self._console = target_console or console
+    self._live = None
+    self._start_time = None
+    self._phrase_order = None
+
+  def __enter__(self):
+    self._start_time = time.monotonic()
+    self._phrase_order = list(range(len(_SUBTITLE_MESSAGES)))
+    random.shuffle(self._phrase_order)
+    if self._console.is_terminal:
+      self._live = Live(
+        self,
+        console=self._console,
+        refresh_per_second=5,
+      )
+      self._live.__enter__()
+    else:
+      self._console.rule(self._title, style="blue")
+    return self
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    if exc_type is not None:
+      self._has_error = True
+    if self._live:
+      if self._transient and not self._has_error:
+        self._live.update(Text(""))
+      self._live.__exit__(exc_type, exc_val, exc_tb)
+    else:
+      style = "yellow" if self._has_error else "blue"
+      self._console.rule(style=style)
+    return False
+
+  def __rich__(self):
+    return self._make_panel()
+
+  def on_output(self, line):
+    """Append a line and refresh the display."""
+    stripped = line.rstrip("\n")
+    if self._live:
+      self._lines.append(stripped)
+    else:
+      self._console.print(stripped)
+
+  def mark_error(self):
+    """Turn the panel border yellow to indicate an error."""
+    self._has_error = True
+    if self._live:
+      self._live.refresh()
+
+  def _make_subtitle(self):
+    if self._start_time is None or self._phrase_order is None:
+      return None
+    elapsed = time.monotonic() - self._start_time
+    spinner_idx = int(elapsed * 4) % len(_SPINNER_FRAMES)
+    spinner = _SPINNER_FRAMES[spinner_idx]
+    msg_idx = int(elapsed / 4) % len(_SUBTITLE_MESSAGES)
+    message = _SUBTITLE_MESSAGES[self._phrase_order[msg_idx]]
+    suffix = "" if message.startswith("Tip:") else "..."
+    return f"[italic]{spinner} {message}{suffix}[/italic]"
+
+  def _make_panel(self):
+    if self._lines:
+      visible = (
+        self._lines if self._has_error else self._lines[-self._max_lines :]
+      )
+      content = "\n".join(visible)
+    else:
+      content = "Waiting..."
+    style = "yellow" if self._has_error else "blue"
+    return Panel(
+      content,
+      title=self._title,
+      subtitle=self._make_subtitle()
+      if self._show_subtitle and not self._has_error
+      else None,
+      border_style=style,
+    )
 
 
 def banner(text):

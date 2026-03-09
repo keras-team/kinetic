@@ -16,7 +16,11 @@ from absl import logging
 from google.api_core import exceptions as google_exceptions
 
 from keras_remote.backend import gke_client, pathways_client
-from keras_remote.constants import get_default_zone, zone_to_region
+from keras_remote.constants import (
+  get_default_cluster_name,
+  get_default_zone,
+  zone_to_region,
+)
 from keras_remote.credentials import ensure_credentials
 from keras_remote.data import _make_data_ref
 from keras_remote.infra import container_builder
@@ -39,6 +43,7 @@ class JobContext:
   container_image: Optional[str]
   zone: str
   project: str
+  cluster_name: str
 
   # Generated identifiers
   job_id: str = field(default_factory=lambda: f"job-{uuid.uuid4().hex[:8]}")
@@ -58,7 +63,7 @@ class JobContext:
   image_uri: Optional[str] = None
 
   def __post_init__(self):
-    self.bucket_name = f"{self.project}-keras-remote-jobs"
+    self.bucket_name = f"{self.project}-kr-{self.cluster_name}-jobs"
     self.region = zone_to_region(self.zone)
     self.display_name = f"keras-remote-{self.func.__name__}-{self.job_id}"
 
@@ -73,9 +78,10 @@ class JobContext:
     zone: Optional[str],
     project: Optional[str],
     env_vars: dict,
+    cluster_name: Optional[str] = None,
     volumes: Optional[dict] = None,
   ) -> "JobContext":
-    """Factory method with default resolution for zone/project."""
+    """Factory method with default resolution for zone/project/cluster."""
     if not zone:
       zone = get_default_zone()
     if not project:
@@ -85,6 +91,8 @@ class JobContext:
           "project must be specified or set KERAS_REMOTE_PROJECT"
           " (or GOOGLE_CLOUD_PROJECT) environment variable"
         )
+    if not cluster_name:
+      cluster_name = get_default_cluster_name()
 
     return cls(
       func=func,
@@ -95,6 +103,7 @@ class JobContext:
       container_image=container_image,
       zone=zone,
       project=project,
+      cluster_name=cluster_name,
       volumes=volumes,
     )
 
@@ -303,6 +312,7 @@ def _build_container(ctx: JobContext) -> None:
       accelerator_type=ctx.accelerator,
       project=ctx.project,
       zone=ctx.zone,
+      cluster_name=ctx.cluster_name,
     )
 
 

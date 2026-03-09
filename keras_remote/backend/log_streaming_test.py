@@ -1,6 +1,5 @@
 """Tests for keras_remote.backend.log_streaming — live pod log streaming."""
 
-import io
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -9,8 +8,6 @@ from kubernetes.client.rest import ApiException
 
 from keras_remote.backend.log_streaming import (
   LogStreamer,
-  _render_live_panel,
-  _render_plain,
   _stream_pod_logs,
 )
 
@@ -40,33 +37,23 @@ class TestStreamPodLogs(absltest.TestCase):
       _preload_content=False,
     )
 
-  def test_routes_by_terminal(self):
-    for is_terminal in (True, False):
-      mock_core = MagicMock()
-      mock_core.read_namespaced_pod_log.return_value = self._make_mock_resp(
-        [b"hello\n"]
-      )
+  def test_handles_partial_lines(self):
+    mock_core = MagicMock()
+    # "hello\nwor" then "ld\n" — "world" is split across chunks
+    mock_core.read_namespaced_pod_log.return_value = self._make_mock_resp(
+      [b"hello\nwor", b"ld\n"]
+    )
 
-      with (
-        mock.patch(
-          "keras_remote.backend.log_streaming.Console"
-        ) as mock_console_cls,
-        mock.patch(
-          "keras_remote.backend.log_streaming._render_live_panel"
-        ) as mock_live,
-        mock.patch(
-          "keras_remote.backend.log_streaming._render_plain"
-        ) as mock_plain,
-      ):
-        mock_console_cls.return_value.is_terminal = is_terminal
-        _stream_pod_logs(mock_core, "pod-1", "default")
+    with mock.patch(
+      "keras_remote.backend.log_streaming.LiveOutputPanel"
+    ) as mock_panel_cls:
+      mock_panel = MagicMock()
+      mock_panel_cls.return_value.__enter__ = MagicMock(return_value=mock_panel)
+      mock_panel_cls.return_value.__exit__ = MagicMock(return_value=False)
+      _stream_pod_logs(mock_core, "pod-1", "default")
 
-      if is_terminal:
-        mock_live.assert_called_once()
-        mock_plain.assert_not_called()
-      else:
-        mock_plain.assert_called_once()
-        mock_live.assert_not_called()
+    lines = [call[0][0] for call in mock_panel.on_output.call_args_list]
+    self.assertEqual(lines, ["hello", "world"])
 
   def test_releases_conn_on_api_exception(self):
     mock_core = MagicMock()
@@ -109,66 +96,6 @@ class TestStreamPodLogs(absltest.TestCase):
     mock_log.warning.assert_called_once()
     self.assertIn("pod-1", mock_log.warning.call_args[0][1])
     mock_resp.release_conn.assert_called_once()
-
-
-class TestRenderPlain(absltest.TestCase):
-  """Tests for the non-terminal plain rendering path."""
-
-  def test_streams_chunks_to_stdout(self):
-    mock_resp = MagicMock()
-    mock_resp.stream.return_value = [b"line 1\n", b"line 2\n"]
-    console = MagicMock()
-
-    with mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-      _render_plain(mock_resp, "pod-1", console)
-
-    self.assertIn("line 1", mock_stdout.getvalue())
-    self.assertIn("line 2", mock_stdout.getvalue())
-
-  def test_prints_rule_delimiters(self):
-    mock_resp = MagicMock()
-    mock_resp.stream.return_value = []
-    console = MagicMock()
-
-    _render_plain(mock_resp, "pod-1", console)
-
-    self.assertEqual(console.rule.call_count, 2)
-    # Opening rule contains pod name
-    self.assertIn("pod-1", console.rule.call_args_list[0][0][0])
-
-  def test_handles_utf8_decode_errors(self):
-    mock_resp = MagicMock()
-    mock_resp.stream.return_value = [b"valid\n", b"\xff\xfe invalid\n"]
-    console = MagicMock()
-
-    with mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-      _render_plain(mock_resp, "pod-1", console)
-
-    output = mock_stdout.getvalue()
-    self.assertIn("valid", output)
-    self.assertIn("invalid", output)
-
-
-class TestRenderLivePanel(absltest.TestCase):
-  """Tests for the terminal Live panel rendering path."""
-
-  def test_handles_partial_lines(self):
-    mock_resp = MagicMock()
-    # "hello\nwor" then "ld\n" — "world" is split across chunks
-    mock_resp.stream.return_value = [b"hello\nwor", b"ld\n"]
-    console = MagicMock()
-
-    with mock.patch("keras_remote.backend.log_streaming.Live") as mock_live_cls:
-      mock_live = MagicMock()
-      mock_live_cls.return_value.__enter__ = MagicMock(return_value=mock_live)
-      mock_live_cls.return_value.__exit__ = MagicMock(return_value=False)
-      _render_live_panel(mock_resp, "pod-1", console)
-
-    # Check the final panel contains both complete lines
-    last_panel = mock_live.update.call_args_list[-1][0][0]
-    panel_content = last_panel.renderable
-    self.assertIn("hello", panel_content)
-    self.assertIn("world", panel_content)
 
 
 class TestLogStreamer(absltest.TestCase):

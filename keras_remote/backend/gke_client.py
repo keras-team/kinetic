@@ -437,9 +437,9 @@ def _check_node_pool_exists_cached(selector_items) -> bool:
       pool_labels = config_dict.get("labels", {}).copy()
 
       # Map GKE injected node labels for accelerators mapping
-      accelerators = config_dict.get("accelerators", [])
-      if accelerators:
-        accel_type = accelerators[0].get("acceleratorType", "")
+      accel_config_list = config_dict.get("accelerators", [])
+      if accel_config_list:
+        accel_type = accel_config_list[0].get("acceleratorType", "")
         if accel_type.startswith("tpu-"):
           pool_labels["cloud.google.com/gke-tpu-accelerator"] = accel_type
         else:
@@ -447,11 +447,27 @@ def _check_node_pool_exists_cached(selector_items) -> bool:
 
       # TPU mapping fallback
       machine_type = config_dict.get("machineType", "")
+
+      # Check resource labels for TPU type (common in v5e/v5litepod)
+      resource_labels = config_dict.get("resourceLabels", {})
+      if "goog-gke-accelerator-type" in resource_labels:
+        pool_labels["cloud.google.com/gke-tpu-accelerator"] = resource_labels[
+          "goog-gke-accelerator-type"
+        ]
+
       if machine_type.startswith("ct"):
         # We roughly map TPU topology presence for preflight
         pool_labels["cloud.google.com/gke-tpu-topology"] = selector.get(
           "cloud.google.com/gke-tpu-topology", ""
         )
+
+      # Infer accelerator count from machine type using registry
+      # This is robust because it uses the same source of truth as the Pod spec generation
+      for tpu_spec in accelerators.TPUS.values():
+        for chips, topo_spec in tpu_spec.topologies.items():
+          if topo_spec.machine_type == machine_type:
+            pool_labels["cloud.google.com/gke-accelerator-count"] = str(chips)
+            break
 
       if all(pool_labels.get(k) == str(v) for k, v in selector.items()):
         return True
