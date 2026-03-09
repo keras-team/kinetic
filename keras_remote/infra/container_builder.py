@@ -109,9 +109,15 @@ def get_or_build_container(
   cluster_name = cluster_name or get_default_cluster_name()
   category = accelerators.get_category(accelerator_type)
 
+  # Read and filter requirements once, reuse for hashing and building.
+  filtered_requirements = None
+  if requirements_path and os.path.exists(requirements_path):
+    with open(requirements_path, "r") as f:
+      filtered_requirements = _filter_jax_requirements(f.read())
+
   # Generate deterministic hash from requirements + base image + category
   requirements_hash = _hash_requirements(
-    requirements_path, category, base_image
+    filtered_requirements, category, base_image
   )
 
   # Use category for image name (e.g., 'tpu-hash', 'gpu-hash')
@@ -137,7 +143,7 @@ def get_or_build_container(
   logging.info("Building new container (requirements changed): %s", image_uri)
   return _build_and_push(
     base_image,
-    requirements_path,
+    filtered_requirements,
     category,
     project,
     image_uri,
@@ -147,12 +153,12 @@ def get_or_build_container(
 
 
 def _hash_requirements(
-  requirements_path: str | None, category: str, base_image: str
+  filtered_requirements: str | None, category: str, base_image: str
 ) -> str:
   """Create deterministic hash from requirements + category + remote_runner + base image.
 
   Args:
-      requirements_path: Path to requirements.txt (or None)
+      filtered_requirements: Pre-filtered requirements content (or None)
       category: Accelerator category ('cpu', 'gpu', 'tpu')
       base_image: Base Docker image (e.g., 'python:3.12-slim')
 
@@ -161,9 +167,8 @@ def _hash_requirements(
   """
   content = f"base_image={base_image}\ncategory={category}\n"
 
-  if requirements_path and os.path.exists(requirements_path):
-    with open(requirements_path, "r") as f:
-      content += _filter_jax_requirements(f.read())
+  if filtered_requirements:
+    content += filtered_requirements
 
   # Include remote_runner.py in the hash so container rebuilds when it changes
   remote_runner_path = os.path.join(_RUNNER_DIR, REMOTE_RUNNER_FILE_NAME)
@@ -218,7 +223,7 @@ def _image_exists(image_uri: str, project: str) -> bool:
 
 def _build_and_push(
   base_image: str,
-  requirements_path: str | None,
+  filtered_requirements: str | None,
   category: str,
   project: str,
   image_uri: str,
@@ -229,7 +234,7 @@ def _build_and_push(
 
   Args:
       base_image: Base Docker image
-      requirements_path: Path to requirements.txt (or None)
+      filtered_requirements: Pre-filtered requirements content (or None)
       category: Accelerator category ('cpu', 'gpu', 'tpu')
       project: GCP project ID
       image_uri: Target image URI
@@ -242,7 +247,7 @@ def _build_and_push(
     # Generate Dockerfile
     dockerfile_content = _generate_dockerfile(
       base_image=base_image,
-      requirements_path=requirements_path,
+      has_requirements=filtered_requirements is not None,
       category=category,
     )
 
@@ -250,12 +255,10 @@ def _build_and_push(
     with open(dockerfile_path, "w") as f:
       f.write(dockerfile_content)
 
-    # Copy requirements.txt (with JAX-related packages filtered out)
-    if requirements_path and os.path.exists(requirements_path):
-      with open(requirements_path, "r") as f:
-        filtered = _filter_jax_requirements(f.read())
+    # Write pre-filtered requirements.txt
+    if filtered_requirements is not None:
       with open(os.path.join(tmpdir, "requirements.txt"), "w") as f:
-        f.write(filtered)
+        f.write(filtered_requirements)
 
     # Copy remote_runner.py
     remote_runner_src = os.path.join(_RUNNER_DIR, REMOTE_RUNNER_FILE_NAME)
@@ -267,7 +270,7 @@ def _build_and_push(
     with tarfile.open(tarball_path, "w:gz") as tar:
       tar.add(dockerfile_path, arcname="Dockerfile")
       tar.add(remote_runner_dst, arcname=REMOTE_RUNNER_FILE_NAME)
-      if requirements_path and os.path.exists(requirements_path):
+      if filtered_requirements is not None:
         tar.add(
           os.path.join(tmpdir, "requirements.txt"), arcname="requirements.txt"
         )
@@ -330,13 +333,13 @@ def _build_and_push(
 
 
 def _generate_dockerfile(
-  base_image: str, requirements_path: str | None, category: str
+  base_image: str, has_requirements: bool, category: str
 ) -> str:
   """Generate Dockerfile content based on configuration.
 
   Args:
       base_image: Base Docker image
-      requirements_path: Path to requirements.txt (or None)
+      has_requirements: Whether filtered requirements content is available
       category: Accelerator category ('cpu', 'gpu', 'tpu')
 
   Returns:
@@ -354,7 +357,7 @@ def _generate_dockerfile(
     jax_install = "RUN python3 -m pip install 'jax[cuda12]'"
 
   requirements_section = ""
-  if requirements_path and os.path.exists(requirements_path):
+  if has_requirements:
     requirements_section = (
       "COPY requirements.txt /tmp/requirements.txt\n"
       "RUN python3 -m pip install -r /tmp/requirements.txt\n"

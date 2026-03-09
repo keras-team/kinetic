@@ -1,7 +1,5 @@
 """Tests for keras_remote.infra.container_builder — hashing, Dockerfile gen, caching."""
 
-import pathlib
-import tempfile
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -15,13 +13,6 @@ from keras_remote.infra.container_builder import (
   _image_exists,
   get_or_build_container,
 )
-
-
-def _make_temp_path(test_case):
-  """Create a temp directory that is cleaned up after the test."""
-  td = tempfile.TemporaryDirectory()
-  test_case.addCleanup(td.cleanup)
-  return pathlib.Path(td.name)
 
 
 class TestFilterJaxRequirements(parameterized.TestCase):
@@ -84,71 +75,42 @@ class TestFilterJaxRequirements(parameterized.TestCase):
 
 class TestHashRequirements(parameterized.TestCase):
   def test_deterministic(self):
-    tmp_path = _make_temp_path(self)
-    req = tmp_path / "requirements.txt"
-    req.write_text("numpy==1.26\n")
-
-    h1 = _hash_requirements(str(req), "gpu", "python:3.12-slim")
-    h2 = _hash_requirements(str(req), "gpu", "python:3.12-slim")
+    h1 = _hash_requirements("numpy==1.26\n", "gpu", "python:3.12-slim")
+    h2 = _hash_requirements("numpy==1.26\n", "gpu", "python:3.12-slim")
     self.assertEqual(h1, h2)
 
   def test_different_requirements_different_hash(self):
-    tmp_path = _make_temp_path(self)
-    req1 = tmp_path / "r1.txt"
-    req1.write_text("numpy==1.26\n")
-    req2 = tmp_path / "r2.txt"
-    req2.write_text("scipy==1.12\n")
-
-    h1 = _hash_requirements(str(req1), "gpu", "python:3.12-slim")
-    h2 = _hash_requirements(str(req2), "gpu", "python:3.12-slim")
+    h1 = _hash_requirements("numpy==1.26\n", "gpu", "python:3.12-slim")
+    h2 = _hash_requirements("scipy==1.12\n", "gpu", "python:3.12-slim")
     self.assertNotEqual(h1, h2)
 
   def test_different_category_different_hash(self):
-    tmp_path = _make_temp_path(self)
-    req = tmp_path / "requirements.txt"
-    req.write_text("numpy\n")
-
-    h1 = _hash_requirements(str(req), "gpu", "python:3.12-slim")
-    h2 = _hash_requirements(str(req), "tpu", "python:3.12-slim")
+    h1 = _hash_requirements("numpy\n", "gpu", "python:3.12-slim")
+    h2 = _hash_requirements("numpy\n", "tpu", "python:3.12-slim")
     self.assertNotEqual(h1, h2)
 
   def test_different_base_image_different_hash(self):
-    tmp_path = _make_temp_path(self)
-    req = tmp_path / "requirements.txt"
-    req.write_text("numpy\n")
-
-    h1 = _hash_requirements(str(req), "gpu", "python:3.12-slim")
-    h2 = _hash_requirements(str(req), "gpu", "python:3.11-slim")
+    h1 = _hash_requirements("numpy\n", "gpu", "python:3.12-slim")
+    h2 = _hash_requirements("numpy\n", "gpu", "python:3.11-slim")
     self.assertNotEqual(h1, h2)
 
-  @parameterized.named_parameters(
-    dict(testcase_name="none", requirements_path=None),
-    dict(
-      testcase_name="nonexistent",
-      requirements_path="/nonexistent/path.txt",
-    ),
-  )
-  def test_missing_requirements_valid(self, requirements_path):
-    h = _hash_requirements(requirements_path, "cpu", "python:3.12-slim")
+  def test_missing_requirements_valid(self):
+    h = _hash_requirements(None, "cpu", "python:3.12-slim")
     self.assertIsInstance(h, str)
     self.assertLen(h, 64)
 
   def test_returns_hex_string(self):
-    tmp_path = _make_temp_path(self)
-    req = tmp_path / "r.txt"
-    req.write_text("keras\n")
-    h = _hash_requirements(str(req), "gpu", "python:3.12-slim")
+    h = _hash_requirements("keras\n", "gpu", "python:3.12-slim")
     self.assertRegex(h, r"^[0-9a-f]{64}$")
 
   def test_jax_in_requirements_does_not_affect_hash(self):
-    tmp_path = _make_temp_path(self)
-    req_without_jax = tmp_path / "r1.txt"
-    req_without_jax.write_text("numpy==1.26\n")
-    req_with_jax = tmp_path / "r2.txt"
-    req_with_jax.write_text("numpy==1.26\njax[tpu]>=0.4.6\n")
+    filtered_without_jax = _filter_jax_requirements("numpy==1.26\n")
+    filtered_with_jax = _filter_jax_requirements(
+      "numpy==1.26\njax[tpu]>=0.4.6\n"
+    )
 
-    h1 = _hash_requirements(str(req_without_jax), "tpu", "python:3.12-slim")
-    h2 = _hash_requirements(str(req_with_jax), "tpu", "python:3.12-slim")
+    h1 = _hash_requirements(filtered_without_jax, "tpu", "python:3.12-slim")
+    h2 = _hash_requirements(filtered_with_jax, "tpu", "python:3.12-slim")
     self.assertEqual(h1, h2)
 
 
@@ -176,7 +138,7 @@ class TestGenerateDockerfile(parameterized.TestCase):
   def test_jax_install(self, category, expected, not_expected):
     content = _generate_dockerfile(
       base_image="python:3.12-slim",
-      requirements_path=None,
+      has_requirements=False,
       category=category,
     )
     for s in expected:
@@ -185,13 +147,9 @@ class TestGenerateDockerfile(parameterized.TestCase):
       self.assertNotIn(s, content)
 
   def test_with_requirements(self):
-    tmp_path = _make_temp_path(self)
-    req = tmp_path / "requirements.txt"
-    req.write_text("numpy\n")
-
     content = _generate_dockerfile(
       base_image="python:3.12-slim",
-      requirements_path=str(req),
+      has_requirements=True,
       category="cpu",
     )
     self.assertIn("COPY requirements.txt", content)
@@ -200,7 +158,7 @@ class TestGenerateDockerfile(parameterized.TestCase):
   def test_without_requirements(self):
     content = _generate_dockerfile(
       base_image="python:3.12-slim",
-      requirements_path=None,
+      has_requirements=False,
       category="cpu",
     )
     self.assertNotIn("COPY requirements.txt", content)
@@ -218,7 +176,7 @@ class TestGenerateDockerfile(parameterized.TestCase):
   def test_contains_expected_content(self, expected_substring):
     content = _generate_dockerfile(
       base_image="python:3.12-slim",
-      requirements_path=None,
+      has_requirements=False,
       category="cpu",
     )
     self.assertIn(expected_substring, content)
@@ -226,7 +184,7 @@ class TestGenerateDockerfile(parameterized.TestCase):
   def test_uses_base_image(self):
     content = _generate_dockerfile(
       base_image="python:3.11-bullseye",
-      requirements_path=None,
+      has_requirements=False,
       category="cpu",
     )
     self.assertIn("FROM python:3.11-bullseye", content)
