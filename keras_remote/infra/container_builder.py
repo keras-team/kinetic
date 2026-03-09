@@ -37,7 +37,7 @@ _PACKAGE_NAME_RE = re.compile(r"^([a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?)")
 _KEEP_MARKER = "# kr:keep"
 
 
-def _filter_jax_requirements(requirements_content):
+def _filter_jax_requirements(requirements_content: str) -> str:
   """Remove JAX-related packages from requirements content.
 
   Strips lines that would override the accelerator-specific JAX installation
@@ -83,13 +83,13 @@ def _filter_jax_requirements(requirements_content):
 
 
 def get_or_build_container(
-  base_image,
-  requirements_path,
-  accelerator_type,
-  project,
-  zone=None,
-  cluster_name=None,
-):
+  base_image: str,
+  requirements_path: str | None,
+  accelerator_type: str,
+  project: str,
+  zone: str | None = None,
+  cluster_name: str | None = None,
+) -> str:
   """Get existing container or build if requirements changed.
 
   Uses content-based hashing to detect requirement changes.
@@ -146,7 +146,9 @@ def get_or_build_container(
   )
 
 
-def _hash_requirements(requirements_path, category, base_image):
+def _hash_requirements(
+  requirements_path: str | None, category: str, base_image: str
+) -> str:
   """Create deterministic hash from requirements + category + remote_runner + base image.
 
   Args:
@@ -178,7 +180,7 @@ def _hash_requirements(requirements_path, category, base_image):
   return hashlib.sha256(content.encode()).hexdigest()
 
 
-def _image_exists(image_uri, project):
+def _image_exists(image_uri: str, project: str) -> bool:
   """Check if image exists in Artifact Registry.
 
   Args:
@@ -215,14 +217,14 @@ def _image_exists(image_uri, project):
 
 
 def _build_and_push(
-  base_image,
-  requirements_path,
-  category,
-  project,
-  image_uri,
-  ar_location="us",
-  cluster_name=None,
-):
+  base_image: str,
+  requirements_path: str | None,
+  category: str,
+  project: str,
+  image_uri: str,
+  ar_location: str = "us",
+  cluster_name: str | None = None,
+) -> str:
   """Build and push Docker image using Cloud Build.
 
   Args:
@@ -327,7 +329,9 @@ def _build_and_push(
       raise RuntimeError(f"Build failed with status: {result.status}")
 
 
-def _generate_dockerfile(base_image, requirements_path, category):
+def _generate_dockerfile(
+  base_image: str, requirements_path: str | None, category: str
+) -> str:
   """Generate Dockerfile content based on configuration.
 
   Args:
@@ -367,7 +371,9 @@ def _generate_dockerfile(base_image, requirements_path, category):
   )
 
 
-def _upload_build_source(tarball_path, bucket_name, project):
+def _upload_build_source(
+  tarball_path: str, bucket_name: str, project: str
+) -> str:
   """Upload build source tarball to Cloud Storage.
 
   Args:
