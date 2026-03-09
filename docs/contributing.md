@@ -58,7 +58,7 @@ Before submitting a pull request, please ensure your changes pass linting and un
   **Prerequisites:**
   - A GCP project with a provisioned GKE cluster (see [Quick Start](../README.md#quick-start))
   - Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
-  - GKE credentials configured: `gcloud container clusters get-credentials <cluster> --zone <zone> --project <project>`
+  - GKE credentials configured: `gcloud container clusters get-credentials <KERAS_REMOTE_CLUSTER> --zone <KERAS_REMOTE_ZONE> --project <KERAS_REMOTE_PROJECT>`
   - Test dependencies installed: `pip install -e ".[test,cli]"`
 
   **Required environment variables:**
