@@ -16,9 +16,10 @@ keras_remote/
 ├── utils/          # Serialization (packager) and Cloud Storage helpers
 ├── cli/            # CLI for infrastructure provisioning (Pulumi-based)
 │   ├── commands/   # up, down, status, config, pool (add/remove/list)
-│   └── infra/      # Pulumi programs, stack management, post-deploy steps
+│   ├── infra/      # Pulumi programs, stack management, state module, post-deploy steps
+│   └── options.py  # Shared --project/--zone/--cluster Click options (common_options decorator)
 ├── credentials.py  # Credential verification & auto-setup (shared by core & CLI)
-└── constants.py    # Zone/region utilities
+└── constants.py    # Zone/region utilities, get_default_cluster_name()
 ```
 
 ## Execution Pipeline
@@ -38,31 +39,34 @@ keras_remote/
 
 ## Key Modules
 
-| Module                       | Responsibility                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------- |
-| `core/core.py`               | `@run()` decorator, backend routing, env var capture                             |
-| `core/accelerators.py`       | Accelerator registry (`GPUS`, `TPUS`), parser (`parse_accelerator`)              |
-| `credentials.py`             | Credential verification & auto-setup (gcloud, ADC, kubeconfig)                   |
-| `backend/execution.py`       | `JobContext` dataclass, `BaseK8sBackend` base class, `execute_remote()` pipeline |
-| `backend/gke_client.py`      | K8s Job creation, status polling, pod log retrieval                              |
-| `backend/pathways_client.py` | LeaderWorkerSet creation for multi-host TPUs                                     |
-| `infra/container_builder.py` | Content-hashed Docker image building via Cloud Build                             |
-| `data/data.py`               | `Data` class, content hashing, data ref serialization                            |
-| `utils/packager.py`          | `save_payload()` (cloudpickle), `zip_working_dir()`, Data ref extraction         |
-| `utils/storage.py`           | GCS upload/download/cleanup for job artifacts and Data cache                     |
-| `runner/remote_runner.py`    | Runs inside container: resolve Data refs/volumes, execute, upload result         |
-| `cli/commands/pool.py`       | Node pool add/remove/list commands                                               |
-| `cli/infra/post_deploy.py`   | kubectl, LWS CRD, GPU driver setup after stack.up()                              |
-| `cli/constants.py`           | CLI defaults, paths, API list                                                    |
-| `cli/main.py`                | CLI entry point (`keras-remote` command)                                         |
+| Module                       | Responsibility                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `core/core.py`               | `@run()` decorator, backend routing, env var capture                                                      |
+| `core/accelerators.py`       | Accelerator registry (`GPUS`, `TPUS`), parser (`parse_accelerator`)                                       |
+| `credentials.py`             | Credential verification & auto-setup (gcloud, ADC, kubeconfig)                                            |
+| `backend/execution.py`       | `JobContext` dataclass (carries `cluster_name`), `BaseK8sBackend` base class, `execute_remote()` pipeline |
+| `backend/gke_client.py`      | K8s Job creation, status polling, pod log retrieval                                                       |
+| `backend/pathways_client.py` | LeaderWorkerSet creation for multi-host TPUs                                                              |
+| `infra/container_builder.py` | Content-hashed Docker image building via Cloud Build                                                      |
+| `data/data.py`               | `Data` class, content hashing, data ref serialization                                                     |
+| `utils/packager.py`          | `save_payload()` (cloudpickle), `zip_working_dir()`, Data ref extraction                                  |
+| `utils/storage.py`           | GCS upload/download/cleanup for job artifacts and Data cache                                              |
+| `runner/remote_runner.py`    | Runs inside container: resolve Data refs/volumes, execute, upload result                                  |
+| `cli/infra/state.py`         | Centralized Pulumi state: `load_state()`, `apply_update()`, `apply_destroy()`                             |
+| `cli/options.py`             | Shared `common_options` Click decorator (`--project`/`--zone`/`--cluster`)                                |
+| `cli/commands/pool.py`       | Node pool add/remove/list commands                                                                        |
+| `cli/infra/post_deploy.py`   | kubectl, LWS CRD, GPU driver setup after stack.up()                                                       |
+| `cli/constants.py`           | CLI defaults, paths, API list                                                                             |
+| `cli/main.py`                | CLI entry point (`keras-remote` command)                                                                  |
 
 ## Key Abstractions
 
-- **`JobContext`** (`backend/execution.py`): Mutable dataclass carrying all job state through the pipeline — inputs, generated IDs, artifact paths, image URI.
+- **`JobContext`** (`backend/execution.py`): Mutable dataclass carrying all job state through the pipeline — inputs, generated IDs, artifact paths, image URI, `cluster_name` (for cluster-scoped bucket/repo resolution).
 - **`BaseK8sBackend`** (`backend/execution.py`): Base class with `submit_job`, `wait_for_job`, `cleanup_job`. Subclassed by `GKEBackend` and `PathwaysBackend`.
 - **`GpuConfig` / `TpuConfig`** (`core/accelerators.py`): Frozen dataclasses for accelerator metadata. Single source of truth used by runtime, container builder, and CLI.
 - **`Data`** (`data/data.py`): Wraps a local path or GCS URI. Passed as a function argument or via the `volumes` decorator parameter. Resolved to a plain filesystem path on the remote pod. Content-hashed for upload caching.
 - **`InfraConfig` / `NodePoolConfig`** (`cli/config.py`): CLI provisioning configuration. `InfraConfig` holds project, zone, cluster name, and a list of `NodePoolConfig` entries. `NodePoolConfig` pairs a unique pool name (e.g., `gpu-l4-a3f2`) with a `GpuConfig` or `TpuConfig`.
+- **`StackState`** (`cli/infra/state.py`): Dataclass bundling all state dimensions loaded from a Pulumi stack (project, zone, cluster_name, node_pools, stack handle). Returned by `load_state()` and consumed by commands.
 
 ## Data API
 
@@ -141,15 +145,33 @@ Additional CLI-only env vars:
 
 ### CLI State Management
 
-The CLI manages three layers of state: in-memory config (`InfraConfig`), Pulumi local state files (`~/.keras-remote/pulumi/`), and GCP cloud resources. Each GCP project gets its own Pulumi stack (stack name = project ID).
+The CLI manages three layers of state: in-memory config (`InfraConfig`), Pulumi local state files (`~/.keras-remote/pulumi/`), and GCP cloud resources. Each `(project, cluster_name)` pair gets its own Pulumi stack (stack name = `{project}-{cluster_name}`), so multiple clusters in the same GCP project are fully independent.
 
-Every mutating command (`up`, `pool add`, `pool remove`, etc.) follows this reconciliation pattern:
+**Centralized state module (`cli/infra/state.py`)** — All Pulumi stack operations go through three functions:
 
-1. `stack.refresh()` — pull cloud reality into local state
-2. `get_current_node_pools()` — read current pools from stack exports
-3. Build new `InfraConfig` — merge existing pools with desired changes
-4. `create_program(config)` — generate Pulumi program from desired state
-5. `stack.up()` — diff desired vs current, apply only changes
+| Function          | Purpose                                                                                 | Used by                         |
+| ----------------- | --------------------------------------------------------------------------------------- | ------------------------------- |
+| `load_state()`    | Load ALL state dimensions (prerequisites, defaults, refresh, node pools) → `StackState` | `up`, `pool`, `status`          |
+| `apply_update()`  | Run `stack.up()` with a complete `InfraConfig`                                          | `up`, `pool add`, `pool remove` |
+| `apply_destroy()` | Run `stack.destroy()`                                                                   | `down`                          |
+
+**Safety invariants:**
+
+- `stack.up()`, `stack.destroy()`, `stack.refresh()` appear **only** in `state.py`
+- No command file imports `create_program` or `get_stack` directly
+- No command file defines inline `--project`/`--zone`/`--cluster` options (use `common_options` from `cli/options.py`)
+- When a new state dimension is added (e.g. namespaces), it is added to `StackState` and `load_state()` — every command gets it automatically
+
+**Cluster-scoped resource naming:**
+
+| Resource      | Name pattern                                      |
+| ------------- | ------------------------------------------------- |
+| Pulumi stack  | `{project}-{cluster_name}`                        |
+| Jobs bucket   | `{project}-kr-{cluster_name}-jobs`                |
+| Builds bucket | `{project}-kr-{cluster_name}-builds`              |
+| AR repository | `kr-{cluster_name}`                               |
+| GKE cluster   | `{cluster_name}`                                  |
+| GCP APIs      | project-wide (shared, `disable_on_destroy=False`) |
 
 Key behaviors:
 

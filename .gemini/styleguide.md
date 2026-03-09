@@ -10,9 +10,6 @@ When performing code reviews on pull requests, you must strictly adhere to the f
 
 5. **Respect Existing Repo Patterns**: Before suggesting review comments (like asking users to add boilerplate or specific patterns), actively check for existing design patterns across the repository. Do not suggest adding useless code or structures that contradict or fall outside the established Keras repo coding style.
 
-
-
-
 # Keras Remote API design guidelines
 
 These guidelines are meant to help focus design discussions and help us create delightful developer experiences for remote execution.
@@ -135,22 +132,49 @@ This prevents confusing situations where a user sets an env var that works in on
 
 ---
 
-## CLI commands must be idempotent and follow the reconciliation pattern.
+## CLI commands must be idempotent and use the centralized state module.
 
-Every mutating CLI command (`up`, `pool add`, `pool remove`, etc.) must follow the refresh-read-merge-apply pattern:
+All Pulumi stack operations go through `cli/infra/state.py` — **no command file should call `stack.up()`, `stack.destroy()`, `stack.refresh()`, or import `create_program`/`get_stack` directly.**
 
-1. `stack.refresh()` — sync local state with cloud reality
-2. `get_current_node_pools()` — read current pools from stack exports
-3. Build `InfraConfig` — merge existing state with desired changes
-4. `stack.up()` — apply only the diff
+The three entry points are:
+
+- `load_state(project, zone, cluster_name)` → `StackState` — loads ALL state dimensions (refresh, node pools, etc.)
+- `apply_update(config)` — runs `stack.up()` with a complete `InfraConfig`
+- `apply_destroy(config)` — runs `stack.destroy()`
+
+Every mutating CLI command follows this pattern:
+
+1. `load_state()` — refresh stack and read all current state dimensions into `StackState`
+2. Build `InfraConfig` — merge existing state with desired changes
+3. `apply_update(config)` or `apply_destroy(config)` — apply the diff
+
+When adding a **new state dimension** (e.g. namespaces), add it to `StackState` and `load_state()` — every command inherits it automatically, preventing accidental omissions that would cause Pulumi to delete resources.
+
+All CLI commands must use the `common_options` decorator from `cli/options.py` for `--project`/`--zone`/`--cluster` flags — never define these inline.
 
 This ensures:
 
 - Re-running after partial failure is always safe
 - Existing resources are never accidentally recreated (Pulumi tracks by URN)
 - External drift is detected and corrected
+- New state dimensions cannot be accidentally omitted by individual commands
 
-When adding a new CLI command that modifies infrastructure, follow this pattern rather than directly creating or deleting resources.
+---
+
+## All infrastructure resources must be cluster-scoped.
+
+Every resource managed by the CLI must include the cluster name in its identifier so that multiple clusters within the same GCP project are fully independent. The naming convention is `{project}-kr-{cluster_name}-{purpose}` for buckets and `kr-{cluster_name}` for Artifact Registry repos.
+
+| Resource      | Name pattern                         |
+| ------------- | ------------------------------------ |
+| Pulumi stack  | `{project}-{cluster_name}`           |
+| Jobs bucket   | `{project}-kr-{cluster_name}-jobs`   |
+| Builds bucket | `{project}-kr-{cluster_name}-builds` |
+| AR repository | `kr-{cluster_name}`                  |
+
+The only exception is project-wide GCP API enablement, which is intentionally shared across clusters (`disable_on_destroy=False`).
+
+When adding a new infrastructure resource, always scope it to the `(project, cluster_name)` pair. Runtime code (`JobContext`, `container_builder`) resolves the cluster name from `KERAS_REMOTE_CLUSTER` env var or default.
 
 ---
 
