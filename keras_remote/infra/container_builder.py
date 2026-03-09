@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import shutil
 import string
 import tarfile
@@ -27,6 +28,58 @@ _PACKAGE_ROOT = os.path.normpath(
   os.path.join(os.path.dirname(__file__), os.pardir)
 )
 _RUNNER_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "runner")
+
+# JAX-related packages managed by the Dockerfile template.
+# User requirements containing these are filtered out to prevent overriding
+# the accelerator-specific JAX installation (e.g., jax[tpu], jax[cuda12]).
+_JAX_PACKAGE_NAMES = frozenset({"jax", "jaxlib", "libtpu", "libtpu-nightly"})
+_PACKAGE_NAME_RE = re.compile(r"^([a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?)")
+_KEEP_MARKER = "# kr:keep"
+
+
+def _filter_jax_requirements(requirements_content):
+  """Remove JAX-related packages from requirements content.
+
+  Strips lines that would override the accelerator-specific JAX installation
+  managed by the Dockerfile template. Logs a warning for each filtered line.
+
+  To preserve a JAX line, append ``# kr:keep`` to it in requirements.txt.
+
+  Args:
+      requirements_content: Raw text of a requirements.txt file.
+
+  Returns:
+      Filtered requirements text with JAX-related lines removed.
+  """
+  filtered_lines = []
+  for line in requirements_content.splitlines(keepends=True):
+    stripped = line.strip()
+    # Preserve blanks, comments, and pip flags (-e, --index-url, etc.)
+    if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+      filtered_lines.append(line)
+      continue
+
+    # Allow users to bypass the filter with an inline marker.
+    if _KEEP_MARKER in line:
+      filtered_lines.append(line)
+      continue
+
+    m = _PACKAGE_NAME_RE.match(stripped)
+    if m:
+      # PEP 503 normalization: lowercase, collapse [-_.] to '-'
+      normalized = re.sub(r"[-_.]+", "-", m.group(1)).lower()
+      if normalized in _JAX_PACKAGE_NAMES:
+        logging.warning(
+          "Filtered '%s' from requirements — JAX is installed "
+          "automatically with the correct accelerator backend. "
+          "To override, add '# kr:keep' to the line.",
+          stripped,
+        )
+        continue
+
+    filtered_lines.append(line)
+
+  return "".join(filtered_lines)
 
 
 def get_or_build_container(
@@ -108,7 +161,7 @@ def _hash_requirements(requirements_path, category, base_image):
 
   if requirements_path and os.path.exists(requirements_path):
     with open(requirements_path, "r") as f:
-      content += f.read()
+      content += _filter_jax_requirements(f.read())
 
   # Include remote_runner.py in the hash so container rebuilds when it changes
   remote_runner_path = os.path.join(_RUNNER_DIR, REMOTE_RUNNER_FILE_NAME)
@@ -195,9 +248,12 @@ def _build_and_push(
     with open(dockerfile_path, "w") as f:
       f.write(dockerfile_content)
 
-    # Copy requirements.txt if it exists
+    # Copy requirements.txt (with JAX-related packages filtered out)
     if requirements_path and os.path.exists(requirements_path):
-      shutil.copy(requirements_path, os.path.join(tmpdir, "requirements.txt"))
+      with open(requirements_path, "r") as f:
+        filtered = _filter_jax_requirements(f.read())
+      with open(os.path.join(tmpdir, "requirements.txt"), "w") as f:
+        f.write(filtered)
 
     # Copy remote_runner.py
     remote_runner_src = os.path.join(_RUNNER_DIR, REMOTE_RUNNER_FILE_NAME)

@@ -9,6 +9,7 @@ from absl.testing import absltest, parameterized
 from google.api_core import exceptions as google_exceptions
 
 from keras_remote.infra.container_builder import (
+  _filter_jax_requirements,
   _generate_dockerfile,
   _hash_requirements,
   _image_exists,
@@ -21,6 +22,64 @@ def _make_temp_path(test_case):
   td = tempfile.TemporaryDirectory()
   test_case.addCleanup(td.cleanup)
   return pathlib.Path(td.name)
+
+
+class TestFilterJaxRequirements(parameterized.TestCase):
+  @parameterized.named_parameters(
+    dict(testcase_name="bare_jax", line="jax\n"),
+    dict(testcase_name="jax_with_tpu_extras", line="jax[tpu]>=0.4.6\n"),
+    dict(testcase_name="jax_cuda", line="jax[cuda12]==0.4.30\n"),
+    dict(testcase_name="jax_cpu", line="jax[cpu]\n"),
+    dict(testcase_name="jaxlib", line="jaxlib>=0.4.6\n"),
+    dict(testcase_name="libtpu", line="libtpu\n"),
+    dict(testcase_name="libtpu_nightly_hyphen", line="libtpu-nightly\n"),
+    dict(testcase_name="libtpu_nightly_underscore", line="libtpu_nightly\n"),
+    dict(testcase_name="jax_uppercase", line="JAX\n"),
+    dict(testcase_name="jax_mixed_case", line="Jax[tpu]\n"),
+  )
+  def test_filters_jax_packages(self, line):
+    self.assertEqual(_filter_jax_requirements(line), "")
+
+  @parameterized.named_parameters(
+    dict(testcase_name="numpy", line="numpy==1.26\n"),
+    dict(testcase_name="keras", line="keras\n"),
+    dict(testcase_name="scipy", line="scipy>=1.12\n"),
+    dict(testcase_name="comment", line="# jax should be here\n"),
+    dict(testcase_name="blank", line="\n"),
+    dict(testcase_name="pip_flag", line="-e git+https://foo\n"),
+    dict(testcase_name="index_url", line="--index-url https://pypi.org\n"),
+  )
+  def test_preserves_non_jax_packages(self, line):
+    self.assertEqual(_filter_jax_requirements(line), line)
+
+  @parameterized.named_parameters(
+    dict(testcase_name="jax_keep", line="jax==0.4.30  # kr:keep\n"),
+    dict(testcase_name="jaxlib_keep", line="jaxlib  # kr:keep\n"),
+    dict(testcase_name="libtpu_keep", line="libtpu-nightly  # kr:keep\n"),
+  )
+  def test_kr_keep_overrides_filter(self, line):
+    self.assertEqual(_filter_jax_requirements(line), line)
+
+  def test_mixed_requirements(self):
+    content = (
+      "numpy==1.26\njax[tpu]>=0.4.6\nscipy\n"
+      "jaxlib\nkeras\njax==0.4.30  # kr:keep\n"
+    )
+    result = _filter_jax_requirements(content)
+    self.assertEqual(
+      result, "numpy==1.26\nscipy\nkeras\njax==0.4.30  # kr:keep\n"
+    )
+
+  def test_empty_string(self):
+    self.assertEqual(_filter_jax_requirements(""), "")
+
+  def test_only_jax_packages(self):
+    self.assertEqual(_filter_jax_requirements("jax\njaxlib\nlibtpu\n"), "")
+
+  def test_preserves_comments_and_blanks(self):
+    content = "# ML deps\nnumpy\n\njax\n# end\n"
+    result = _filter_jax_requirements(content)
+    self.assertEqual(result, "# ML deps\nnumpy\n\n# end\n")
 
 
 class TestHashRequirements(parameterized.TestCase):
@@ -80,6 +139,17 @@ class TestHashRequirements(parameterized.TestCase):
     req.write_text("keras\n")
     h = _hash_requirements(str(req), "gpu", "python:3.12-slim")
     self.assertRegex(h, r"^[0-9a-f]{64}$")
+
+  def test_jax_in_requirements_does_not_affect_hash(self):
+    tmp_path = _make_temp_path(self)
+    req_without_jax = tmp_path / "r1.txt"
+    req_without_jax.write_text("numpy==1.26\n")
+    req_with_jax = tmp_path / "r2.txt"
+    req_with_jax.write_text("numpy==1.26\njax[tpu]>=0.4.6\n")
+
+    h1 = _hash_requirements(str(req_without_jax), "tpu", "python:3.12-slim")
+    h2 = _hash_requirements(str(req_with_jax), "tpu", "python:3.12-slim")
+    self.assertEqual(h1, h2)
 
 
 class TestGenerateDockerfile(parameterized.TestCase):
