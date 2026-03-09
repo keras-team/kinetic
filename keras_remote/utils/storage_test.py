@@ -202,33 +202,33 @@ class TestUploadData(_GcsTestBase):
     self.assertIn(marker_name, blobs)
     blobs[marker_name].upload_from_string.assert_called_once_with("")
 
-  def test_cache_miss_uploads_directory(self):
+  @mock.patch(
+    "keras_remote.utils.storage.transfer_manager.upload_many_from_filenames",
+  )
+  def test_cache_miss_uploads_directory(self, mock_upload):
     tmp = _make_temp_path(self)
     d_dir = tmp / "dataset"
     d_dir.mkdir()
     (d_dir / "train.csv").write_text("train")
     (d_dir / "val.csv").write_text("val")
     d = Data(str(d_dir))
+    content_hash = d.content_hash()
 
     mock_bucket = self.mock_gcs.bucket.return_value
-    blobs = {}
-
-    def track_blob(name):
-      b = MagicMock()
-      blobs[name] = b
-      if name.endswith(".cache_marker"):
-        b.exists.return_value = False
-      return b
-
-    mock_bucket.blob.side_effect = track_blob
+    marker_blob = MagicMock()
+    marker_blob.exists.return_value = False
+    mock_bucket.blob.return_value = marker_blob
 
     result = upload_data("jobs-bucket", d, project="proj")
 
-    self.assertIn("gs://jobs-bucket/default/data-cache/", result)
-    # Both files + marker should have blobs
-    blob_names = list(blobs.keys())
-    csv_blobs = [n for n in blob_names if n.endswith(".csv")]
-    self.assertEqual(len(csv_blobs), 2)
+    expected_prefix = f"default/data-cache/{content_hash}"
+    self.assertEqual(result, f"gs://jobs-bucket/{expected_prefix}")
+    # Directory upload via transfer_manager
+    mock_upload.assert_called_once()
+    filenames = sorted(mock_upload.call_args[0][1])
+    self.assertEqual(filenames, ["train.csv", "val.csv"])
+    # Marker written after upload
+    marker_blob.upload_from_string.assert_called_once_with("")
 
   def test_custom_namespace(self):
     tmp = _make_temp_path(self)
@@ -273,7 +273,16 @@ class TestComputeTotalSize(absltest.TestCase):
     self.assertEqual(_compute_total_size(str(d)), 0)
 
 
-class TestUploadDirectory(_GcsTestBase):
+class TestUploadDirectory(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    self.mock_upload = self.enterContext(
+      mock.patch(
+        "keras_remote.utils.storage.transfer_manager"
+        ".upload_many_from_filenames",
+      )
+    )
+
   def test_preserves_structure(self):
     tmp = _make_temp_path(self)
     d = tmp / "dataset"
@@ -283,21 +292,27 @@ class TestUploadDirectory(_GcsTestBase):
     (sub / "b.csv").write_text("b")
 
     mock_bucket = MagicMock()
-    uploaded = {}
-
-    def track_blob(name):
-      b = MagicMock()
-      uploaded[name] = b
-      return b
-
-    mock_bucket.blob.side_effect = track_blob
 
     _upload_directory(mock_bucket, str(d), "prefix/hash")
 
-    self.assertIn("prefix/hash/a.csv", uploaded)
-    self.assertIn("prefix/hash/sub/b.csv", uploaded)
-    for blob in uploaded.values():
-      blob.upload_from_filename.assert_called_once()
+    self.mock_upload.assert_called_once()
+    call_kwargs = self.mock_upload.call_args
+    filenames = sorted(call_kwargs[0][1])  # second positional arg
+    self.assertEqual(filenames, ["a.csv", "sub/b.csv"])
+    self.assertEqual(call_kwargs.kwargs["source_directory"], str(d))
+    self.assertEqual(call_kwargs.kwargs["blob_name_prefix"], "prefix/hash/")
+    self.assertTrue(call_kwargs.kwargs["raise_exception"])
+
+  def test_empty_directory_is_noop(self):
+    tmp = _make_temp_path(self)
+    d = tmp / "empty_dataset"
+    d.mkdir()
+
+    mock_bucket = MagicMock()
+
+    _upload_directory(mock_bucket, str(d), "prefix/hash")
+
+    self.mock_upload.assert_not_called()
 
 
 if __name__ == "__main__":

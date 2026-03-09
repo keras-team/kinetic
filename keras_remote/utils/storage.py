@@ -7,6 +7,7 @@ import tempfile
 
 from absl import logging
 from google.cloud import storage
+from google.cloud.storage import transfer_manager
 
 from keras_remote.data import Data
 from keras_remote.infra.infra import get_default_project
@@ -205,9 +206,23 @@ def _upload_directory(
   bucket: storage.Bucket, local_dir: str, gcs_prefix: str
 ) -> None:
   """Upload a local directory to GCS preserving structure."""
+  filenames = []
   for root, _dirs, files in os.walk(local_dir):
     for fname in files:
       local_path = os.path.join(root, fname)
       rel_path = os.path.relpath(local_path, local_dir).replace(os.sep, "/")
-      blob = bucket.blob(f"{gcs_prefix}/{rel_path}")
-      blob.upload_from_filename(local_path)
+      filenames.append(rel_path)
+
+  if not filenames:
+    return
+
+  logging.info("Uploading %d files to GCS...", len(filenames))
+
+  transfer_manager.upload_many_from_filenames(
+    bucket,
+    filenames,
+    source_directory=local_dir,
+    blob_name_prefix=f"{gcs_prefix}/",
+    worker_type=transfer_manager.THREAD,
+    raise_exception=True,
+  )

@@ -15,6 +15,9 @@ import zipfile
 import cloudpickle
 from absl import logging
 from google.cloud import storage
+from google.cloud.storage import transfer_manager
+
+_DOWNLOAD_BATCH_SIZE = 10000
 
 # Base temp directory for remote execution artifacts
 TEMP_DIR = tempfile.gettempdir()
@@ -147,6 +150,7 @@ def resolve_volumes(volume_refs, storage_client):
 def resolve_data_refs(args, kwargs, storage_client):
   """Recursively resolve data ref dicts in args/kwargs to local paths."""
   counter = 0
+  resolved_uris = {}
 
   def _resolve(obj):
     nonlocal counter
@@ -155,6 +159,9 @@ def resolve_data_refs(args, kwargs, storage_client):
       # Volume-mounted data refs are handled by Kubernetes, skip download
       if obj.get("mount_path") is not None:
         return obj["mount_path"]
+      gcs_uri = obj["gcs_uri"]
+      if gcs_uri in resolved_uris:
+        return resolved_uris[gcs_uri]
       local_dir = os.path.join(DATA_DIR, str(counter))
       counter += 1
       _download_data(obj, local_dir, storage_client)
@@ -162,7 +169,10 @@ def resolve_data_refs(args, kwargs, storage_client):
       if not obj["is_dir"]:
         files = [f for f in os.listdir(local_dir) if f != ".cache_marker"]
         if len(files) == 1:
-          return os.path.join(local_dir, files[0])
+          path = os.path.join(local_dir, files[0])
+          resolved_uris[gcs_uri] = path
+          return path
+      resolved_uris[gcs_uri] = local_dir
       return local_dir
     # Recurse into containers to find nested data refs
     if isinstance(obj, dict):
@@ -187,17 +197,39 @@ def _download_data(ref, target_dir, storage_client):
   bucket = storage_client.bucket(bucket_name)
 
   blobs = bucket.list_blobs(prefix=prefix + "/")
-  count = 0
+  total_downloaded = 0
+  batch = []
   for blob in blobs:
     if blob.name.endswith("/") or blob.name.endswith(".cache_marker"):
       continue
-    rel_path = blob.name[len(prefix) + 1 :]
-    local_path = os.path.join(target_dir, rel_path)
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    blob.download_to_filename(local_path)
-    count += 1
+    batch.append(blob.name[len(prefix) + 1 :])
+    if len(batch) >= _DOWNLOAD_BATCH_SIZE:
+      transfer_manager.download_many_to_path(
+        bucket,
+        batch,
+        destination_directory=target_dir,
+        blob_name_prefix=prefix + "/",
+        worker_type=transfer_manager.THREAD,
+        raise_exception=True,
+      )
+      total_downloaded += len(batch)
+      batch = []
 
-  logging.info("Downloaded %d files from %s to %s", count, gcs_uri, target_dir)
+  if batch:
+    transfer_manager.download_many_to_path(
+      bucket,
+      batch,
+      destination_directory=target_dir,
+      blob_name_prefix=prefix + "/",
+      worker_type=transfer_manager.THREAD,
+      raise_exception=True,
+    )
+    total_downloaded += len(batch)
+
+  if total_downloaded:
+    logging.info(
+      "Downloaded %d files from %s to %s", total_downloaded, gcs_uri, target_dir
+    )
 
 
 def _download_from_gcs(client, gcs_path, local_path):

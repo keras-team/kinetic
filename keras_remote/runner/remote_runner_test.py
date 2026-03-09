@@ -13,6 +13,7 @@ import cloudpickle
 from absl.testing import absltest
 
 from keras_remote.runner.remote_runner import (
+  _DOWNLOAD_BATCH_SIZE,
   _download_data,
   _download_from_gcs,
   _upload_to_gcs,
@@ -81,6 +82,15 @@ class TestUploadToGcs(absltest.TestCase):
 
 
 class TestDownloadData(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    self.mock_download = self.enterContext(
+      mock.patch(
+        "keras_remote.runner.remote_runner.transfer_manager"
+        ".download_many_to_path",
+      )
+    )
+
   def test_downloads_files_skips_marker(self):
     tmp = _make_temp_path(self)
     target = tmp / "output"
@@ -91,9 +101,6 @@ class TestDownloadData(absltest.TestCase):
 
     blob_data = MagicMock()
     blob_data.name = "prefix/hash/train.csv"
-    blob_data.download_to_filename = MagicMock(
-      side_effect=lambda p: pathlib.Path(p).write_text("train")
-    )
 
     blob_marker = MagicMock()
     blob_marker.name = "prefix/hash/.cache_marker"
@@ -115,9 +122,18 @@ class TestDownloadData(absltest.TestCase):
 
     _download_data(ref, str(target), mock_client)
 
-    blob_data.download_to_filename.assert_called_once()
-    blob_marker.download_to_filename.assert_not_called()
-    blob_dir.download_to_filename.assert_not_called()
+    self.mock_download.assert_called_once()
+    blob_names = self.mock_download.call_args[0][1]
+    self.assertEqual(blob_names, ["train.csv"])
+    self.assertEqual(
+      self.mock_download.call_args.kwargs["destination_directory"],
+      str(target),
+    )
+    self.assertEqual(
+      self.mock_download.call_args.kwargs["blob_name_prefix"],
+      "prefix/hash/",
+    )
+    self.assertTrue(self.mock_download.call_args.kwargs["raise_exception"])
 
   def test_creates_subdirectories(self):
     tmp = _make_temp_path(self)
@@ -129,12 +145,6 @@ class TestDownloadData(absltest.TestCase):
 
     blob = MagicMock()
     blob.name = "prefix/hash/sub/deep.csv"
-    blob.download_to_filename = MagicMock(
-      side_effect=lambda p: (
-        pathlib.Path(p).parent.mkdir(parents=True, exist_ok=True)
-        or pathlib.Path(p).write_text("data")
-      )
-    )
     mock_bucket.list_blobs.return_value = [blob]
 
     ref = {
@@ -145,10 +155,57 @@ class TestDownloadData(absltest.TestCase):
 
     _download_data(ref, str(target), mock_client)
 
-    # The call should include the nested path
-    call_path = blob.download_to_filename.call_args[0][0]
-    self.assertIn("sub", call_path)
-    self.assertTrue(call_path.endswith("deep.csv"))
+    blob_names = self.mock_download.call_args[0][1]
+    self.assertEqual(blob_names, ["sub/deep.csv"])
+
+  def test_large_listing_downloads_in_batches(self):
+    tmp = _make_temp_path(self)
+    target = tmp / "output"
+
+    mock_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+
+    num_blobs = _DOWNLOAD_BATCH_SIZE + 5
+    blobs = []
+    for i in range(num_blobs):
+      blob = MagicMock()
+      blob.name = f"prefix/hash/file_{i}.csv"
+      blobs.append(blob)
+    mock_bucket.list_blobs.return_value = blobs
+
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://bucket/prefix/hash",
+      "is_dir": True,
+    }
+
+    _download_data(ref, str(target), mock_client)
+
+    self.assertEqual(self.mock_download.call_count, 2)
+    first_batch = self.mock_download.call_args_list[0][0][1]
+    second_batch = self.mock_download.call_args_list[1][0][1]
+    self.assertEqual(len(first_batch), _DOWNLOAD_BATCH_SIZE)
+    self.assertEqual(len(second_batch), 5)
+
+  def test_empty_listing_is_noop(self):
+    tmp = _make_temp_path(self)
+    target = tmp / "output"
+
+    mock_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+    mock_bucket.list_blobs.return_value = []
+
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://bucket/prefix/hash",
+      "is_dir": True,
+    }
+
+    _download_data(ref, str(target), mock_client)
+
+    self.mock_download.assert_not_called()
 
 
 class TestResolveDataRefs(absltest.TestCase):
@@ -200,16 +257,6 @@ class TestResolveDataRefs(absltest.TestCase):
 
   def test_single_file_returns_file_path(self):
     tmp = _make_temp_path(self)
-    mock_client = MagicMock()
-    mock_bucket = MagicMock()
-    mock_client.bucket.return_value = mock_bucket
-
-    blob = MagicMock()
-    blob.name = "prefix/hash/config.json"
-    blob.download_to_filename = MagicMock(
-      side_effect=lambda p: pathlib.Path(p).write_text("{}")
-    )
-    mock_bucket.list_blobs.return_value = [blob]
 
     ref = {
       "__data_ref__": True,
@@ -218,13 +265,54 @@ class TestResolveDataRefs(absltest.TestCase):
       "mount_path": None,
     }
 
-    with mock.patch(
-      "keras_remote.runner.remote_runner.DATA_DIR",
-      str(tmp / "data"),
+    def fake_dl(ref, target_dir, client):
+      os.makedirs(target_dir, exist_ok=True)
+      pathlib.Path(os.path.join(target_dir, "config.json")).write_text("{}")
+
+    with (
+      mock.patch(
+        "keras_remote.runner.remote_runner.DATA_DIR",
+        str(tmp / "data"),
+      ),
+      mock.patch(
+        "keras_remote.runner.remote_runner._download_data",
+        side_effect=fake_dl,
+      ),
     ):
-      args, _ = resolve_data_refs((ref,), {}, mock_client)
+      args, _ = resolve_data_refs((ref,), {}, MagicMock())
 
     self.assertTrue(args[0].endswith("config.json"))
+
+  def test_duplicate_uri_downloaded_once(self):
+    tmp = _make_temp_path(self)
+
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://b/cache/hash",
+      "is_dir": True,
+      "mount_path": None,
+    }
+
+    def fake_dl(r, target_dir, client):
+      os.makedirs(target_dir, exist_ok=True)
+
+    with (
+      mock.patch(
+        "keras_remote.runner.remote_runner.DATA_DIR",
+        str(tmp / "data"),
+      ),
+      mock.patch(
+        "keras_remote.runner.remote_runner._download_data",
+        side_effect=fake_dl,
+      ) as mock_dl,
+    ):
+      args, kwargs = resolve_data_refs((ref, ref), {"d": ref}, MagicMock())
+
+    # Downloaded only once despite three references
+    mock_dl.assert_called_once()
+    # All resolved paths point to the same directory
+    self.assertEqual(args[0], args[1])
+    self.assertEqual(args[0], kwargs["d"])
 
   def test_non_ref_dict_preserved(self):
     mock_client = MagicMock()
