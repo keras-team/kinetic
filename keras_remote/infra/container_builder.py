@@ -8,6 +8,7 @@ import string
 import tarfile
 import tempfile
 import time
+import tomllib
 import uuid
 
 from absl import logging
@@ -82,6 +83,29 @@ def _filter_jax_requirements(requirements_content: str) -> str:
   return "".join(filtered_lines)
 
 
+def _parse_pyproject_dependencies(pyproject_path: str) -> str | None:
+  """Extract ``[project.dependencies]`` from a pyproject.toml file.
+
+  Reads only the core dependency list defined under the ``[project]`` table.
+  Optional dependency groups (``[project.optional-dependencies]``) are ignored;
+  users who need those should use a ``requirements.txt`` instead.
+
+  Args:
+      pyproject_path: Absolute path to a ``pyproject.toml`` file.
+
+  Returns:
+      Newline-separated dependency strings in PEP 508 format suitable for
+      ``pip install``, or ``None`` if the file declares no dependencies.
+  """
+  with open(pyproject_path, "rb") as f:
+    data = tomllib.load(f)
+
+  deps = data.get("project", {}).get("dependencies", [])
+  if not deps:
+    return None
+  return "\n".join(deps) + "\n"
+
+
 def get_or_build_container(
   base_image: str,
   requirements_path: str | None,
@@ -92,11 +116,16 @@ def get_or_build_container(
 ) -> str:
   """Get existing container or build if requirements changed.
 
-  Uses content-based hashing to detect requirement changes.
+  Uses content-based hashing to detect requirement changes. Dependencies can
+  be supplied via a ``requirements.txt`` or a ``pyproject.toml`` (from which
+  ``[project.dependencies]`` are extracted).
 
   Args:
       base_image: Base Docker image (e.g., 'python:3.12-slim')
-      requirements_path: Path to requirements.txt (or None)
+      requirements_path: Path to requirements.txt or pyproject.toml (or
+          None).  When a pyproject.toml is provided,
+          ``[project.dependencies]`` are extracted and used as the
+          install list.
       accelerator_type: TPU/GPU type (e.g., 'v3-8')
       project: GCP project ID
       zone: GCP zone for region derivation (defaults to KERAS_REMOTE_ZONE)
@@ -112,8 +141,13 @@ def get_or_build_container(
   # Read and filter requirements once, reuse for hashing and building.
   filtered_requirements = None
   if requirements_path and os.path.exists(requirements_path):
-    with open(requirements_path, "r") as f:
-      filtered_requirements = _filter_jax_requirements(f.read())
+    if requirements_path.endswith(".toml"):
+      raw_requirements = _parse_pyproject_dependencies(requirements_path)
+    else:
+      with open(requirements_path, "r") as f:
+        raw_requirements = f.read()
+    if raw_requirements:
+      filtered_requirements = _filter_jax_requirements(raw_requirements)
 
   # Generate deterministic hash from requirements + base image + category
   requirements_hash = _hash_requirements(

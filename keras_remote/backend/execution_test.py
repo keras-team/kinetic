@@ -148,11 +148,61 @@ class TestFindRequirements(absltest.TestCase):
     )
 
   def test_returns_none_when_not_found(self):
-    """Returns None when no requirements.txt exists in any ancestor."""
+    """Returns None when no requirements.txt or pyproject.toml exists."""
     tmp_path = _make_temp_path(self)
     empty = tmp_path / "empty"
     empty.mkdir()
     self.assertIsNone(_find_requirements(str(empty)))
+
+  def test_finds_pyproject_toml(self):
+    """Returns pyproject.toml path when no requirements.txt exists."""
+    tmp_path = _make_temp_path(self)
+    (tmp_path / "pyproject.toml").write_text(
+      '[project]\ndependencies = ["numpy"]\n'
+    )
+    self.assertEqual(
+      _find_requirements(str(tmp_path)),
+      str(tmp_path / "pyproject.toml"),
+    )
+
+  def test_requirements_txt_preferred_over_pyproject_toml(self):
+    """requirements.txt in the same directory wins over pyproject.toml."""
+    tmp_path = _make_temp_path(self)
+    (tmp_path / "requirements.txt").write_text("numpy\n")
+    (tmp_path / "pyproject.toml").write_text(
+      '[project]\ndependencies = ["scipy"]\n'
+    )
+    self.assertEqual(
+      _find_requirements(str(tmp_path)),
+      str(tmp_path / "requirements.txt"),
+    )
+
+  def test_parent_pyproject_toml_found_from_child(self):
+    """Walks up to find pyproject.toml in parent when child has nothing."""
+    tmp_path = _make_temp_path(self)
+    (tmp_path / "pyproject.toml").write_text(
+      '[project]\ndependencies = ["numpy"]\n'
+    )
+    child = tmp_path / "subdir"
+    child.mkdir()
+    self.assertEqual(
+      _find_requirements(str(child)),
+      str(tmp_path / "pyproject.toml"),
+    )
+
+  def test_child_requirements_txt_beats_parent_pyproject_toml(self):
+    """requirements.txt in child dir is found before pyproject.toml in parent."""
+    tmp_path = _make_temp_path(self)
+    (tmp_path / "pyproject.toml").write_text(
+      '[project]\ndependencies = ["scipy"]\n'
+    )
+    child = tmp_path / "subdir"
+    child.mkdir()
+    (child / "requirements.txt").write_text("numpy\n")
+    self.assertEqual(
+      _find_requirements(str(child)),
+      str(child / "requirements.txt"),
+    )
 
 
 class TestExecuteRemote(absltest.TestCase):

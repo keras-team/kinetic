@@ -187,7 +187,19 @@ pillow
 scikit-learn
 ```
 
+Alternatively, dependencies declared in `pyproject.toml` are also supported:
+
+```toml
+[project]
+dependencies = [
+    "tensorflow-datasets",
+    "pillow",
+    "scikit-learn",
+]
+```
+
 Keras Remote automatically detects and installs dependencies on the remote worker.
+If both files exist in the same directory, `requirements.txt` takes precedence.
 
 ### Prebuilt Container Images
 

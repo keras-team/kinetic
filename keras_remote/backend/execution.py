@@ -59,7 +59,7 @@ class JobContext:
   # Artifact paths (set during prepare phase)
   payload_path: Optional[str] = None
   context_path: Optional[str] = None
-  requirements_path: Optional[str] = None
+  requirements_path: Optional[str] = None  # requirements.txt or pyproject.toml
   image_uri: Optional[str] = None
 
   def __post_init__(self):
@@ -204,12 +204,20 @@ class PathwaysBackend(BaseK8sBackend):
 
 
 def _find_requirements(start_dir: str) -> Optional[str]:
-  """Search up directory tree for requirements.txt."""
+  """Search up directory tree for requirements.txt or pyproject.toml.
+
+  At each directory level, ``requirements.txt`` is preferred over
+  ``pyproject.toml``.  The first match found while walking towards the
+  filesystem root is returned.
+  """
   search_dir = start_dir
   while search_dir != "/":
     req_path = os.path.join(search_dir, "requirements.txt")
     if os.path.exists(req_path):
       return req_path
+    pyproject_path = os.path.join(search_dir, "pyproject.toml")
+    if os.path.exists(pyproject_path):
+      return pyproject_path
     parent_dir = os.path.dirname(search_dir)
     if parent_dir == search_dir:
       break
@@ -288,12 +296,12 @@ def _prepare_artifacts(
   )
   logging.info("Context packaged to %s", ctx.context_path)
 
-  # Find requirements.txt
+  # Find requirements.txt or pyproject.toml
   ctx.requirements_path = _find_requirements(caller_path)
   if ctx.requirements_path:
-    logging.info("Found requirements.txt: %s", ctx.requirements_path)
+    logging.info("Found dependency file: %s", ctx.requirements_path)
   else:
-    logging.info("No requirements.txt found")
+    logging.info("No requirements.txt or pyproject.toml found")
 
 
 def _build_container(ctx: JobContext) -> None:

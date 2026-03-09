@@ -30,7 +30,7 @@ _SUBTITLE_MESSAGES = (
   "Aligning the cloud crystals",
   "Tip: Container images are content-hashed — unchanged deps skip rebuilds",
   "Feeding the hamsters",
-  "Tip: Add a requirements.txt to auto-install deps on the remote pod",
+  "Tip: Add a requirements.txt or pyproject.toml to auto-install deps on the remote pod",
   "Consulting the oracle",
   "Tip: Use --cluster to manage multiple clusters in the same project",
   "Calibrating the widgets",

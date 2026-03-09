@@ -1,5 +1,7 @@
 """Tests for keras_remote.infra.container_builder — hashing, Dockerfile gen, caching."""
 
+import os
+import tempfile
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -11,6 +13,7 @@ from keras_remote.infra.container_builder import (
   _generate_dockerfile,
   _hash_requirements,
   _image_exists,
+  _parse_pyproject_dependencies,
   get_or_build_container,
 )
 
@@ -71,6 +74,44 @@ class TestFilterJaxRequirements(parameterized.TestCase):
     content = "# ML deps\nnumpy\n\njax\n# end\n"
     result = _filter_jax_requirements(content)
     self.assertEqual(result, "# ML deps\nnumpy\n\n# end\n")
+
+
+class TestParsePyprojectDependencies(absltest.TestCase):
+  def _write_toml(self, content):
+    """Write content to a temp pyproject.toml and return its path."""
+    td = tempfile.TemporaryDirectory()
+    self.addCleanup(td.cleanup)
+    path = os.path.join(td.name, "pyproject.toml")
+    with open(path, "w") as f:
+      f.write(content)
+    return path
+
+  def test_extracts_dependencies(self):
+    path = self._write_toml(
+      '[project]\ndependencies = ["numpy>=1.20", "pandas"]\n'
+    )
+    result = _parse_pyproject_dependencies(path)
+    self.assertEqual(result, "numpy>=1.20\npandas\n")
+
+  def test_returns_none_when_no_dependencies(self):
+    path = self._write_toml("[project]\nname = 'foo'\n")
+    self.assertIsNone(_parse_pyproject_dependencies(path))
+
+  def test_returns_none_when_no_project_table(self):
+    path = self._write_toml("[tool.ruff]\nline-length = 88\n")
+    self.assertIsNone(_parse_pyproject_dependencies(path))
+
+  def test_returns_none_for_empty_dependencies(self):
+    path = self._write_toml("[project]\ndependencies = []\n")
+    self.assertIsNone(_parse_pyproject_dependencies(path))
+
+  def test_ignores_optional_dependencies(self):
+    path = self._write_toml(
+      '[project]\ndependencies = ["numpy"]\n\n'
+      '[project.optional-dependencies]\ndev = ["pytest"]\n'
+    )
+    result = _parse_pyproject_dependencies(path)
+    self.assertEqual(result, "numpy\n")
 
 
 class TestHashRequirements(parameterized.TestCase):
