@@ -18,7 +18,7 @@ from keras_remote.cli.infra.stack_manager import (
   get_current_node_pools,
   get_stack,
 )
-from keras_remote.cli.output import console, success, warning
+from keras_remote.cli.output import LiveOutputPanel, console, success, warning
 from keras_remote.cli.prerequisites_check import check_all
 from keras_remote.cli.prompts import resolve_project
 
@@ -80,11 +80,15 @@ def load_state(
       "Run 'keras-remote up' to provision infrastructure first."
     ) from e
 
-  console.print("\nRefreshing state...\n")
-  try:
-    stack.refresh(on_output=print)
-  except auto.errors.CommandError as e:
-    warning(f"Failed to refresh stack state: {e}")
+  refresh_failed = False
+  with LiveOutputPanel("Refreshing state", transient=True) as panel:
+    try:
+      stack.refresh(on_output=panel.on_output)
+    except auto.errors.CommandError:
+      panel.mark_error()
+      refresh_failed = True
+  if refresh_failed:
+    warning("State refresh encountered an issue (using cached state).")
 
   node_pools = get_current_node_pools(stack)
 
@@ -109,16 +113,22 @@ def apply_update(config):
   program = create_program(config)
   stack = get_stack(program, config)
 
-  console.print("\n[bold]Updating infrastructure...[/bold]\n")
-  try:
-    result = stack.up(on_output=print)
-    console.print()
-    success(f"Pulumi update complete. {result.summary.resource_changes}")
+  ok = True
+  with LiveOutputPanel("Updating infrastructure", transient=True) as panel:
+    try:
+      result = stack.up(on_output=panel.on_output)
+    except auto.errors.CommandError:
+      panel.mark_error()
+      ok = False
+
+  console.print()
+  if ok:
+    success(
+      f"Infrastructure update complete. {result.summary.resource_changes}"
+    )
     return True
-  except auto.errors.CommandError as e:
-    console.print()
-    warning(f"Pulumi update encountered an issue: {e}")
-    return False
+  warning("Infrastructure update encountered an issue.")
+  return False
 
 
 def apply_destroy(config):
@@ -133,13 +143,19 @@ def apply_destroy(config):
   program = create_program(config)
   stack = get_stack(program, config)
 
-  console.print("\n[bold]Destroying Pulumi-managed resources...[/bold]\n")
-  try:
-    result = stack.destroy(on_output=print)
-    console.print()
-    success(f"Pulumi destroy complete. {result.summary.resource_changes}")
+  ok = True
+  with LiveOutputPanel("Destroying infrastructure", transient=True) as panel:
+    try:
+      result = stack.destroy(on_output=panel.on_output)
+    except auto.errors.CommandError:
+      panel.mark_error()
+      ok = False
+
+  console.print()
+  if ok:
+    success(
+      f"Infrastructure destroy complete. {result.summary.resource_changes}"
+    )
     return True
-  except auto.errors.CommandError as e:
-    console.print()
-    warning(f"Pulumi destroy encountered an issue: {e}")
-    return False
+  warning("Infrastructure destroy encountered an issue.")
+  return False

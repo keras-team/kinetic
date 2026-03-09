@@ -14,10 +14,10 @@ from keras_remote.cli.infra.post_deploy import (
 from keras_remote.cli.infra.state import apply_update, load_state
 from keras_remote.cli.options import common_options
 from keras_remote.cli.output import (
+  LiveOutputPanel,
   banner,
   config_summary,
   console,
-  success,
   warning,
 )
 from keras_remote.cli.prerequisites_check import check_all
@@ -89,8 +89,6 @@ def up(project, zone, accelerator, cluster_name, yes):
 
   console.print()
 
-  # Run Pulumi
-  console.print("[bold]Provisioning infrastructure...[/bold]\n")
   pulumi_ok = apply_update(config)
   pulumi_failed = not pulumi_ok
 
@@ -98,8 +96,6 @@ def up(project, zone, accelerator, cluster_name, yes):
     warning("Attempting post-deploy configuration anyway...")
 
   # Post-deploy steps
-  console.print("\n[bold]Running post-deploy configuration...[/bold]\n")
-
   steps = [
     (
       "kubectl configuration",
@@ -115,14 +111,21 @@ def up(project, zone, accelerator, cluster_name, yes):
     steps.append(("GPU driver installation", install_gpu_drivers))
 
   failures = []
-  for name, fn in steps:
-    console.print(f"{name}...")
-    try:
-      fn()
-      success(f"{name} complete.")
-    except subprocess.CalledProcessError as e:
-      failures.append(name)
-      warning(f"{name} failed: {e}")
+  with LiveOutputPanel("Post-deploy configuration", transient=True) as panel:
+    for name, fn in steps:
+      panel.on_output(f"{name}...")
+      try:
+        fn()
+        panel.on_output(f"{name} complete.")
+      except subprocess.CalledProcessError as e:
+        failures.append(name)
+        panel.on_output(f"{name} failed: {e}")
+        if e.stderr:
+          stderr_text = e.stderr.decode("utf-8", errors="replace").strip()
+          if stderr_text:
+            for line in stderr_text.splitlines():
+              panel.on_output(f"  {line}")
+        panel.mark_error()
 
   # Final summary
   console.print()
