@@ -80,12 +80,12 @@ class TestCreateTpuNodePool(parameterized.TestCase):
 
     # Due to multi-host TPU workaround, initial_node_count is equal to num_nodes
     call_kwargs = gcp_mock.container.NodePool.call_args.kwargs
-    self.assertEqual(call_kwargs.get("initial_node_count"), 4)
+    self.assertEqual(call_kwargs.get("initial_node_count"), 0)
     autoscaling_kwargs = (
       gcp_mock.container.NodePoolAutoscalingArgs.call_args.kwargs
     )
     self.assertEqual(autoscaling_kwargs.get("max_node_count"), 4)
-    self.assertEqual(autoscaling_kwargs.get("min_node_count"), 4)
+    self.assertEqual(autoscaling_kwargs.get("min_node_count"), 0)
 
   @mock.patch.object(program, "gcp")
   def test_pool_name_passed_through(self, gcp_mock):
@@ -352,21 +352,13 @@ class TestScaleToZeroNodePools(parameterized.TestCase):
         cluster, accelerator, "us-central2-b", "my-project", "test-pool"
       )
 
-    is_multi_host = getattr(accelerator, "num_nodes", 1) > 1
-
     call_kwargs = gcp_mock.container.NodePool.call_args.kwargs
-    self.assertEqual(
-      call_kwargs.get("initial_node_count"),
-      expected_max_count if is_multi_host else 0,
-    )
+    self.assertEqual(call_kwargs.get("initial_node_count"), 0)
 
     autoscaling_kwargs = (
       gcp_mock.container.NodePoolAutoscalingArgs.call_args.kwargs
     )
-    self.assertEqual(
-      autoscaling_kwargs.get("min_node_count"),
-      expected_max_count if is_multi_host else 0,
-    )
+    self.assertEqual(autoscaling_kwargs.get("min_node_count"), 0)
     self.assertEqual(
       autoscaling_kwargs.get("max_node_count"), expected_max_count
     )
