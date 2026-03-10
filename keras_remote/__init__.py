@@ -6,16 +6,31 @@ os.environ.setdefault("GLOG_minloglevel", "3")
 os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "0")
 
 import logging as python_logging
+import os
 
 from absl import logging
+from rich.console import Console
+from rich.logging import RichHandler
 
 from keras_remote.core.core import run as run
 from keras_remote.data import Data as Data
 
 logging.use_absl_handler()
 
-# Remove absl verbose prefixes (e.g. I0310... execution.py:297])
-logging.get_absl_handler().setFormatter(python_logging.Formatter("%(message)s"))
+# Use rich to format the absl logs, making them slightly dimmed and links clickable
+console = Console(stderr=True)
+rich_handler = RichHandler(
+  console=console,
+  show_time=False,
+  show_path=False,
+  show_level=False,
+  markup=True,
+)
+rich_handler.setFormatter(python_logging.Formatter("[dim]%(message)s[/dim]"))
+
+absl_logger = logging.get_absl_logger()
+absl_logger.handlers = [rich_handler]
+absl_logger.propagate = False
 
 # Default to INFO if the user is running a script outside of absl.app.run()
 # This ensures that operations like container building and job status are visible.
