@@ -331,6 +331,7 @@ train("gs://my-bucket/arrayrecords/")
 | `KERAS_REMOTE_ZONE`          | No       | `us-central1-a`        | Default compute zone    |
 | `KERAS_REMOTE_CLUSTER`       | No       | `keras-remote-cluster` | GKE cluster name        |
 | `KERAS_REMOTE_GKE_NAMESPACE` | No       | `default`              | Kubernetes namespace    |
+| `KERAS_REMOTE_LOG_LEVEL`     | No       | `INFO`                 | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
 
 ### Decorator Parameters
 
@@ -450,10 +451,13 @@ gcloud builds list --project=$KERAS_REMOTE_PROJECT --limit=5
 
 ### Debug Logging
 
-```python
-import logging
-logging.basicConfig(level=logging.INFO)
+Keras Remote uses `absl-py` for logging. You can control the log verbosity by setting the `KERAS_REMOTE_LOG_LEVEL` environment variable:
+
+```bash
+export KERAS_REMOTE_LOG_LEVEL="DEBUG"
 ```
+
+Supported levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `FATAL`. The default is `INFO`.
 
 ### Verify Setup
 
