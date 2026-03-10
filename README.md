@@ -48,7 +48,7 @@ You need a GKE cluster with accelerator node pools to run jobs. The `keras-remot
 - **Simple decorator API** — Add `@keras_remote.run()` to any function to execute it remotely
 - **Automatic infrastructure** — No manual VM provisioning or teardown required
 - **Result serialization** — Functions return actual values, not just logs
-- **Fast iteration** — Container images are cached by dependency hash; unchanged dependencies skip the build entirely (2-4 minute startup)
+- **Fast iteration** — Container images are cached by dependency hash; unchanged dependencies skip the build entirely (subsequent runs start in less than a minute)
 - **Data API** — Declarative `Data` class with smart caching for local files and GCS data
 - **Environment variable forwarding** — Propagate local env vars to the remote environment with wildcard patterns (`capture_env_vars=["KAGGLE_*"]`)
 - **Built-in monitoring** — View job status and logs in Google Cloud Console
