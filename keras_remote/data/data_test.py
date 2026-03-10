@@ -7,6 +7,7 @@ import tempfile
 from absl.testing import absltest
 
 from keras_remote.data import Data, _make_data_ref, is_data_ref
+from keras_remote.data.data import _PARALLEL_HASH_THRESHOLD
 
 
 def _make_temp_path(test_case):
@@ -215,6 +216,34 @@ class TestContentHash(absltest.TestCase):
     self.assertNotEqual(
       Data(str(d1)).content_hash(), Data(str(d2)).content_hash()
     )
+
+  def test_parallel_determinism_many_files(self):
+    """Directory with many files exercises the thread pool path and
+    must still produce deterministic hashes."""
+    tmp = _make_temp_path(self)
+    d = tmp / "large_dir"
+    d.mkdir()
+    num_files = _PARALLEL_HASH_THRESHOLD + 30
+    for i in range(num_files):
+      (d / f"file_{i:04d}.txt").write_text(f"content_{i}")
+
+    hashes = [Data(str(d)).content_hash() for _ in range(5)]
+    self.assertTrue(all(h == hashes[0] for h in hashes))
+
+  def test_parallel_threshold_boundary(self):
+    """Directories at and just above the threshold both produce valid
+    deterministic hashes."""
+    tmp = _make_temp_path(self)
+    for count in (_PARALLEL_HASH_THRESHOLD, _PARALLEL_HASH_THRESHOLD + 1):
+      d = tmp / f"dir_{count}"
+      d.mkdir()
+      for i in range(count):
+        (d / f"f{i}.txt").write_text(f"data{i}")
+
+      h1 = Data(str(d)).content_hash()
+      h2 = Data(str(d)).content_hash()
+      self.assertEqual(h1, h2)
+      self.assertEqual(len(h1), 64)
 
 
 class TestMakeDataRef(absltest.TestCase):
