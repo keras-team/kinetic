@@ -23,8 +23,9 @@ def _hash_single_file(fpath: str, relpath: str) -> bytes:
   h = hashlib.sha256()
   h.update(relpath.encode("utf-8"))
   h.update(b"\0")
+  # 256 KB: matches hashlib.file_digest's default buffer size.
   with open(fpath, "rb") as f:
-    for chunk in iter(partial(f.read, 65536), b""):
+    for chunk in iter(partial(f.read, 2**18), b""):
       h.update(chunk)
   return h.digest()
 
