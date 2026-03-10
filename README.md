@@ -390,7 +390,7 @@ Keras Remote uses `absl-py` for logging. Set `KERAS_REMOTE_LOG_LEVEL=DEBUG` for 
 
 ### Supported Accelerators
 
-Each accelerator and topology requires [setting up its own node pool](#cli-commands) as a prerequisite.
+Each accelerator and topology requires [setting up its own node pool](#keras-remote-pool) as a prerequisite.
 
 #### TPUs
 
