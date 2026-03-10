@@ -246,7 +246,8 @@ def _create_tpu_node_pool(cluster, tpu: TpuConfig, zone, project_id, pool_name):
   # Single-host TPU slices (1 node) must not specify placement_policy;
   # multi-host slices require COMPACT placement with an explicit topology.
   is_multi_host = tpu.num_nodes > 1
-  min_nodes = tpu.num_nodes if is_multi_host else 0
+  # Autoscaling is enabled, so we need to set the min_node_count to 0.
+  min_nodes = 0
 
   placement = (
     gcp.container.NodePoolPlacementPolicyArgs(
