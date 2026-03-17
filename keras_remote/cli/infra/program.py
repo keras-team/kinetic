@@ -224,7 +224,7 @@ def _create_gpu_node_pool(
     initial_node_count=min_nodes,
     autoscaling=gcp.container.NodePoolAutoscalingArgs(
       min_node_count=min_nodes,
-      max_node_count=max(min_nodes, 10),
+      max_node_count=min_nodes + 10,
     ),
     management=gcp.container.NodePoolManagementArgs(
       auto_repair=True,
@@ -252,6 +252,11 @@ def _create_tpu_node_pool(
   # Single-host TPU slices (1 node) must not specify placement_policy;
   # multi-host slices require COMPACT placement with an explicit topology.
   is_multi_host = tpu.num_nodes > 1
+  if is_multi_host and min_nodes % tpu.num_nodes != 0:
+    raise ValueError(
+      f"min_nodes ({min_nodes}) must be a multiple of the TPU slice size "
+      f"({tpu.num_nodes}) for multi-host TPUs."
+    )
 
   placement = (
     gcp.container.NodePoolPlacementPolicyArgs(
@@ -270,7 +275,7 @@ def _create_tpu_node_pool(
     initial_node_count=min_nodes,
     autoscaling=gcp.container.NodePoolAutoscalingArgs(
       min_node_count=min_nodes,
-      max_node_count=max(min_nodes, tpu.num_nodes),
+      max_node_count=min_nodes + tpu.num_nodes,
     ),
     management=gcp.container.NodePoolManagementArgs(
       auto_repair=True,
