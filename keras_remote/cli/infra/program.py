@@ -13,6 +13,7 @@ from keras_remote.cli.constants import (
   NODE_MAX_RUN_DURATION_SECONDS,
   REQUIRED_APIS,
   RESOURCE_NAME_PREFIX,
+  GPU_NODE_POOL_MAX_SCALE_UP,
 )
 from keras_remote.constants import zone_to_ar_location, zone_to_region
 from keras_remote.core.accelerators import GpuConfig, TpuConfig
@@ -224,7 +225,7 @@ def _create_gpu_node_pool(
     initial_node_count=min_nodes,
     autoscaling=gcp.container.NodePoolAutoscalingArgs(
       min_node_count=min_nodes,
-      max_node_count=min_nodes + 10,
+      max_node_count=min_nodes + GPU_NODE_POOL_MAX_SCALE_UP,
     ),
     management=gcp.container.NodePoolManagementArgs(
       auto_repair=True,
