@@ -5,8 +5,10 @@ resolves to a plain filesystem path — the user's function only sees paths.
 """
 
 import hashlib
+import itertools
 import os
 import posixpath
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
@@ -100,11 +102,11 @@ class Data:
     return os.path.isdir(self._resolved_path)
 
   def content_hash(self) -> str:
-    """SHA-256 hash of all file contents, sorted by relative path.
+    """SHA-256 hash of all file contents in deterministic order.
 
     Uses two-level hashing for parallelism: each file is hashed
     independently (SHA-256 of relpath + contents), then per-file
-    digests are combined in sorted order into a final hash.
+    digests are combined in sorted-walk (DFS) order into a final hash.
 
     Includes a type prefix ("dir:" or "file:") to prevent collisions
     between a single file and a directory containing only that file.
@@ -132,37 +134,55 @@ class Data:
     return h.hexdigest()
 
   def _content_hash_dir(self) -> str:
-    # Enumerate all files. Walk in filesystem order (better disk
-    # locality) and sort once at the end for determinism.
-    file_list = []
-    for root, _dirs, files in os.walk(self._resolved_path, followlinks=False):
-      for fname in files:
-        fpath = os.path.join(root, fname)
-        relpath = os.path.relpath(fpath, self._resolved_path)
-        file_list.append((relpath, fpath))
-    file_list.sort()
+    resolved = self._resolved_path
 
-    # Hash each file independently. Use a thread pool for large
-    # directories to parallelize I/O-bound reads. Work is batched
-    # to avoid creating one Future per file.
-    if len(file_list) <= _PARALLEL_HASH_THRESHOLD:
-      digests = _hash_file_batch(file_list)
-    else:
-      batches = [
-        file_list[i : i + _HASH_BATCH_SIZE]
-        for i in range(0, len(file_list), _HASH_BATCH_SIZE)
-      ]
-      max_workers = min(32, (os.cpu_count() or 4) + 4)
-      with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        digests = []
-        for batch_digests in pool.map(_hash_file_batch, batches):
-          digests.extend(batch_digests)
+    # Walk in sorted order for determinism. Sorting dirs in-place
+    # controls os.walk's traversal order; sorting files within each
+    # directory yields a deterministic DFS order without materializing
+    # the full file list — critical for datasets with millions of files.
+    def _iter_files():
+      for root, dirs, files in os.walk(resolved, followlinks=False):
+        dirs.sort()
+        for fname in sorted(files):
+          fpath = os.path.join(root, fname)
+          relpath = os.path.relpath(fpath, resolved)
+          yield (relpath, fpath)
 
-    # Combine per-file digests (each exactly 32 bytes) into final hash.
+    file_iter = _iter_files()
+    first_batch = list(
+      itertools.islice(file_iter, _PARALLEL_HASH_THRESHOLD + 1)
+    )
+
     h = hashlib.sha256()
     h.update(b"dir:")
-    for digest in digests:
-      h.update(digest)
+
+    if len(first_batch) <= _PARALLEL_HASH_THRESHOLD:
+      # Small directory — hash sequentially, no pool overhead.
+      for digest in _hash_file_batch(first_batch):
+        h.update(digest)
+    else:
+      # Large directory — stream batches to a thread pool.
+      # Futures are kept in a bounded deque so at most a few batches
+      # worth of file tuples reside in memory at any time.
+      max_workers = min(32, (os.cpu_count() or 4) + 4)
+      with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        pending = deque()
+        batch = []
+        for item in itertools.chain(first_batch, file_iter):
+          batch.append(item)
+          if len(batch) >= _HASH_BATCH_SIZE:
+            pending.append(pool.submit(_hash_file_batch, batch))
+            batch = []
+            # Drain oldest completed futures to bound memory.
+            while len(pending) > max_workers * 2:
+              for digest in pending.popleft().result():
+                h.update(digest)
+        if batch:
+          pending.append(pool.submit(_hash_file_batch, batch))
+        for future in pending:
+          for digest in future.result():
+            h.update(digest)
+
     return h.hexdigest()
 
   def __repr__(self):

@@ -3,6 +3,7 @@
 import os
 import pathlib
 import tempfile
+from unittest import mock
 
 from absl.testing import absltest
 
@@ -244,6 +245,88 @@ class TestContentHash(absltest.TestCase):
       h2 = Data(str(d)).content_hash()
       self.assertEqual(h1, h2)
       self.assertEqual(len(h1), 64)
+
+  def test_streaming_does_not_materialise_full_file_list(self):
+    """The peak number of live file tuples must be bounded, not O(total).
+
+    We wrap os.walk so that every filename it yields increments a
+    counter, and wrap _hash_file_batch so that every file it consumes
+    decrements the same counter.  The peak value of that counter is the
+    high-water mark for live tuples.  A non-streaming implementation
+    would hit peak == total_files; the streaming one must stay well
+    below that.
+    """
+    tmp = _make_temp_path(self)
+    d = tmp / "big"
+    d.mkdir()
+    # Spread files across many subdirectories so os.walk yields entries
+    # incrementally rather than in one giant batch.
+    num_subdirs = 20
+    files_per_subdir = 5
+    for i in range(num_subdirs):
+      sub = d / f"sub_{i:03d}"
+      sub.mkdir()
+      for j in range(files_per_subdir):
+        (sub / f"f{j}.txt").write_text(f"v{i}_{j}")
+    total_files = num_subdirs * files_per_subdir
+
+    # Reference hash with default settings.
+    h_ref = Data(str(d)).content_hash()
+
+    # Track live file tuples: +1 when yielded by os.walk, -1 when
+    # consumed by _hash_file_batch.  Access is single-threaded within
+    # the main loop; worker threads only decrement after the main
+    # thread has stopped incrementing for that batch, so plain ints
+    # are safe here.
+    import threading
+
+    lock = threading.Lock()
+    alive = 0
+    peak_alive = 0
+    real_walk = os.walk
+    from keras_remote.data import data as _data_mod
+
+    real_hash = _data_mod._hash_file_batch
+
+    def tracking_walk(*args, **kwargs):
+      nonlocal alive, peak_alive
+      for root, dirs, files in real_walk(*args, **kwargs):
+        with lock:
+          alive += len(files)
+          peak_alive = max(peak_alive, alive)
+        yield root, dirs, files
+
+    def tracking_hash(batch):
+      nonlocal alive
+      result = real_hash(batch)
+      with lock:
+        alive -= len(batch)
+      return result
+
+    # Shrink batch size so more submit/drain cycles occur and the
+    # bounded-drain logic has a chance to reclaim tuples mid-walk.
+    # cpu_count=1 → max_workers=5 → drain threshold=10 futures.
+    with (
+      mock.patch("keras_remote.data.data._HASH_BATCH_SIZE", 4),
+      mock.patch("keras_remote.data.data.os.walk", side_effect=tracking_walk),
+      mock.patch(
+        "keras_remote.data.data._hash_file_batch",
+        side_effect=tracking_hash,
+      ),
+      mock.patch("keras_remote.data.data.os.cpu_count", return_value=1),
+    ):
+      h = Data(str(d)).content_hash()
+
+    self.assertEqual(h_ref, h)
+    # A non-streaming implementation would hit peak_alive == total_files
+    # because all walk events fire before any hash events.  The
+    # streaming implementation keeps peak_alive well below total.
+    self.assertLess(
+      peak_alive,
+      total_files,
+      f"Peak live file count ({peak_alive}) equals total files "
+      f"({total_files}); the full file list was materialised.",
+    )
 
 
 class TestMakeDataRef(absltest.TestCase):
