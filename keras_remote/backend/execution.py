@@ -394,14 +394,14 @@ def execute_remote(ctx: JobContext, backend: BaseK8sBackend) -> Any:
     # Step 2: Build or get cached container image
     _build_container(ctx)
 
-    # Step 3: Upload artifacts to Cloud Storage
-    _upload_artifacts(ctx)
-
-    # Step 4: Submit job (backend-specific)
-    logging.info("Submitting job to %s...", backend.__class__.__name__)
-    job = backend.submit_job(ctx)
-
     try:
+      # Step 3: Upload artifacts to Cloud Storage
+      _upload_artifacts(ctx)
+
+      # Step 4: Submit job (backend-specific)
+      logging.info("Submitting job to %s...", backend.__class__.__name__)
+      job = backend.submit_job(ctx)
+
       # Step 5: Wait for completion (with cleanup on failure)
       job_error = None
       try:
