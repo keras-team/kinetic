@@ -24,7 +24,7 @@ jobs:
         run: >
           coverage run
           -m unittest discover
-          -s keras_remote -p "*_test.py"
+          -s kinetic -p "*_test.py"
           -v
 
       - name: Generate coverage report
