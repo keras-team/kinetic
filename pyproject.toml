@@ -1,5 +1,5 @@
 [project]
-name = "keras-remote"
+name = "kinetic"
 version = "0.0.1"
 authors = [
     {name = "Keras team", email = "keras-users@googlegroups.com"},
@@ -39,7 +39,7 @@ test = [
 dev = [
     "pre-commit",
     "ruff",
-    "keras-remote[test]",
+    "kinetic[test]",
 ]
 demo = [
     "jax",
@@ -49,11 +49,11 @@ demo = [
 ]
 
 [project.scripts]
-keras-remote = "keras_remote.cli.main:cli"
+kinetic = "kinetic.cli.main:cli"
 
 [project.urls]
-Homepage = "https://github.com/keras-team/keras-remote"
-Issues = "https://github.com/keras-team/keras-remote/issues"
+Homepage = "https://github.com/keras-team/kinetic"
+Issues = "https://github.com/keras-team/kinetic/issues"
 
 [build-system]
 requires = [

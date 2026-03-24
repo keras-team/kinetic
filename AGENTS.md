@@ -2,12 +2,12 @@
 
 ## Project Overview
 
-Keras Remote lets users execute Keras/JAX workloads on cloud TPUs and GPUs via a single decorator (`@keras_remote.run()`). It handles infrastructure provisioning, container building, job submission, and result retrieval on GCP.
+Keras Remote lets users execute Keras/JAX workloads on cloud TPUs and GPUs via a single decorator (`@kinetic.run()`). It handles infrastructure provisioning, container building, job submission, and result retrieval on GCP.
 
 ## Architecture
 
 ```
-keras_remote/
+kinetic/
 ├── core/           # @run decorator, accelerator registry & parser
 ├── backend/        # Job execution backends (GKE, Pathways)
 ├── data/           # Data class for declaring data dependencies
@@ -25,7 +25,7 @@ keras_remote/
 ## Execution Pipeline
 
 ```python
-@keras_remote.run() called
+@kinetic.run() called
   → JobContext.from_params()        # Resolve config from args/env vars
   → ensure_credentials()            # Verify/auto-configure gcloud, ADC, kubeconfig
   → _prepare_artifacts()            # Upload Data, serialize function, zip working dir
@@ -57,7 +57,7 @@ keras_remote/
 | `cli/commands/pool.py`       | Node pool add/remove/list commands                                                                        |
 | `cli/infra/post_deploy.py`   | kubectl, LWS CRD, GPU driver setup after stack.up()                                                       |
 | `cli/constants.py`           | CLI defaults, paths, API list                                                                             |
-| `cli/main.py`                | CLI entry point (`keras-remote` command)                                                                  |
+| `cli/main.py`                | CLI entry point (`kinetic` command)                                                                  |
 
 ## Key Abstractions
 
@@ -70,14 +70,14 @@ keras_remote/
 
 ## Data API
 
-The `Data` class (`keras_remote.Data`) declares data dependencies for remote functions. It accepts local file/directory paths or GCS URIs (`gs://...`).
+The `Data` class (`kinetic.Data`) declares data dependencies for remote functions. It accepts local file/directory paths or GCS URIs (`gs://...`).
 
 ### Two usage patterns
 
 **Function arguments** — `Data` objects passed as args/kwargs are uploaded to GCS, serialized as data ref dicts in the payload, and resolved to local paths on the pod:
 
 ```python
-@keras_remote.run(accelerator="v3-8")
+@kinetic.run(accelerator="v3-8")
 def train(data_dir, config_path):
     ...  # data_dir and config_path are plain strings
 
@@ -87,7 +87,7 @@ train(Data("./dataset/"), Data("./config.json"))
 **Volumes** — `Data` objects in the `volumes=` decorator parameter are downloaded to fixed mount paths before execution:
 
 ```python
-@keras_remote.run(accelerator="v3-8", volumes={"/data": Data("./dataset/")})
+@kinetic.run(accelerator="v3-8", volumes={"/data": Data("./dataset/")})
 def train():
     files = os.listdir("/data")  # available at mount path
 ```
@@ -132,7 +132,7 @@ Every customizable resource name must follow the same resolution model across al
 | ---------------------------- | -------------- | ---------------- | ------------- | ---------------------- |
 | `KERAS_REMOTE_PROJECT`       | `project=`     | `--project`      | Yes           | _(required)_           |
 | `KERAS_REMOTE_ZONE`          | `zone=`        | `--zone`         | Yes           | `us-central1-a`        |
-| `KERAS_REMOTE_CLUSTER`       | `cluster=`     | `--cluster`      | Yes           | `keras-remote-cluster` |
+| `KERAS_REMOTE_CLUSTER`       | `cluster=`     | `--cluster`      | Yes           | `kinetic-cluster` |
 | `KERAS_REMOTE_NAMESPACE`     | `namespace=`   | _(runtime only)_ | Yes           | `default`              |
 
 When adding a new configurable resource name, ensure it is wired into **all three paths** (decorator, CLI flags on every relevant command, and `config show`). The `GOOGLE_CLOUD_PROJECT` env var is also accepted as a fallback for project ID (after `KERAS_REMOTE_PROJECT`).
@@ -141,11 +141,11 @@ Additional CLI-only env vars:
 
 | Env Var                  | Default                  | Description                  |
 | ------------------------ | ------------------------ | ---------------------------- |
-| `KERAS_REMOTE_STATE_DIR` | `~/.keras-remote/pulumi` | Pulumi local state directory |
+| `KERAS_REMOTE_STATE_DIR` | `~/.kinetic/pulumi` | Pulumi local state directory |
 
 ### CLI State Management
 
-The CLI manages three layers of state: in-memory config (`InfraConfig`), Pulumi local state files (`~/.keras-remote/pulumi/`), and GCP cloud resources. Each `(project, cluster_name)` pair gets its own Pulumi stack (stack name = `{project}-{cluster_name}`), so multiple clusters in the same GCP project are fully independent.
+The CLI manages three layers of state: in-memory config (`InfraConfig`), Pulumi local state files (`~/.kinetic/pulumi/`), and GCP cloud resources. Each `(project, cluster_name)` pair gets its own Pulumi stack (stack name = `{project}-{cluster_name}`), so multiple clusters in the same GCP project are fully independent.
 
 **Centralized state module (`cli/infra/state.py`)** — All Pulumi stack operations go through three functions:
 
@@ -188,7 +188,7 @@ Key behaviors:
 - **Patterns**: `@parameterized.named_parameters` for multi-case tests, mocked GCP/K8s APIs, `tempfile.TemporaryDirectory()` for file ops
 - **Integration tests**: `tests/integration/`
 - **E2E tests**: `tests/e2e/` (requires live GCP resources)
-- **Run tests**: Use pytest (e.g., `/opt/miniconda3/envs/keras-remote-3.12/bin/python -m pytest`). Tests use `absl.testing` internally but should be run via pytest for better output.
+- **Run tests**: Use pytest (e.g., `/opt/miniconda3/envs/kinetic-3.12/bin/python -m pytest`). Tests use `absl.testing` internally but should be run via pytest for better output.
 
 ### Container Caching
 
@@ -205,7 +205,7 @@ Images are tagged with `SHA256(base_image + accelerator_type + requirements.txt 
 - **Core deps**: absl-py, cloudpickle, numpy, keras, google-cloud-{artifact-registry,storage,build}, kubernetes
 - **CLI deps** (optional `[cli]`): click, rich, pulumi, pulumi-gcp
 - **Dev deps** (optional `[dev]`): pre-commit, ruff
-- **Entry point**: `keras-remote` → `keras_remote.cli.main:cli`
+- **Entry point**: `kinetic` → `kinetic.cli.main:cli`
 
 ## Backend Selection Logic
 

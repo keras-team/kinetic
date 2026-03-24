@@ -1,7 +1,7 @@
 """
-Example: Using keras_remote with GKE
+Example: Using kinetic with GKE
 
-This demonstrates running remote functions on a GKE cluster with keras_remote.
+This demonstrates running remote functions on a GKE cluster with kinetic.
 
 Prerequisites:
 1. A GKE cluster (CPU or with GPU node pools)
@@ -14,7 +14,7 @@ Setup (CPU cluster - works out of the box):
 Setup (GPU cluster - for GPU examples):
     # Add a GPU node pool to existing cluster
     gcloud container node-pools create gpu-pool \\
-        --cluster keras-remote-cluster \\
+        --cluster kinetic-cluster \\
         --zone us-central1-a \\
         --machine-type n1-standard-4 \\
         --accelerator type=nvidia-tesla-t4,count=1 \\
@@ -41,11 +41,11 @@ os.environ["KERAS_BACKEND"] = "jax"
 import keras
 import numpy as np
 
-import keras_remote
+import kinetic
 
 
 # Example 1: CPU-only execution (works with default cluster)
-@keras_remote.run(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def simple_computation(x, y):
   """Simple addition that runs on remote CPU."""
   result = x + y
@@ -54,7 +54,7 @@ def simple_computation(x, y):
 
 
 # Example 2: Keras model training on CPU
-@keras_remote.run(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def train_simple_model_cpu():
   """Train a simple Keras model on remote CPU."""
 
@@ -82,7 +82,7 @@ def train_simple_model_cpu():
 
 
 # Example 3: GPU training (requires GPU node pool)
-@keras_remote.run(accelerator="nvidia-tesla-t4")
+@kinetic.run(accelerator="nvidia-tesla-t4")
 def train_model_gpu():
   """Train a Keras model on remote GPU. Requires T4 GPU node pool."""
   model = keras.Sequential(

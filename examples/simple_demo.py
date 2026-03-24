@@ -6,10 +6,10 @@ import jax
 import keras
 import numpy as np
 
-import keras_remote
+import kinetic
 
 
-@keras_remote.run(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def train_keras_jax_model():
   print(f"Keras version: {keras.__version__}")
   print(f"Keras backend: {keras.config.backend()}")

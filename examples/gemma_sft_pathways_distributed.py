@@ -7,10 +7,10 @@ import jax
 import keras
 import keras_hub
 
-import keras_remote
+import kinetic
 
 
-@keras_remote.run(
+@kinetic.run(
   accelerator="v5litepod-2x4",
   cluster="keras-team-dogfood",
   project="keras-team-gcp",

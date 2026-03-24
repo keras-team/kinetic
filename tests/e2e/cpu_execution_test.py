@@ -13,7 +13,7 @@ from unittest import mock
 
 from absl.testing import absltest
 
-import keras_remote
+import kinetic
 from tests.e2e.e2e_utils import skip_unless_e2e
 
 
@@ -25,7 +25,7 @@ class TestCpuExecution(absltest.TestCase):
   def test_simple_function(self):
     """Execute a simple add function remotely and verify the result."""
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def add(a, b):
       return a + b
 
@@ -35,7 +35,7 @@ class TestCpuExecution(absltest.TestCase):
   def test_complex_return_type(self):
     """Verify complex return types survive serialization roundtrip."""
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def complex_return():
       return {
         "key": [1, 2, 3],
@@ -52,7 +52,7 @@ class TestCpuExecution(absltest.TestCase):
   def test_function_that_raises(self):
     """Verify remote exceptions are re-raised locally."""
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def bad_func():
       raise ValueError("intentional test error")
 
@@ -63,7 +63,7 @@ class TestCpuExecution(absltest.TestCase):
     """Verify captured env vars are available in the remote environment."""
     with mock.patch.dict(os.environ, {"E2E_TEST_VAR": "hello_from_local"}):
 
-      @keras_remote.run(
+      @kinetic.run(
         accelerator="cpu",
         capture_env_vars=["E2E_TEST_VAR"],
       )
@@ -76,7 +76,7 @@ class TestCpuExecution(absltest.TestCase):
   def test_function_with_args_and_kwargs(self):
     """Verify positional and keyword arguments are passed correctly."""
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def compute(x, y, scale=1.0, offset=0.0):
       return (x + y) * scale + offset
 

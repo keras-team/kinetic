@@ -6,11 +6,11 @@ import keras
 import numpy as np
 from keras import layers
 
-import keras_remote
+import kinetic
 
 
 # A simple model that will be executed remotely on pathways
-@keras_remote.run(accelerator="v5litepod-1", backend="pathways")
+@kinetic.run(accelerator="v5litepod-1", backend="pathways")
 def train_simple_model():
   print("Running Pathways job on JAX Backend!")
 

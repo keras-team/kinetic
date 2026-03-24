@@ -2,10 +2,10 @@ import os
 
 import keras_hub
 
-from keras_remote import core as keras_remote
+from kinetic import core as kinetic
 
 
-@keras_remote.run(
+@kinetic.run(
   accelerator="v5litepod-1", capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"]
 )
 def train_gemma():

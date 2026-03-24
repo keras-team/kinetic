@@ -68,7 +68,7 @@ Before submitting a pull request, please ensure your changes pass linting and un
   | `E2E_TESTS`            | Yes      | —               | Set to `1` to enable e2e tests |
   | `KERAS_REMOTE_PROJECT` | Yes      | —               | Google Cloud project ID        |
   | `KERAS_REMOTE_ZONE`    | No       | `us-central1-a` | GKE cluster zone               |
-  | `KERAS_REMOTE_CLUSTER` | No       | `keras-remote`  | GKE cluster name               |
+  | `KERAS_REMOTE_CLUSTER` | No       | `kinetic`  | GKE cluster name               |
 
   **Run all e2e tests:**
 

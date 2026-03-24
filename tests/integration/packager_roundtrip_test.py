@@ -7,7 +7,7 @@ import zipfile
 
 from absl.testing import absltest
 
-from keras_remote.utils.packager import zip_working_dir
+from kinetic.utils.packager import zip_working_dir
 
 
 def _make_temp_path(test_case):

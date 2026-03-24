@@ -6,9 +6,9 @@
 Run Keras and JAX workloads on cloud TPUs and GPUs with a simple decorator. No infrastructure management required.
 
 ```python
-import keras_remote
+import kinetic
 
-@keras_remote.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v6e-8")
 def train_model():
     import keras
     model = keras.Sequential([...])
@@ -41,11 +41,11 @@ When you call a decorated function, Keras Remote handles the entire remote execu
 
 If the remote function raises an exception, it is re-raised locally with the original traceback, so debugging works the same as local development.
 
-You need a GKE cluster with accelerator node pools to run jobs. The `keras-remote` CLI handles this setup for you.
+You need a GKE cluster with accelerator node pools to run jobs. The `kinetic` CLI handles this setup for you.
 
 ## Features
 
-- **Simple decorator API** — Add `@keras_remote.run()` to any function to execute it remotely
+- **Simple decorator API** — Add `@kinetic.run()` to any function to execute it remotely
 - **Automatic infrastructure** — No manual VM provisioning or teardown required
 - **Result serialization** — Functions return actual values, not just logs
 - **Fast iteration** — Container images are cached by dependency hash; unchanged dependencies skip the build entirely (subsequent runs start in less than a minute)
@@ -70,17 +70,17 @@ gcloud auth login
 gcloud auth application-default login
 ```
 
-> **Note:** The Pulumi CLI (used for infrastructure provisioning) is bundled and managed automatically. It will be installed to `~/.keras-remote/pulumi` on first use if not already present.
+> **Note:** The Pulumi CLI (used for infrastructure provisioning) is bundled and managed automatically. It will be installed to `~/.kinetic/pulumi` on first use if not already present.
 
 ### Install
 
 ```bash
-git clone https://github.com/keras-team/keras-remote.git
-cd keras-remote
+git clone https://github.com/keras-team/kinetic.git
+cd kinetic
 pip install -e ".[cli]"
 ```
 
-This installs both the `@keras_remote.run()` decorator and the `keras-remote` CLI for managing infrastructure.
+This installs both the `@kinetic.run()` decorator and the `kinetic` CLI for managing infrastructure.
 
 > If your GKE cluster and Artifact Registry are already provisioned, you can install without the CLI: `pip install -e .`
 
@@ -89,7 +89,7 @@ This installs both the `@keras_remote.run()` decorator and the `keras-remote` CL
 Run the one-time setup to create the required cloud resources:
 
 ```bash
-keras-remote up
+kinetic up
 ```
 
 This interactively prompts for your GCP project and accelerator type, then:
@@ -102,10 +102,10 @@ This interactively prompts for your GCP project and accelerator type, then:
 You can also run non-interactively:
 
 ```bash
-keras-remote up --project=my-project --accelerator=t4 --yes
+kinetic up --project=my-project --accelerator=t4 --yes
 ```
 
-> **Cleanup reminder:** When you're done, run `keras-remote down` to tear down all resources and avoid ongoing charges. See [CLI Commands](#cli-commands).
+> **Cleanup reminder:** When you're done, run `kinetic down` to tear down all resources and avoid ongoing charges. See [CLI Commands](#cli-commands).
 
 ### Configure
 
@@ -120,9 +120,9 @@ Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it. Se
 ### Run Your First Job
 
 ```python
-import keras_remote
+import kinetic
 
-@keras_remote.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v6e-8")
 def hello_tpu():
     import jax
     return f"Running on {jax.devices()}"
@@ -138,9 +138,9 @@ print(result)
 ### Training a Keras Model
 
 ```python
-import keras_remote
+import kinetic
 
-@keras_remote.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v6e-8")
 def train_model():
     import keras
     import numpy as np
@@ -182,10 +182,10 @@ On the remote pod, these objects are automatically resolved into plain string pa
 
 ```python
 import pandas as pd
-import keras_remote
-from keras_remote import Data
+import kinetic
+from kinetic import Data
 
-@keras_remote.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v6e-8")
 def train(data_dir):
     # data_dir is resolved to a local path on the remote machine
     df = pd.read_csv(f"{data_dir}/train.csv")
@@ -208,10 +208,10 @@ For established training scripts where data requirements are fixed, use the `vol
 
 ```python
 import pandas as pd
-import keras_remote
-from keras_remote import Data
+import kinetic
+from kinetic import Data
 
-@keras_remote.run(
+@kinetic.run(
     accelerator="v6e-8",
     volumes={
         "/data": Data("./my_dataset/"),
@@ -234,9 +234,9 @@ If your dataset is very large (e.g., > 10GB), it is inefficient to download the 
 
 ```python
 import grain.python as grain
-import keras_remote
+import kinetic
 
-@keras_remote.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v6e-8")
 def train(data_uri):
     # Native GCS reading, no download overhead
     data_source = grain.ArrayRecordDataSource(data_uri)
@@ -277,9 +277,9 @@ If both files exist in the same directory, `requirements.txt` takes precedence.
 Skip container build time by using prebuilt images:
 
 ```python
-@keras_remote.run(
+@kinetic.run(
     accelerator="v6e-8",
-    container_image="us-docker.pkg.dev/my-project/keras-remote/prebuilt:v1.0"
+    container_image="us-docker.pkg.dev/my-project/kinetic/prebuilt:v1.0"
 )
 def train():
     ...
@@ -292,9 +292,9 @@ Build your own prebuilt image using the project's Dockerfile template as a start
 Use `capture_env_vars` to propagate local environment variables to the remote pod. This supports exact names and wildcard patterns:
 
 ```python
-import keras_remote
+import kinetic
 
-@keras_remote.run(
+@kinetic.run(
     accelerator="v5litepod-1",
     capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"]
 )
@@ -312,7 +312,7 @@ This is useful for forwarding API keys, credentials, or configuration without ha
 Multi-host TPU configurations (those requiring more than one node, such as `v2-16`, `v3-32`, or `v5p-16`) automatically use the [Pathways](https://cloud.google.com/tpu/docs/pathways-overview) backend. You can also set the backend explicitly:
 
 ```python
-@keras_remote.run(accelerator="v3-32", backend="pathways")
+@kinetic.run(accelerator="v3-32", backend="pathways")
 def distributed_train():
     ...
 ```
@@ -321,27 +321,27 @@ def distributed_train():
 
 You can run multiple independent clusters within the same GCP project — for example, one for GPU workloads and another for TPUs. Each cluster gets its own isolated set of cloud resources (GKE cluster, Artifact Registry, storage buckets) backed by a separate infrastructure stack, so they never interfere with each other.
 
-**Create clusters** by passing `--cluster` to `keras-remote up`:
+**Create clusters** by passing `--cluster` to `kinetic up`:
 
 ```bash
-# Default cluster (named "keras-remote-cluster")
-keras-remote up --project=my-project --accelerator=v6e-8
+# Default cluster (named "kinetic-cluster")
+kinetic up --project=my-project --accelerator=v6e-8
 
 # A separate GPU cluster
-keras-remote up --project=my-project --cluster=gpu-cluster --accelerator=a100
+kinetic up --project=my-project --cluster=gpu-cluster --accelerator=a100
 ```
 
 **Target a cluster** in your code with the `cluster` parameter or the `KERAS_REMOTE_CLUSTER` environment variable:
 
 ```python
 # Run on the GPU cluster
-@keras_remote.run(accelerator="a100", cluster="gpu-cluster")
+@kinetic.run(accelerator="a100", cluster="gpu-cluster")
 def train_on_gpu():
     ...
 
 # Or set the env var to avoid repeating the cluster name
 # export KERAS_REMOTE_CLUSTER="gpu-cluster"
-@keras_remote.run(accelerator="a100")
+@kinetic.run(accelerator="a100")
 def train_on_gpu():
     ...
 ```
@@ -349,9 +349,9 @@ def train_on_gpu():
 All CLI commands accept `--cluster` as well, so you can manage each cluster independently:
 
 ```bash
-keras-remote status --cluster=gpu-cluster
-keras-remote pool add --cluster=gpu-cluster --accelerator=h100
-keras-remote down --cluster=gpu-cluster
+kinetic status --cluster=gpu-cluster
+kinetic pool add --cluster=gpu-cluster --accelerator=h100
+kinetic down --cluster=gpu-cluster
 ```
 
 For more examples, see the [`examples/`](examples/) directory.
@@ -366,7 +366,7 @@ For more examples, see the [`examples/`](examples/) directory.
 | ---------------------------- | -------- | ---------------------- | ------------------------------------------------------------ |
 | `KERAS_REMOTE_PROJECT`       | Yes      | —                      | Google Cloud project ID                                      |
 | `KERAS_REMOTE_ZONE`          | No       | `us-central1-a`        | Default compute zone                                         |
-| `KERAS_REMOTE_CLUSTER`       | No       | `keras-remote-cluster` | GKE cluster name                                             |
+| `KERAS_REMOTE_CLUSTER`       | No       | `kinetic-cluster` | GKE cluster name                                             |
 | `KERAS_REMOTE_NAMESPACE`     | No       | `default`              | Kubernetes namespace                                         |
 | `KERAS_REMOTE_LOG_LEVEL`     | No       | `INFO`                 | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
 
@@ -375,7 +375,7 @@ Keras Remote uses `absl-py` for logging. Set `KERAS_REMOTE_LOG_LEVEL=DEBUG` for 
 #### Decorator Parameters
 
 ```python
-@keras_remote.run(
+@kinetic.run(
     accelerator="v6e-8",       # TPU/GPU type (default: "v6e-8")
     container_image=None,      # Custom container URI
     zone=None,                 # Override default zone
@@ -390,7 +390,7 @@ Keras Remote uses `absl-py` for logging. Set `KERAS_REMOTE_LOG_LEVEL=DEBUG` for 
 
 ### Supported Accelerators
 
-Each accelerator and topology requires [setting up its own node pool](#keras-remote-pool) as a prerequisite.
+Each accelerator and topology requires [setting up its own node pool](#kinetic-pool) as a prerequisite.
 
 #### TPUs
 
@@ -423,57 +423,57 @@ Use `accelerator="cpu"` to run on a CPU-only node (no accelerator attached).
 
 ### CLI Commands
 
-The `keras-remote` CLI manages your cloud infrastructure. Install it with `pip install -e ".[cli]"`.
+The `kinetic` CLI manages your cloud infrastructure. Install it with `pip install -e ".[cli]"`.
 
-#### `keras-remote up`
+#### `kinetic up`
 
 Provision all required cloud resources (one-time setup):
 
 ```bash
-keras-remote up
-keras-remote up --project=my-project --accelerator=t4 --yes
+kinetic up
+kinetic up --project=my-project --accelerator=t4 --yes
 ```
 
-#### `keras-remote down`
+#### `kinetic down`
 
 Remove all Keras Remote resources to avoid ongoing charges:
 
 ```bash
-keras-remote down
-keras-remote down --yes   # Skip confirmation prompt
+kinetic down
+kinetic down --yes   # Skip confirmation prompt
 ```
 
 This removes the GKE cluster and node pools, Artifact Registry repository and container images, and Cloud Storage buckets.
 
-#### `keras-remote status`
+#### `kinetic status`
 
 View current infrastructure state:
 
 ```bash
-keras-remote status
+kinetic status
 ```
 
-#### `keras-remote config`
+#### `kinetic config`
 
 View current configuration:
 
 ```bash
-keras-remote config
+kinetic config
 ```
 
-#### `keras-remote pool`
+#### `kinetic pool`
 
 Manage accelerator node pools after initial setup:
 
 ```bash
 # Add a node pool for a specific accelerator
-keras-remote pool add --accelerator=v6e-8
+kinetic pool add --accelerator=v6e-8
 
 # List current node pools
-keras-remote pool list
+kinetic pool list
 
 # Remove a node pool by name
-keras-remote pool remove <pool-name>
+kinetic pool remove <pool-name>
 ```
 
 ### Monitoring
@@ -510,7 +510,7 @@ gcloud services enable compute.googleapis.com \
     storage.googleapis.com container.googleapis.com \
     --project=$KERAS_REMOTE_PROJECT
 
-gcloud artifacts repositories create keras-remote \
+gcloud artifacts repositories create kinetic \
     --repository-format=docker \
     --location=us \
     --project=$KERAS_REMOTE_PROJECT
@@ -536,7 +536,7 @@ gcloud builds list --project=$KERAS_REMOTE_PROJECT --limit=5
 
 ### Verify Setup
 
-Run `keras-remote status` to check the health of your infrastructure. For manual verification:
+Run `kinetic status` to check the health of your infrastructure. For manual verification:
 
 ```bash
 # Check authentication
@@ -564,5 +564,5 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 
 **Maintained by the Keras team at Google.**
 
-- [Report Issues](https://github.com/keras-team/keras-remote/issues)
-- [Discussions](https://github.com/keras-team/keras-remote/discussions)
+- [Report Issues](https://github.com/keras-team/kinetic/issues)
+- [Discussions](https://github.com/keras-team/kinetic/discussions)

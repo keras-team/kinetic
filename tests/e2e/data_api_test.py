@@ -15,8 +15,8 @@ import uuid
 
 from absl.testing import absltest
 
-import keras_remote
-from keras_remote import Data
+import kinetic
+from kinetic import Data
 from tests.e2e.e2e_utils import skip_unless_e2e
 
 # Per-run nonce ensures fresh content hashes (no stale cache hits from
@@ -42,7 +42,7 @@ class TestDataAsArg(absltest.TestCase):
     data_dir.mkdir()
     (data_dir / "train.csv").write_text(f"id,value\n1,{_RUN_NONCE}\n")
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def read_dir(data_path):
 
       files = sorted(os.listdir(data_path))
@@ -61,7 +61,7 @@ class TestDataAsArg(absltest.TestCase):
     config = tmp / "config.json"
     config.write_text(f'{{"nonce": "{_RUN_NONCE}"}}')
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def read_file(config_path):
       with open(config_path) as f:
         return json.load(f)
@@ -80,7 +80,7 @@ class TestDataAsArg(absltest.TestCase):
     d2.mkdir()
     (d2 / "b.csv").write_text(f"val,{_RUN_NONCE}")
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def read_both(train_dir, val_dir):
 
       return {
@@ -104,7 +104,7 @@ class TestDataCaching(absltest.TestCase):
     config = tmp / "config.json"
     config.write_text(f'{{"cached": true, "nonce": "{_RUN_NONCE}"}}')
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def read_config(path):
       with open(path) as f:
         return json.load(f)
@@ -130,7 +130,7 @@ class TestDataCaching(absltest.TestCase):
     f = tmp / "data.txt"
     f.write_text(f"version_a_{_RUN_NONCE}")
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def read_data(path):
       with open(path) as fh:
         return fh.read()
@@ -162,7 +162,7 @@ class TestVolumes(absltest.TestCase):
     data_dir.mkdir()
     (data_dir / "train.csv").write_text(f"id,value\n1,{_RUN_NONCE}\n")
 
-    @keras_remote.run(
+    @kinetic.run(
       accelerator="cpu",
       volumes={"/data": Data(str(data_dir))},
     )
@@ -186,7 +186,7 @@ class TestVolumes(absltest.TestCase):
     (data_dir / "info.txt").write_text(f"vol_cache,{_RUN_NONCE}")
     vol_data = Data(str(data_dir))
 
-    @keras_remote.run(
+    @kinetic.run(
       accelerator="cpu",
       volumes={"/cached_vol": vol_data},
     )
@@ -217,7 +217,7 @@ class TestVolumes(absltest.TestCase):
     data_file = data_dir / "info.txt"
 
     def run_read_vol():
-      @keras_remote.run(
+      @kinetic.run(
         accelerator="cpu",
         volumes={"/vol": Data(str(data_dir))},
       )
@@ -253,7 +253,7 @@ class TestVolumes(absltest.TestCase):
     d2.mkdir()
     (d2 / "model.bin").write_text(f"weights,{_RUN_NONCE}")
 
-    @keras_remote.run(
+    @kinetic.run(
       accelerator="cpu",
       volumes={
         "/data": Data(str(d1)),
@@ -286,7 +286,7 @@ class TestMixed(absltest.TestCase):
     config = tmp / "config.json"
     config.write_text(f'{{"lr": 0.01, "nonce": "{_RUN_NONCE}"}}')
 
-    @keras_remote.run(
+    @kinetic.run(
       accelerator="cpu",
       volumes={"/weights": Data(str(weights_dir))},
     )
@@ -317,7 +317,7 @@ class TestMixed(absltest.TestCase):
     (data_dir / "train.csv").write_text(f"id,value\n1,{_RUN_NONCE}\n")
     vol_data = Data(str(data_dir))
 
-    @keras_remote.run(
+    @kinetic.run(
       accelerator="cpu",
       volumes={"/mnt/data": vol_data},
     )
@@ -356,7 +356,7 @@ class TestNestedData(absltest.TestCase):
     d2.mkdir()
     (d2 / "b.csv").write_text(f"b,{_RUN_NONCE}")
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def list_dirs(datasets):
 
       return [sorted(os.listdir(d)) for d in datasets]
@@ -372,7 +372,7 @@ class TestNestedData(absltest.TestCase):
     d.mkdir()
     (d / "x.csv").write_text(f"x,{_RUN_NONCE}")
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def read_from_dict(sources):
 
       return {k: sorted(os.listdir(v)) for k, v in sources.items()}

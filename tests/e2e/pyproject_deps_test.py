@@ -18,7 +18,7 @@ from unittest import mock
 
 from absl.testing import absltest
 
-import keras_remote
+import kinetic
 from tests.e2e.e2e_utils import skip_unless_e2e
 
 
@@ -47,14 +47,14 @@ class TestPyprojectTomlDependencies(absltest.TestCase):
       'dependencies = ["humanize>=4.0"]\n'
     )
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def use_humanize():
       import humanize
 
       return humanize.intcomma(1_000_000)
 
     with mock.patch(
-      "keras_remote.backend.execution._find_requirements",
+      "kinetic.backend.execution._find_requirements",
       return_value=path,
     ):
       result = use_humanize()
@@ -65,12 +65,12 @@ class TestPyprojectTomlDependencies(absltest.TestCase):
     """A pyproject.toml with no [project.dependencies] doesn't break the pipeline."""
     path = self._create_pyproject("[tool.ruff]\nline-length = 88\n")
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def simple_add(a, b):
       return a + b
 
     with mock.patch(
-      "keras_remote.backend.execution._find_requirements",
+      "kinetic.backend.execution._find_requirements",
       return_value=path,
     ):
       result = simple_add(10, 20)
@@ -84,14 +84,14 @@ class TestPyprojectTomlDependencies(absltest.TestCase):
       'dependencies = ["jax", "humanize>=4.0"]\n'
     )
 
-    @keras_remote.run(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def check_humanize():
       import humanize
 
       return humanize.intcomma(2_500)
 
     with mock.patch(
-      "keras_remote.backend.execution._find_requirements",
+      "kinetic.backend.execution._find_requirements",
       return_value=path,
     ):
       result = check_humanize()

@@ -2,8 +2,8 @@ import json
 import os
 import tempfile
 
-import keras_remote
-from keras_remote import Data
+import kinetic
+from kinetic import Data
 
 # Setup: create temporary dummy data
 tmp_dir = tempfile.mkdtemp(prefix="kr-data-example-")
@@ -24,7 +24,7 @@ print(f"Created temp data in {tmp_dir}\n")
 
 
 # Data as function arg (local directory)
-@keras_remote.run(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def test_data_arg(data_dir):
   files = sorted(os.listdir(data_dir))
   with open(f"{data_dir}/train.csv") as f:
@@ -39,7 +39,7 @@ assert "1,100" in result["content"]
 
 
 # Data as function arg (single file)
-@keras_remote.run(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def test_file_arg(config_path):
   with open(config_path) as f:
     return json.load(f)
@@ -56,7 +56,7 @@ assert result["lr"] == 0.01
 
 
 # volumes (fixed-path mount)
-@keras_remote.run(
+@kinetic.run(
   accelerator="cpu",
   volumes={"/data": Data(dataset_dir)},
 )
@@ -73,7 +73,7 @@ assert result["files"] == ["train.csv"]
 
 
 # Mixed — volumes + Data arg + plain arg
-@keras_remote.run(
+@kinetic.run(
   accelerator="cpu",
   volumes={"/weights": Data(dataset_dir)},
 )
@@ -92,7 +92,7 @@ assert result["has_weights"] is True
 
 
 # Data in nested structure
-@keras_remote.run(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def test_nested(datasets):
   return [sorted(os.listdir(d)) for d in datasets]
 

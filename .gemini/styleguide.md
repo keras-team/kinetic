@@ -42,7 +42,7 @@ We design for the end-to-end user intent ("run this function on a TPU"):
 
 ```python
 # Good: Workflow-centric
-@keras_remote.run(accelerator="v3-8")
+@kinetic.run(accelerator="v3-8")
 def my_function():
     ...
 ```
@@ -82,7 +82,7 @@ Every feature has a maintenance cost.
 
 ```python
 # Bad: Implementation details leaking into API
-@keras_remote.run(
+@kinetic.run(
     tpu_topology="2x2",
     k8s_namespace="user-1",
     docker_image_repo="gcr.io/..."
@@ -91,7 +91,7 @@ Every feature has a maintenance cost.
 
 ```python
 # Good: Focused on the user problem
-@keras_remote.run(
+@kinetic.run(
     accelerator="v3-8",
     container_image="my-image"
 )
@@ -108,7 +108,7 @@ Every feature has a maintenance cost.
 
 ### APIs should be strictly compartmentalized.
 
-- The `keras_remote.run` decorator shouldn't handle model definition logic. It should only handle execution.
+- The `kinetic.run` decorator shouldn't handle model definition logic. It should only handle execution.
 
 ---
 
