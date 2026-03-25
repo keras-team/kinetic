@@ -33,7 +33,7 @@ class TestEnvVarCapture(absltest.TestCase):
 
       func()
       call_args = mock_exec.call_args
-      env_vars = call_args[0][-2]  # last positional arg
+      env_vars = call_args[0][-3]  # env_vars arg (before volumes and spot)
       self.assertEqual(env_vars, {"MY_VAR": "my_val"})
 
   def test_wildcard_pattern(self):
@@ -53,7 +53,7 @@ class TestEnvVarCapture(absltest.TestCase):
         pass
 
       func()
-      env_vars = mock_exec.call_args[0][-2]
+      env_vars = mock_exec.call_args[0][-3]
       self.assertIn("PREFIX_A", env_vars)
       self.assertIn("PREFIX_B", env_vars)
       self.assertNotIn("OTHER", env_vars)
@@ -70,7 +70,7 @@ class TestEnvVarCapture(absltest.TestCase):
         pass
 
       func()
-      env_vars = mock_exec.call_args[0][-2]
+      env_vars = mock_exec.call_args[0][-3]
       self.assertEqual(env_vars, {})
 
   def test_none_capture(self):
@@ -81,7 +81,7 @@ class TestEnvVarCapture(absltest.TestCase):
         pass
 
       func()
-      env_vars = mock_exec.call_args[0][-2]
+      env_vars = mock_exec.call_args[0][-3]
       self.assertEqual(env_vars, {})
 
   def test_mixed_exact_and_wildcard(self):
@@ -104,7 +104,7 @@ class TestEnvVarCapture(absltest.TestCase):
         pass
 
       func()
-      env_vars = mock_exec.call_args[0][-2]
+      env_vars = mock_exec.call_args[0][-3]
       self.assertEqual(
         env_vars, {"EXACT_VAR": "exact", "WILD_A": "a", "WILD_B": "b"}
       )
