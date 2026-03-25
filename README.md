@@ -46,6 +46,7 @@ You need a GKE cluster with accelerator node pools to run jobs. The `kinetic` CL
 ## Features
 
 - **Simple decorator API** — Add `@kinetic.run()` to any function to execute it remotely
+- **Detached execution** — Use `@kinetic.submit()` to launch work, reattach later, and collect results when convenient
 - **Automatic infrastructure** — No manual VM provisioning or teardown required
 - **Result serialization** — Functions return actual values, not just logs
 - **Fast iteration** — Container images are cached by dependency hash; unchanged dependencies skip the build entirely (subsequent runs start in less than a minute)
@@ -157,6 +158,124 @@ def train_model():
 final_loss = train_model()
 print(f"Final loss: {final_loss}")
 ```
+
+### Async Jobs
+
+`@kinetic.run()` blocks until the remote function finishes and returns the result inline — convenient for interactive work, but limiting when jobs take hours or you want to launch several in parallel. `@kinetic.submit()` is the async counterpart: it launches the job, returns a `JobHandle` immediately, and lets you check status, stream logs, collect the result, or reattach from a completely different session whenever you're ready.
+
+The two decorators accept the same parameters, so switching between them is a one-word change.
+
+#### Submitting a Job
+
+```python
+import kinetic
+import time
+
+@kinetic.submit(accelerator="v5e-1")
+def train_model():
+    time.sleep(60)
+    return {"loss": 0.1}
+
+# Returns a JobHandle immediately — does not wait for the job to finish
+job = train_model()
+print(job.job_id)       # e.g. "job-a1b2c3d4"
+print(job.func_name)    # "train_model"
+print(job.accelerator)  # "v6e-8"
+```
+
+#### Monitoring Status and Logs
+
+```python
+# Poll the current status
+status = job.status()  # PENDING → RUNNING → SUCCEEDED or FAILED
+print(status.value)
+
+# Grab the last N log lines from the active pod
+print(job.tail(20))
+
+# Or fetch the full log as a string
+full_log = job.logs()
+
+# Stream logs in real time (blocks until the job finishes)
+job.logs(follow=True)
+```
+
+`JobStatus` values: `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `NOT_FOUND`.
+
+#### Collecting the Result
+
+```python
+# Block until the job completes and return its value
+metrics = job.result()   # {"loss": 0.1}
+
+# With a timeout (raises TimeoutError if exceeded, but the job keeps running)
+metrics = job.result(timeout=600)
+```
+
+By default, `result()` cleans up the Kubernetes resource and GCS artifacts after downloading the return value. Pass `cleanup=False` to keep them around for inspection.
+
+If the remote function raises an exception, `result()` re-raises it locally with the original traceback attached.
+
+#### Running Multiple Jobs Concurrently
+
+Because `submit()` returns immediately, you can launch several jobs and collect results later:
+
+```python
+@kinetic.submit(accelerator="cpu")
+def train_model_a():
+    ...
+
+@kinetic.submit(accelerator="cpu")
+def train_model_b():
+    ...
+
+job_a = train_model_a()
+job_b = train_model_b()
+
+# Both are running in parallel — collect when ready
+loss_a = job_a.result(cleanup=False)
+loss_b = job_b.result(cleanup=False)
+```
+
+#### Reattaching to a Job
+
+You can reconnect to a running (or finished) job from a different Python session, shell, or machine — all you need is the job ID and access to the same GCP project:
+
+```python
+job = kinetic.attach(
+    job_id="job-a1b2c3d4",
+    project="my-project",   # optional if KINETIC_PROJECT is set
+    cluster="kinetic-cluster",  # optional if KINETIC_CLUSTER is set
+)
+
+print(job.status().value)
+metrics = job.result()
+```
+
+#### Listing Jobs
+
+Discover all live Kinetic jobs on the cluster:
+
+```python
+for job in kinetic.list_jobs(project="my-project", cluster="kinetic-cluster"):
+    print(job.job_id, job.func_name, job.status().value)
+```
+
+Both `project` and `cluster` are optional when the corresponding environment variables are set.
+
+#### Cancelling and Cleaning Up
+
+```python
+# Cancel a running job (deletes the Kubernetes resource)
+job.cancel()
+
+# Explicitly clean up Kubernetes resources and/or GCS artifacts
+job.cleanup(k8s=True, gcs=True)
+```
+
+#### CLI
+
+Async jobs can also be managed from the terminal — see [`kinetic jobs`](#kinetic-jobs) in the CLI reference below.
 
 ### Working with Data
 
@@ -471,6 +590,54 @@ kinetic pool list
 
 # Remove a node pool by name
 kinetic pool remove <pool-name>
+```
+
+#### `kinetic jobs`
+
+Inspect and manage async jobs submitted with `@kinetic.submit()`. All subcommands accept `--project`, `--zone`, and `--cluster` overrides (or read from the corresponding environment variables).
+
+**List** all live jobs on the cluster:
+
+```bash
+kinetic jobs list
+```
+
+**Status** of a specific job:
+
+```bash
+kinetic jobs status <job-id>
+```
+
+**Logs** — fetch the full log, the last N lines, or stream in real time:
+
+```bash
+kinetic jobs logs <job-id>              # full log
+kinetic jobs logs <job-id> --tail 100   # last 100 lines
+kinetic jobs logs <job-id> --follow     # stream until completion
+```
+
+`--follow` and `--tail` are mutually exclusive.
+
+**Result** — block until the job completes and print its return value:
+
+```bash
+kinetic jobs result <job-id>
+kinetic jobs result <job-id> --timeout 600    # give up after 10 min
+kinetic jobs result <job-id> --no-cleanup     # keep k8s/GCS artifacts
+```
+
+**Cancel** a running job (deletes the Kubernetes resource):
+
+```bash
+kinetic jobs cancel <job-id>
+```
+
+**Cleanup** Kubernetes resources and/or GCS artifacts for a finished job:
+
+```bash
+kinetic jobs cleanup <job-id>
+kinetic jobs cleanup <job-id> --no-k8s   # only delete GCS artifacts
+kinetic jobs cleanup <job-id> --no-gcs   # only delete k8s resources
 ```
 
 ### Monitoring
