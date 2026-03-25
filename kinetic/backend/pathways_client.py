@@ -134,7 +134,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
   logged_running = False
 
   # The leader pod is suffixed with '-0' by LWS
-  leader_pod_name = f"{job_name}-0"
+  leader_pod_name = _get_leader_pod_name(job_name)
 
   logged_pending = set()
   with LogStreamer(core_v1, namespace) as streamer:
@@ -234,6 +234,119 @@ def cleanup_job(job_name, namespace="default"):
       )
 
 
+def job_exists(job_name, namespace="default") -> bool:
+  """Return whether a namespaced LeaderWorkerSet currently exists."""
+  _load_kube_config()
+  lws_version = _get_lws_version()
+  custom_api = client.CustomObjectsApi()
+  try:
+    custom_api.get_namespaced_custom_object(
+      group=LWS_GROUP,
+      version=lws_version,
+      namespace=namespace,
+      plural=LWS_PLURAL,
+      name=job_name,
+    )
+    return True
+  except ApiException as e:
+    if e.status == 404:
+      return False
+    raise RuntimeError(
+      f"Failed to read LeaderWorkerSet {job_name}: {e.reason}"
+    ) from e
+
+
+def get_job_status(job_name, namespace="default") -> str:
+  """Return the current Pathways job status for async observation APIs."""
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+  leader_pod_name = _get_leader_pod_name(job_name)
+
+  try:
+    pod = core_v1.read_namespaced_pod(leader_pod_name, namespace)
+  except ApiException as e:
+    if e.status == 404:
+      return "PENDING" if job_exists(job_name, namespace) else "NOT_FOUND"
+    raise RuntimeError(f"Failed to read leader pod status: {e.reason}") from e
+
+  if pod.status.phase == "Succeeded":
+    return "SUCCEEDED"
+  if pod.status.phase == "Failed":
+    return "FAILED"
+  if pod.status.container_statuses:
+    container_status = pod.status.container_statuses[0]
+    if container_status.state.terminated:
+      return (
+        "SUCCEEDED"
+        if container_status.state.terminated.exit_code == 0
+        else "FAILED"
+      )
+    if container_status.last_state.terminated:
+      return (
+        "SUCCEEDED"
+        if container_status.last_state.terminated.exit_code == 0
+        else "FAILED"
+      )
+  if pod.status.phase == "Running":
+    return "RUNNING"
+  return "PENDING"
+
+
+def get_job_logs(
+  job_name, namespace="default", tail_lines: int | None = None
+) -> str:
+  """Return logs for the leader pod of a Pathways job."""
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+  leader_pod_name = _get_leader_pod_name(job_name)
+
+  log_kwargs = {}
+  if tail_lines is not None:
+    log_kwargs["tail_lines"] = tail_lines
+  try:
+    return core_v1.read_namespaced_pod_log(
+      leader_pod_name,
+      namespace,
+      **log_kwargs,
+    )
+  except ApiException as e:
+    if e.status == 404:
+      raise RuntimeError(
+        f"No leader pod found for Pathways job {job_name}"
+      ) from e
+    raise RuntimeError(f"Failed to read leader pod logs: {e.reason}") from e
+
+
+def list_jobs(namespace="default") -> list[dict[str, str]]:
+  """List live Pathways jobs managed by Kinetic in a namespace."""
+  _load_kube_config()
+  lws_version = _get_lws_version()
+  custom_api = client.CustomObjectsApi()
+  objects = custom_api.list_namespaced_custom_object(
+    group=LWS_GROUP,
+    version=lws_version,
+    namespace=namespace,
+    plural=LWS_PLURAL,
+    label_selector="app=kinetic-pathways",
+  )
+
+  results = []
+  for item in objects.get("items", []):
+    metadata = item.get("metadata", {})
+    labels = metadata.get("labels", {})
+    job_id = labels.get("job-id")
+    name = metadata.get("name")
+    if job_id is None or name is None:
+      continue
+    results.append(
+      {
+        "job_id": job_id,
+        "k8s_name": name,
+      }
+    )
+  return results
+
+
 def _create_lws_spec(
   job_name,
   container_uri,
@@ -326,3 +439,8 @@ def _create_lws_spec(
       },
     },
   }
+
+
+def _get_leader_pod_name(job_name: str) -> str:
+  """Get the leader pod name for a LeaderWorkerSet."""
+  return f"{job_name}-0"
