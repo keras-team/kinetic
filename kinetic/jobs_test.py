@@ -263,7 +263,9 @@ class TestJobHandleMethods(absltest.TestCase):
       result = handle.result()
 
     self.assertEqual(result, 42)
-    mock_cleanup.assert_called_once_with(k8s=True, gcs=True)
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=True, cleanup_timeout=180, cleanup_poll_interval=2
+    )
 
   def test_result_checks_gcs_after_not_found(self):
     handle = self._make_handle()
@@ -280,7 +282,9 @@ class TestJobHandleMethods(absltest.TestCase):
       result = handle.result()
 
     self.assertEqual(result, "done")
-    mock_cleanup.assert_called_once_with(k8s=True, gcs=True)
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=True, cleanup_timeout=180, cleanup_poll_interval=2
+    )
 
   def test_result_raises_clear_error_when_result_missing(self):
     handle = self._make_handle()
@@ -297,7 +301,9 @@ class TestJobHandleMethods(absltest.TestCase):
     ):
       handle.result()
 
-    mock_cleanup.assert_called_once_with(k8s=True, gcs=False)
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
 
   def test_result_failed_raises_clear_error_when_result_missing(self):
     handle = self._make_handle()
@@ -314,7 +320,9 @@ class TestJobHandleMethods(absltest.TestCase):
     ):
       handle.result()
 
-    mock_cleanup.assert_called_once_with(k8s=True, gcs=False)
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
 
   def test_result_reraises_user_exception_with_remote_traceback(self):
     handle = self._make_handle()
@@ -381,7 +389,9 @@ class TestJobHandleMethods(absltest.TestCase):
     with mock.patch.object(handle, "cleanup") as mock_cleanup:
       handle.cancel()
 
-    mock_cleanup.assert_called_once_with(k8s=True, gcs=False)
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
 
   def test_cleanup_deletes_k8s_and_gcs(self):
     handle = self._make_handle()
@@ -398,6 +408,8 @@ class TestJobHandleMethods(absltest.TestCase):
     mock_cleanup_job.assert_called_once_with(
       handle.k8s_name,
       namespace=handle.namespace,
+      timeout=180,
+      poll_interval=2,
     )
     mock_cleanup_artifacts.assert_called_once_with(
       handle.bucket_name,

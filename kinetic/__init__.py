@@ -12,7 +12,11 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from kinetic.core.core import run as run
+from kinetic.core.core import submit as submit
 from kinetic.data import Data as Data
+from kinetic.jobs import JobHandle as JobHandle
+from kinetic.jobs import attach as attach
+from kinetic.jobs import list_jobs as list_jobs
 
 logging.use_absl_handler()
 

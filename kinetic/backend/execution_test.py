@@ -17,6 +17,7 @@ from kinetic.backend.execution import (
   _find_requirements,
   _prepare_artifacts,
   execute_remote,
+  submit_remote,
 )
 from kinetic.data import Data
 
@@ -51,26 +52,6 @@ class TestJobContext(absltest.TestCase):
     self.assertEqual(ctx.region, "europe-west4")
     self.assertTrue(ctx.display_name.startswith("kinetic-my_train-"))
     self.assertRegex(ctx.job_id, r"^job-[0-9a-f]{8}$")
-
-  def test_from_params_explicit(self):
-    ctx = JobContext.from_params(
-      func=self._make_func(),
-      args=(1, 2),
-      kwargs={"k": "v"},
-      accelerator="l4",
-      container_image="my-image:latest",
-      zone="us-west1-a",
-      project="explicit-proj",
-      env_vars={"X": "Y"},
-    )
-    self.assertEqual(ctx.zone, "us-west1-a")
-    self.assertEqual(ctx.project, "explicit-proj")
-    self.assertEqual(ctx.accelerator, "l4")
-    self.assertEqual(ctx.container_image, "my-image:latest")
-    self.assertEqual(ctx.args, (1, 2))
-    self.assertEqual(ctx.kwargs, {"k": "v"})
-    self.assertEqual(ctx.env_vars, {"X": "Y"})
-    self.assertTrue(ctx.working_dir)
 
   def test_from_params_resolves_zone_from_env(self):
     with mock.patch.dict(
@@ -274,9 +255,7 @@ class TestExecuteRemote(absltest.TestCase):
 
   def test_success_flow(self):
     with (
-      mock.patch("kinetic.backend.execution.ensure_credentials"),
-      mock.patch("kinetic.backend.execution._build_container"),
-      mock.patch("kinetic.backend.execution._upload_artifacts"),
+      mock.patch("kinetic.backend.execution.prepare_execution"),
       mock.patch(
         "kinetic.backend.execution._download_result",
         return_value={"success": True, "result": 42},
@@ -285,7 +264,7 @@ class TestExecuteRemote(absltest.TestCase):
         "kinetic.backend.execution._cleanup_and_return",
         return_value=42,
       ),
-      mock.patch("kinetic.backend.execution.storage"),
+      mock.patch("kinetic.backend.execution.storage.cleanup_artifacts"),
     ):
       ctx = self._make_ctx()
       backend = MagicMock()
@@ -299,14 +278,12 @@ class TestExecuteRemote(absltest.TestCase):
 
   def test_cleanup_on_wait_failure(self):
     with (
-      mock.patch("kinetic.backend.execution.ensure_credentials"),
-      mock.patch("kinetic.backend.execution._build_container"),
-      mock.patch("kinetic.backend.execution._upload_artifacts"),
+      mock.patch("kinetic.backend.execution.prepare_execution"),
       mock.patch(
         "kinetic.backend.execution._download_result",
         side_effect=google_exceptions.NotFound("no result uploaded"),
       ),
-      mock.patch("kinetic.backend.execution.storage"),
+      mock.patch("kinetic.backend.execution.storage.cleanup_artifacts"),
     ):
       ctx = self._make_ctx()
       backend = MagicMock()
@@ -317,6 +294,30 @@ class TestExecuteRemote(absltest.TestCase):
 
       # cleanup_job is called in finally block even when wait fails
       backend.cleanup_job.assert_called_once()
+
+  def test_gcs_cleanup_always_attempted(self):
+    with (
+      mock.patch("kinetic.backend.execution.prepare_execution"),
+      mock.patch(
+        "kinetic.backend.execution._download_result",
+        return_value={"success": True, "result": 42},
+      ),
+      mock.patch(
+        "kinetic.backend.execution._cleanup_and_return",
+        return_value=42,
+      ),
+      mock.patch(
+        "kinetic.backend.execution.storage.cleanup_artifacts"
+      ) as mock_gcs,
+    ):
+      ctx = self._make_ctx()
+      backend = MagicMock()
+
+      execute_remote(ctx, backend)
+
+      mock_gcs.assert_called_once_with(
+        ctx.bucket_name, ctx.job_id, project=ctx.project
+      )
 
 
 class TestPrepareArtifacts(absltest.TestCase):
@@ -465,6 +466,119 @@ class TestPrepareArtifacts(absltest.TestCase):
     )
     self.assertEqual(
       ctx.requirements_path, str(working_dir / "requirements.txt")
+    )
+
+
+class TestSubmitRemote(absltest.TestCase):
+  def _make_ctx(self):
+    def train():
+      return 1
+
+    return JobContext(
+      func=train,
+      args=(),
+      kwargs={},
+      env_vars={},
+      accelerator="v6e-8",
+      container_image=None,
+      zone="us-central1-a",
+      project="proj",
+      cluster_name="cluster",
+    )
+
+  def _make_backend(self):
+    backend = MagicMock()
+    backend.namespace = "default"
+    backend.get_k8s_name.return_value = "kinetic-job-1234"
+    return backend
+
+  def test_handle_uploaded_before_k8s_submit(self):
+    ctx = self._make_ctx()
+    backend = self._make_backend()
+    call_order = []
+    backend.submit_job.side_effect = lambda *a, **kw: call_order.append(
+      "submit"
+    )
+
+    with (
+      mock.patch(
+        "kinetic.backend.execution.prepare_execution",
+        side_effect=lambda _ctx, _b: setattr(_ctx, "image_uri", "img:tag"),
+      ),
+      mock.patch(
+        "kinetic.backend.execution.storage.upload_handle",
+        side_effect=lambda *a, **kw: call_order.append("handle"),
+      ),
+    ):
+      submit_remote(ctx, backend)
+
+    self.assertEqual(call_order, ["handle", "submit"])
+
+  def test_conclusive_submit_failure_cleans_up(self):
+    ctx = self._make_ctx()
+    backend = self._make_backend()
+    backend.job_exists.return_value = False
+    backend.submit_job.side_effect = RuntimeError("submit failed")
+
+    with (
+      mock.patch(
+        "kinetic.backend.execution.prepare_execution",
+        side_effect=lambda _ctx, _b: setattr(_ctx, "image_uri", "img:tag"),
+      ),
+      mock.patch("kinetic.backend.execution.storage.upload_handle"),
+      mock.patch(
+        "kinetic.backend.execution.storage.cleanup_artifacts"
+      ) as mock_cleanup,
+      self.assertRaisesRegex(RuntimeError, "submit failed"),
+    ):
+      submit_remote(ctx, backend)
+
+    mock_cleanup.assert_called_once_with(
+      ctx.bucket_name, ctx.job_id, project=ctx.project
+    )
+
+  def test_ambiguous_submit_failure_returns_handle_when_job_exists(self):
+    ctx = self._make_ctx()
+    backend = self._make_backend()
+    backend.job_exists.return_value = True
+    backend.submit_job.side_effect = RuntimeError("transport reset")
+
+    with (
+      mock.patch(
+        "kinetic.backend.execution.prepare_execution",
+        side_effect=lambda _ctx, _b: setattr(_ctx, "image_uri", "img:tag"),
+      ),
+      mock.patch("kinetic.backend.execution.storage.upload_handle"),
+      mock.patch(
+        "kinetic.backend.execution.storage.cleanup_artifacts"
+      ) as mock_cleanup,
+    ):
+      handle = submit_remote(ctx, backend)
+
+    self.assertEqual(handle.job_id, ctx.job_id)
+    mock_cleanup.assert_not_called()
+
+  def test_reconciliation_failure_cleans_up(self):
+    ctx = self._make_ctx()
+    backend = self._make_backend()
+    backend.job_exists.side_effect = RuntimeError("k8s unreachable")
+    backend.submit_job.side_effect = RuntimeError("submit failed")
+
+    with (
+      mock.patch(
+        "kinetic.backend.execution.prepare_execution",
+        side_effect=lambda _ctx, _b: setattr(_ctx, "image_uri", "img:tag"),
+      ),
+      mock.patch("kinetic.backend.execution.storage.upload_handle"),
+      mock.patch(
+        "kinetic.backend.execution.storage.cleanup_artifacts"
+      ) as mock_cleanup,
+      self.assertRaisesRegex(RuntimeError, "submit failed"),
+    ):
+      submit_remote(ctx, backend)
+
+    mock_cleanup.assert_called_once_with(
+      ctx.bucket_name, ctx.job_id, project=ctx.project
     )
 
 

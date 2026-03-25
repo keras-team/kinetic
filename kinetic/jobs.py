@@ -62,7 +62,7 @@ def _utcnow_iso() -> str:
   )
 
 
-def _attach_remote_traceback(
+def attach_remote_traceback(
   exception: BaseException, remote_traceback: str | None
 ) -> BaseException:
   """Attach the remote traceback string to an exception when available."""
@@ -190,16 +190,30 @@ class JobHandle:
       )
     raise ValueError(f"Unknown backend: {self.backend}")
 
-  def _cleanup_k8s_resource(self) -> None:
+  def _cleanup_k8s_resource(
+    self,
+    timeout: float = 180,
+    poll_interval: float = 2,
+  ) -> None:
     """Delete the backend-specific Kubernetes resource if it exists."""
     ensure_credentials(
       project=self.project, zone=self.zone, cluster=self.cluster_name
     )
     if self.backend == "gke":
-      gke_client.cleanup_job(self.k8s_name, namespace=self.namespace)
+      gke_client.cleanup_job(
+        self.k8s_name,
+        namespace=self.namespace,
+        timeout=timeout,
+        poll_interval=poll_interval,
+      )
       return
     if self.backend == "pathways":
-      pathways_client.cleanup_job(self.k8s_name, namespace=self.namespace)
+      pathways_client.cleanup_job(
+        self.k8s_name,
+        namespace=self.namespace,
+        timeout=timeout,
+        poll_interval=poll_interval,
+      )
       return
     raise ValueError(f"Unknown backend: {self.backend}")
 
@@ -280,7 +294,13 @@ class JobHandle:
     """Return the last n log lines from the active pod."""
     return self._get_logs(tail_lines=n)
 
-  def result(self, timeout: float | None = None, cleanup: bool = True) -> Any:
+  def result(
+    self,
+    timeout: float | None = None,
+    cleanup: bool = True,
+    cleanup_timeout: float = 180,
+    cleanup_poll_interval: float = 2,
+  ) -> Any:
     """Wait for the job result and return it or re-raise the user exception.
 
     Args:
@@ -290,6 +310,10 @@ class JobHandle:
       cleanup: When *True* (default), delete the k8s resource and
         GCS artifacts after a result payload is successfully
         downloaded.  Matches `run()` semantics.
+      cleanup_timeout: Maximum seconds to wait for the k8s resource
+        deletion to be confirmed.
+      cleanup_poll_interval: Seconds between deletion-confirmation
+        polls.
 
     Returns:
       The function's return value.
@@ -321,28 +345,60 @@ class JobHandle:
 
       if result_payload["success"]:
         return result_payload["result"]
-      raise _attach_remote_traceback(
+      raise attach_remote_traceback(
         result_payload["exception"],
         result_payload.get("traceback"),
       )
     finally:
       if cleanup:
         try:
-          self.cleanup(k8s=True, gcs=result_payload is not None)
+          self.cleanup(
+            k8s=True,
+            gcs=result_payload is not None,
+            cleanup_timeout=cleanup_timeout,
+            cleanup_poll_interval=cleanup_poll_interval,
+          )
         except Exception:
           logging.warning(
             "Failed to clean up job %s after result collection",
             self.job_id,
           )
 
-  def cancel(self) -> None:
+  def cancel(
+    self,
+    cleanup_timeout: float = 180,
+    cleanup_poll_interval: float = 2,
+  ) -> None:
     """Cancel the running job by deleting its Kubernetes resource."""
-    self.cleanup(k8s=True, gcs=False)
+    self.cleanup(
+      k8s=True,
+      gcs=False,
+      cleanup_timeout=cleanup_timeout,
+      cleanup_poll_interval=cleanup_poll_interval,
+    )
 
-  def cleanup(self, k8s: bool = True, gcs: bool = True) -> None:
-    """Clean up Kubernetes resources and/or uploaded GCS artifacts."""
+  def cleanup(
+    self,
+    k8s: bool = True,
+    gcs: bool = True,
+    cleanup_timeout: float = 180,
+    cleanup_poll_interval: float = 2,
+  ) -> None:
+    """Clean up Kubernetes resources and/or uploaded GCS artifacts.
+
+    Args:
+      k8s: Delete the Kubernetes job/LWS resource.
+      gcs: Delete uploaded GCS artifacts.
+      cleanup_timeout: Maximum seconds to wait for the k8s resource
+        deletion to be confirmed.
+      cleanup_poll_interval: Seconds between deletion-confirmation
+        polls.
+    """
     if k8s:
-      self._cleanup_k8s_resource()
+      self._cleanup_k8s_resource(
+        timeout=cleanup_timeout,
+        poll_interval=cleanup_poll_interval,
+      )
     if gcs:
       storage.cleanup_artifacts(
         self.bucket_name,

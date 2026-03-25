@@ -8,14 +8,14 @@ Run Keras and JAX workloads on cloud TPUs and GPUs with a simple decorator. No i
 ```python
 import kinetic
 
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v5e-1")
 def train_model():
     import keras
     model = keras.Sequential([...])
     model.fit(x_train, y_train)
     return model.history.history["loss"][-1]
 
-# Executes on TPU v6e-8, returns the result
+# Executes on TPU v5e-1, returns the result
 final_loss = train_model()
 ```
 
@@ -119,7 +119,7 @@ Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it. Se
 ```python
 import kinetic
 
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v5e-1")
 def hello_tpu():
     import jax
     return f"Running on {jax.devices()}"
@@ -137,7 +137,7 @@ print(result)
 ```python
 import kinetic
 
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v5e-1")
 def train_model():
     import keras
     import numpy as np
@@ -182,7 +182,7 @@ import pandas as pd
 import kinetic
 from kinetic import Data
 
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v5e-1")
 def train(data_dir):
     # data_dir is resolved to a local path on the remote machine
     df = pd.read_csv(f"{data_dir}/train.csv")
@@ -209,7 +209,7 @@ import kinetic
 from kinetic import Data
 
 @kinetic.run(
-    accelerator="v6e-8",
+    accelerator="v5e-1",
     volumes={
         "/data": Data("./my_dataset/"),
         "/weights": Data("gs://my-bucket/pretrained-weights/")
@@ -233,7 +233,7 @@ If your dataset is very large (e.g., > 10GB), it is inefficient to download the 
 import grain.python as grain
 import kinetic
 
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="v5e-1")
 def train(data_uri):
     # Native GCS reading, no download overhead
     data_source = grain.ArrayRecordDataSource(data_uri)
@@ -275,7 +275,7 @@ Skip container build time by using prebuilt images:
 
 ```python
 @kinetic.run(
-    accelerator="v6e-8",
+    accelerator="v5e-1",
     container_image="us-docker.pkg.dev/my-project/kinetic/prebuilt:v1.0"
 )
 def train():
@@ -322,7 +322,7 @@ You can run multiple independent clusters within the same GCP project — for ex
 
 ```bash
 # Default cluster (named "kinetic-cluster")
-kinetic up --project=my-project --accelerator=v6e-8
+kinetic up --project=my-project --accelerator=v5e-1
 
 # A separate GPU cluster
 kinetic up --project=my-project --cluster=gpu-cluster --accelerator=a100
@@ -359,13 +359,13 @@ For more examples, see the [`examples/`](examples/) directory.
 
 #### Environment Variables
 
-| Variable                     | Required | Default                | Description                                                  |
-| ---------------------------- | -------- | ---------------------- | ------------------------------------------------------------ |
-| `KINETIC_PROJECT`       | Yes      | —                      | Google Cloud project ID                                      |
-| `KINETIC_ZONE`          | No       | `us-central1-a`        | Default compute zone                                         |
-| `KINETIC_CLUSTER`       | No       | `kinetic-cluster` | GKE cluster name                                             |
-| `KINETIC_NAMESPACE`     | No       | `default`              | Kubernetes namespace                                         |
-| `KINETIC_LOG_LEVEL`     | No       | `INFO`                 | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
+| Variable            | Required | Default           | Description                                                  |
+| ------------------- | -------- | ----------------- | ------------------------------------------------------------ |
+| `KINETIC_PROJECT`   | Yes      | —                 | Google Cloud project ID                                      |
+| `KINETIC_ZONE`      | No       | `us-central1-a`   | Default compute zone                                         |
+| `KINETIC_CLUSTER`   | No       | `kinetic-cluster` | GKE cluster name                                             |
+| `KINETIC_NAMESPACE` | No       | `default`         | Kubernetes namespace                                         |
+| `KINETIC_LOG_LEVEL` | No       | `INFO`            | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
 
 Kinetic uses `absl-py` for logging. Set `KINETIC_LOG_LEVEL=DEBUG` for verbose output when debugging issues.
 
@@ -373,7 +373,7 @@ Kinetic uses `absl-py` for logging. Set `KINETIC_LOG_LEVEL=DEBUG` for verbose ou
 
 ```python
 @kinetic.run(
-    accelerator="v6e-8",       # TPU/GPU type (default: "v6e-8")
+    accelerator="v5e-1",       # TPU/GPU type (default: "v5e-1")
     container_image=None,      # Custom container URI
     zone=None,                 # Override default zone
     project=None,              # Override default project
@@ -464,7 +464,7 @@ Manage accelerator node pools after initial setup:
 
 ```bash
 # Add a node pool for a specific accelerator
-kinetic pool add --accelerator=v6e-8
+kinetic pool add --accelerator=v5e-1
 
 # List current node pools
 kinetic pool list

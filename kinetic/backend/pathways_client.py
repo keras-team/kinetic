@@ -208,7 +208,9 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
       time.sleep(poll_interval)
 
 
-def cleanup_job(job_name, namespace="default", timeout=180, poll_interval=2):
+def cleanup_job(
+  job_name, namespace="default", timeout: float = 180, poll_interval: float = 2
+):
   """Delete LeaderWorkerSet.
 
   Blocks until the API confirms the resource is gone (404).

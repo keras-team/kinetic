@@ -26,6 +26,7 @@ from kinetic.constants import (
 from kinetic.credentials import ensure_credentials
 from kinetic.data import _make_data_ref
 from kinetic.infra import container_builder
+from kinetic.jobs import JobHandle, attach_remote_traceback
 from kinetic.utils import packager, storage
 
 
@@ -132,8 +133,22 @@ class BaseK8sBackend:
     """Wait for job completion. Raises RuntimeError if job fails."""
     raise NotImplementedError
 
-  def cleanup_job(self, job: Any, ctx: JobContext) -> None:
+  def cleanup_job(
+    self,
+    job: Any,
+    ctx: JobContext,
+    timeout: float = 180,
+    poll_interval: float = 2,
+  ) -> None:
     """Optional cleanup after job completion."""
+    raise NotImplementedError
+
+  def get_k8s_name(self, job_id: str) -> str:
+    """Return the backend-specific Kubernetes resource name."""
+    raise NotImplementedError
+
+  def job_exists(self, job_name: str) -> bool:
+    """Return whether the Kubernetes resource currently exists."""
     raise NotImplementedError
 
 
@@ -152,6 +167,7 @@ class GKEBackend(BaseK8sBackend):
 
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit job to GKE cluster."""
+    logging.info("Submitting job to GKEBackend...")
     return gke_client.submit_k8s_job(
       display_name=ctx.display_name,
       container_uri=ctx.image_uri,
@@ -167,10 +183,29 @@ class GKEBackend(BaseK8sBackend):
     """Wait for GKE job completion."""
     gke_client.wait_for_job(job, namespace=self.namespace)
 
-  def cleanup_job(self, job: Any, ctx: JobContext) -> None:
+  def cleanup_job(
+    self,
+    job: Any,
+    ctx: JobContext,
+    timeout: float = 180,
+    poll_interval: float = 2,
+  ) -> None:
     """Clean up K8s job resources."""
     job_name = job.metadata.name
-    gke_client.cleanup_job(job_name, namespace=self.namespace)
+    gke_client.cleanup_job(
+      job_name,
+      namespace=self.namespace,
+      timeout=timeout,
+      poll_interval=poll_interval,
+    )
+
+  def get_k8s_name(self, job_id: str) -> str:
+    """Return the standard GKE Job name for this job ID."""
+    return f"kinetic-{job_id}"
+
+  def job_exists(self, job_name: str) -> bool:
+    """Return whether the GKE Job exists."""
+    return gke_client.job_exists(job_name, namespace=self.namespace)
 
 
 class PathwaysBackend(BaseK8sBackend):
@@ -189,6 +224,7 @@ class PathwaysBackend(BaseK8sBackend):
 
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit LWS job to GKE cluster."""
+    logging.info("Submitting job to PathwaysBackend...")
     return pathways_client.submit_pathways_job(
       display_name=ctx.display_name,
       container_uri=ctx.image_uri,
@@ -204,10 +240,29 @@ class PathwaysBackend(BaseK8sBackend):
     """Wait for Pathways LWS completion."""
     pathways_client.wait_for_job(ctx.job_id, namespace=self.namespace)
 
-  def cleanup_job(self, job: Any, ctx: JobContext) -> None:
+  def cleanup_job(
+    self,
+    job: Any,
+    ctx: JobContext,
+    timeout: float = 180,
+    poll_interval: float = 2,
+  ) -> None:
     """Clean up LWS resources."""
     job_name = pathways_client._get_job_name(ctx.job_id)
-    pathways_client.cleanup_job(job_name, namespace=self.namespace)
+    pathways_client.cleanup_job(
+      job_name,
+      namespace=self.namespace,
+      timeout=timeout,
+      poll_interval=poll_interval,
+    )
+
+  def get_k8s_name(self, job_id: str) -> str:
+    """Return the standard LeaderWorkerSet name for this job ID."""
+    return pathways_client._get_job_name(job_id)
+
+  def job_exists(self, job_name: str) -> bool:
+    """Return whether the LeaderWorkerSet exists."""
+    return pathways_client.job_exists(job_name, namespace=self.namespace)
 
 
 def _find_requirements(start_dir: str) -> Optional[str]:
@@ -232,7 +287,7 @@ def _find_requirements(start_dir: str) -> Optional[str]:
   return None
 
 
-def _maybe_exclude(data_path, caller_path, exclude_paths):
+def _maybe_exclude(data_path, caller_path, exclude_paths) -> None:
   """Add data_path to exclude_paths if it's inside the caller directory."""
   data_abs = os.path.normpath(data_path)
   caller_abs = os.path.normpath(caller_path)
@@ -343,6 +398,21 @@ def _upload_artifacts(ctx: JobContext) -> None:
   )
 
 
+def prepare_execution(ctx: JobContext, backend: BaseK8sBackend) -> None:
+  """Run the shared pre-submit phases for a remote job."""
+  ensure_credentials(
+    project=ctx.project,
+    zone=ctx.zone,
+    cluster=backend.cluster,
+  )
+  backend.validate_preflight(ctx)
+
+  with tempfile.TemporaryDirectory() as tmpdir:
+    _prepare_artifacts(ctx, tmpdir)
+    _build_container(ctx)
+    _upload_artifacts(ctx)
+
+
 def _download_result(ctx: JobContext) -> dict:
   """Download and deserialize result from Cloud Storage."""
   logging.info("Downloading result...")
@@ -364,7 +434,10 @@ def _cleanup_and_return(ctx: JobContext, result_payload: dict) -> Any:
     return result_payload["result"]
   else:
     logging.error("Remote execution failed:\n%s", result_payload["traceback"])
-    raise result_payload["exception"]
+    raise attach_remote_traceback(
+      result_payload["exception"],
+      result_payload.get("traceback"),
+    )
 
 
 def execute_remote(ctx: JobContext, backend: BaseK8sBackend) -> Any:
@@ -383,62 +456,102 @@ def execute_remote(ctx: JobContext, backend: BaseK8sBackend) -> Any:
   Raises:
       Exception: Re-raised from remote execution if it failed
   """
-  ensure_credentials(
-    project=ctx.project,
-    zone=ctx.zone,
-    cluster=backend.cluster,
+  prepare_execution(ctx, backend)
+
+  try:
+    job = backend.submit_job(ctx)
+
+    # Step 4: Wait for completion (with cleanup on failure)
+    job_error = None
+    try:
+      backend.wait_for_job(job, ctx)
+    except RuntimeError as e:
+      job_error = e
+    finally:
+      backend.cleanup_job(job, ctx)
+
+    # Step 6: Download and deserialize result
+    # Try even if the job failed — the runner may have captured a user
+    # exception and uploaded the result before exiting with non-zero.
+    if job_error is not None:
+      try:
+        result_payload = _download_result(ctx)
+      except google_exceptions.NotFound:
+        # Result wasn't uploaded (infrastructure failure), surface the
+        # original job error.
+        raise job_error from None
+    else:
+      result_payload = _download_result(ctx)
+
+    # Step 7: Return result or raise remote exception
+    return _cleanup_and_return(ctx, result_payload)
+  finally:
+    # Always attempt GCS cleanup, even if download or deserialization
+    # fails unexpectedly. This prevents orphaned artifacts.
+    try:
+      storage.cleanup_artifacts(
+        ctx.bucket_name, ctx.job_id, project=ctx.project
+      )
+    except Exception:
+      logging.warning("Failed to clean up GCS artifacts for job %s", ctx.job_id)
+
+
+def submit_remote(ctx: JobContext, backend: BaseK8sBackend) -> JobHandle:
+  """Submit a job and return a JobHandle without waiting for completion.
+
+  Runs the shared pre-submit phases (credentials, preflight, prepare,
+  build, upload), persists a durable handle to GCS, and submits the
+  job to Kubernetes.  The caller observes, collects, and cleans up
+  via the returned handle.
+
+  Returns:
+      A ``JobHandle`` representing the submitted job.
+  """
+
+  prepare_execution(ctx, backend)
+
+  handle = JobHandle.from_job_context(
+    ctx,
+    backend_name="pathways" if isinstance(backend, PathwaysBackend) else "gke",
+    namespace=backend.namespace,
+    k8s_name=backend.get_k8s_name(ctx.job_id),
   )
 
-  # Preflight check
-  backend.validate_preflight(ctx)
+  try:
+    storage.upload_handle(
+      ctx.bucket_name,
+      ctx.job_id,
+      handle.to_dict(),
+      project=ctx.project,
+    )
+  except Exception:
+    storage.cleanup_artifacts(ctx.bucket_name, ctx.job_id, project=ctx.project)
+    raise
 
-  with tempfile.TemporaryDirectory() as tmpdir:
-    # Step 1: Package artifacts
-    _prepare_artifacts(ctx, tmpdir)
-
-    # Step 2: Build or get cached container image
-    _build_container(ctx)
+  try:
+    backend.submit_job(ctx)
+  except Exception as submit_error:
+    try:
+      if backend.job_exists(handle.k8s_name):
+        logging.warning(
+          "Kubernetes create for %s failed but resource %s exists; "
+          "treating submission as successful",
+          ctx.job_id,
+          handle.k8s_name,
+        )
+        return handle
+    except Exception:
+      logging.warning(
+        "Failed to reconcile submit error for job %s",
+        ctx.job_id,
+      )
 
     try:
-      # Step 3: Upload artifacts to Cloud Storage
-      _upload_artifacts(ctx)
+      storage.cleanup_artifacts(
+        ctx.bucket_name, ctx.job_id, project=ctx.project
+      )
+    except Exception:
+      logging.warning("Failed to clean up GCS artifacts for job %s", ctx.job_id)
+    raise submit_error from None
 
-      # Step 4: Submit job (backend-specific)
-      logging.info("Submitting job to %s...", backend.__class__.__name__)
-      job = backend.submit_job(ctx)
-
-      # Step 5: Wait for completion (with cleanup on failure)
-      job_error = None
-      try:
-        backend.wait_for_job(job, ctx)
-      except RuntimeError as e:
-        job_error = e
-      finally:
-        backend.cleanup_job(job, ctx)
-
-      # Step 6: Download and deserialize result
-      # Try even if the job failed — the runner may have captured a user
-      # exception and uploaded the result before exiting with non-zero.
-      if job_error is not None:
-        try:
-          result_payload = _download_result(ctx)
-        except google_exceptions.NotFound:
-          # Result wasn't uploaded (infrastructure failure), surface the
-          # original job error.
-          raise job_error from None
-      else:
-        result_payload = _download_result(ctx)
-
-      # Step 7: Return result or raise remote exception
-      return _cleanup_and_return(ctx, result_payload)
-    finally:
-      # Always attempt GCS cleanup, even if download or deserialization
-      # fails unexpectedly. This prevents orphaned artifacts.
-      try:
-        storage.cleanup_artifacts(
-          ctx.bucket_name, ctx.job_id, project=ctx.project
-        )
-      except Exception:
-        logging.warning(
-          "Failed to clean up GCS artifacts for job %s", ctx.job_id
-        )
+  return handle
