@@ -68,7 +68,7 @@ Before submitting a pull request, please ensure your changes pass linting and un
   | `E2E_TESTS`       | Yes      | —               | Set to `1` to enable e2e tests |
   | `KINETIC_PROJECT` | Yes      | —               | Google Cloud project ID        |
   | `KINETIC_ZONE`    | No       | `us-central1-a` | GKE cluster zone               |
-  | `KINETIC_CLUSTER` | No       | `kinetic`        | GKE cluster name               |
+| `KINETIC_CLUSTER` | No       | `kinetic-cluster` | GKE cluster name               |
 
   **Run all e2e tests:**
 
