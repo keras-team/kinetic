@@ -30,7 +30,7 @@ This project follows
 1. Install the package with development dependencies:
 
    ```bash
-   pip install -e ".[dev]"
+   uv pip install -e ".[dev]"
    ```
 
 2. Install pre-commit hooks:
@@ -59,7 +59,7 @@ Before submitting a pull request, please ensure your changes pass linting and un
   - A GCP project with a provisioned GKE cluster (see [Quick Start](../README.md#quick-start))
   - Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
   - GKE credentials configured: `gcloud container clusters get-credentials <KINETIC_CLUSTER> --zone <KINETIC_ZONE> --project <KINETIC_PROJECT>`
-  - Test dependencies installed: `pip install -e ".[test,cli]"`
+  - Test dependencies installed: `uv pip install -e ".[test,cli]"`
 
   **Required environment variables:**
 

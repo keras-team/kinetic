@@ -5,14 +5,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
-RUN python3 -m pip install --upgrade pip
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Install JAX with appropriate backend
 $jax_install
 
 # Install Keras and cloudpickle
-RUN python3 -m pip install keras cloudpickle google-cloud-storage
+RUN uv pip install --system keras cloudpickle google-cloud-storage
 
 # Install user requirements
 $requirements_section

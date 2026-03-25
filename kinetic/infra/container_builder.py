@@ -95,7 +95,7 @@ def _parse_pyproject_dependencies(pyproject_path: str) -> str:
 
   Returns:
       Newline-separated dependency strings in PEP 508 format suitable for
-      ``pip install``, or an empty string if the file declares no
+      ``uv pip install``, or an empty string if the file declares no
       dependencies.
   """
   with open(pyproject_path, "rb") as f:
@@ -382,20 +382,20 @@ def _generate_dockerfile(
   """
   # Determine JAX installation command based on accelerator category
   if category == "cpu":
-    jax_install = "RUN python3 -m pip install jax"
+    jax_install = "RUN uv pip install --system jax"
   elif category == "tpu":
     jax_install = (
-      "RUN python3 -m pip install 'jax[tpu]>=0.4.6' "
+      "RUN uv pip install --system 'jax[tpu]>=0.4.6' "
       "-f https://storage.googleapis.com/jax-releases/libtpu_releases.html"
     )
   else:
-    jax_install = "RUN python3 -m pip install 'jax[cuda12]'"
+    jax_install = "RUN uv pip install --system 'jax[cuda12]'"
 
   requirements_section = ""
   if has_requirements:
     requirements_section = (
       "COPY requirements.txt /tmp/requirements.txt\n"
-      "RUN python3 -m pip install -r /tmp/requirements.txt\n"
+      "RUN uv pip install --system -r /tmp/requirements.txt\n"
     )
 
   template_path = os.path.join(_PACKAGE_ROOT, "Dockerfile.template")

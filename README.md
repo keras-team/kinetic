@@ -60,6 +60,7 @@ You need a GKE cluster with accelerator node pools to run jobs. The `kinetic` CL
 ### Prerequisites
 
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) — fast Python package installer
 - Google Cloud SDK (`gcloud`) — [install guide](https://cloud.google.com/sdk/docs/install)
 - A Google Cloud project with billing enabled
 
@@ -77,12 +78,12 @@ gcloud auth application-default login
 ```bash
 git clone https://github.com/keras-team/kinetic.git
 cd kinetic
-pip install -e ".[cli]"
+uv pip install -e ".[cli]"
 ```
 
 This installs both the `@kinetic.run()` decorator and the `kinetic` CLI for managing infrastructure.
 
-> If your GKE cluster and Artifact Registry are already provisioned, you can install without the CLI: `pip install -e .`
+> If your GKE cluster and Artifact Registry are already provisioned, you can install without the CLI: `uv pip install -e .`
 
 ### Provision Infrastructure
 
@@ -423,7 +424,7 @@ Use `accelerator="cpu"` to run on a CPU-only node (no accelerator attached).
 
 ### CLI Commands
 
-The `kinetic` CLI manages your cloud infrastructure. Install it with `pip install -e ".[cli]"`.
+The `kinetic` CLI manages your cloud infrastructure. Install it with `uv pip install -e ".[cli]"`.
 
 #### `kinetic up`
 

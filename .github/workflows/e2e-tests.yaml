@@ -54,8 +54,11 @@ jobs:
           location: ${{ secrets.GKE_ZONE }}
           project_id: ${{ secrets.GCP_PROJECT }}
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
-        run: pip install -e ".[test,cli]"
+        run: uv pip install --system -e ".[test,cli]"
 
       - name: Run E2E tests
         env:

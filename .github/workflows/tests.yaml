@@ -17,8 +17,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
-        run: pip install -e ".[test,cli]"
+        run: uv pip install --system -e ".[test,cli]"
 
       - name: Run unit tests
         run: >

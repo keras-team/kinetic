@@ -160,7 +160,7 @@ class TestGenerateDockerfile(parameterized.TestCase):
     dict(
       testcase_name="cpu",
       category="cpu",
-      expected=["pip install jax"],
+      expected=["uv pip install --system jax"],
       not_expected=["cuda", "tpu"],
     ),
     dict(
@@ -194,7 +194,7 @@ class TestGenerateDockerfile(parameterized.TestCase):
       category="cpu",
     )
     self.assertIn("COPY requirements.txt", content)
-    self.assertIn("pip install -r", content)
+    self.assertIn("uv pip install --system -r", content)
 
   def test_without_requirements(self):
     content = _generate_dockerfile(
