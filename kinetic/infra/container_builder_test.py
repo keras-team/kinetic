@@ -231,7 +231,9 @@ class TestGenerateDockerfile(parameterized.TestCase):
     # All deps should be resolved in exactly one uv pip install invocation.
     self.assertEqual(content.count("uv pip install"), 1)
     # That single command should contain JAX, core deps, and requirements.
-    install_line = [l for l in content.splitlines() if "uv pip install" in l][0]
+    install_line = [
+      line for line in content.splitlines() if "uv pip install" in line
+    ][0]
     for expected in [
       "jax[cuda12]",
       "keras",
