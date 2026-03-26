@@ -14,6 +14,7 @@ from kinetic.backend.gke_client import (
 )
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.core import accelerators
+from kinetic.job_status import JobStatus
 
 LWS_GROUP = "leaderworkerset.x-k8s.io"
 LWS_VERSION = "v1"
@@ -207,8 +208,17 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
       time.sleep(poll_interval)
 
 
-def cleanup_job(job_name, namespace="default"):
-  """Delete LeaderWorkerSet."""
+def cleanup_job(job_name, namespace="default", timeout=180, poll_interval=2):
+  """Delete LeaderWorkerSet.
+
+  Blocks until the API confirms the resource is gone (404).
+
+  Args:
+      job_name: Name of the LeaderWorkerSet
+      namespace: Kubernetes namespace
+      timeout: Maximum seconds to wait for deletion (default 180)
+      poll_interval: Seconds between existence checks (default 2)
+  """
   _load_kube_config()
   lws_version = _get_lws_version()
   custom_api = client.CustomObjectsApi()
@@ -225,13 +235,24 @@ def cleanup_job(job_name, namespace="default"):
   except ApiException as e:
     if e.status == 404:
       # Job already deleted
-      pass
+      return
     else:
       logging.warning(
         "Failed to delete LeaderWorkerSet %s: %s",
         job_name,
         e.reason,
       )
+      return
+
+  # Deletion is async; poll until the resource is gone.
+  max_attempts = max(1, timeout // poll_interval)
+  for _ in range(max_attempts):
+    if not job_exists(job_name, namespace):
+      return
+    time.sleep(poll_interval)
+  logging.warning(
+    "Timed out waiting for LeaderWorkerSet %s to be deleted", job_name
+  )
 
 
 def job_exists(job_name, namespace="default") -> bool:
@@ -256,7 +277,7 @@ def job_exists(job_name, namespace="default") -> bool:
     ) from e
 
 
-def get_job_status(job_name, namespace="default") -> str:
+def get_job_status(job_name, namespace="default") -> JobStatus:
   """Return the current Pathways job status for async observation APIs."""
   _load_kube_config()
   core_v1 = client.CoreV1Api()
@@ -266,30 +287,34 @@ def get_job_status(job_name, namespace="default") -> str:
     pod = core_v1.read_namespaced_pod(leader_pod_name, namespace)
   except ApiException as e:
     if e.status == 404:
-      return "PENDING" if job_exists(job_name, namespace) else "NOT_FOUND"
+      return (
+        JobStatus.PENDING
+        if job_exists(job_name, namespace)
+        else JobStatus.NOT_FOUND
+      )
     raise RuntimeError(f"Failed to read leader pod status: {e.reason}") from e
 
   if pod.status.phase == "Succeeded":
-    return "SUCCEEDED"
+    return JobStatus.SUCCEEDED
   if pod.status.phase == "Failed":
-    return "FAILED"
+    return JobStatus.FAILED
   if pod.status.container_statuses:
     container_status = pod.status.container_statuses[0]
     if container_status.state.terminated:
       return (
-        "SUCCEEDED"
+        JobStatus.SUCCEEDED
         if container_status.state.terminated.exit_code == 0
-        else "FAILED"
+        else JobStatus.FAILED
       )
     if container_status.last_state.terminated:
       return (
-        "SUCCEEDED"
+        JobStatus.SUCCEEDED
         if container_status.last_state.terminated.exit_code == 0
-        else "FAILED"
+        else JobStatus.FAILED
       )
   if pod.status.phase == "Running":
-    return "RUNNING"
-  return "PENDING"
+    return JobStatus.RUNNING
+  return JobStatus.PENDING
 
 
 def get_job_logs(

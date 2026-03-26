@@ -9,6 +9,7 @@ from absl.testing import absltest, parameterized
 from kubernetes.config import ConfigException
 from kubernetes.client.rest import ApiException
 
+from kinetic.job_status import JobStatus
 from kinetic.backend.gke_client import (
   _check_node_pool_exists_cached,
   _check_pod_scheduling,
@@ -418,7 +419,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("kinetic-job-1")
 
-    self.assertEqual(status, "SUCCEEDED")
+    self.assertEqual(status, JobStatus.SUCCEEDED)
 
   def test_get_job_status_failed(self):
     self.mock_batch.read_namespaced_job_status.return_value = (
@@ -427,7 +428,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("kinetic-job-1")
 
-    self.assertEqual(status, "FAILED")
+    self.assertEqual(status, JobStatus.FAILED)
 
   def test_get_job_status_running(self):
     self.mock_batch.read_namespaced_job_status.return_value = (
@@ -439,7 +440,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("kinetic-job-1")
 
-    self.assertEqual(status, "RUNNING")
+    self.assertEqual(status, JobStatus.RUNNING)
 
   def test_get_job_status_pending_when_no_pod_yet(self):
     self.mock_batch.read_namespaced_job_status.return_value = (
@@ -449,7 +450,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("kinetic-job-1")
 
-    self.assertEqual(status, "PENDING")
+    self.assertEqual(status, JobStatus.PENDING)
 
   def test_get_job_status_not_found(self):
     self.mock_batch.read_namespaced_job_status.side_effect = ApiException(
@@ -458,7 +459,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("kinetic-job-1")
 
-    self.assertEqual(status, "NOT_FOUND")
+    self.assertEqual(status, JobStatus.NOT_FOUND)
 
   def test_get_job_pod_name_prefers_running_pod(self):
     self.mock_core.list_namespaced_pod.return_value.items = [

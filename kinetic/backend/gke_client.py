@@ -13,6 +13,7 @@ from kubernetes.client.rest import ApiException
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.core import accelerators
 from kinetic.core.accelerators import TpuConfig
+from kinetic.job_status import JobStatus
 
 
 def submit_k8s_job(
@@ -158,12 +159,16 @@ def wait_for_job(job, namespace="default", timeout=3600, poll_interval=10):
       time.sleep(poll_interval)
 
 
-def cleanup_job(job_name, namespace="default"):
+def cleanup_job(job_name, namespace="default", timeout=180, poll_interval=2):
   """Delete completed Kubernetes Job and its pods.
+
+  Blocks until the API confirms the resource is gone (404).
 
   Args:
       job_name: Name of the Kubernetes Job
       namespace: Kubernetes namespace
+      timeout: Maximum seconds to wait for deletion (default 180)
+      poll_interval: Seconds between existence checks (default 2)
   """
   _load_kube_config()
   batch_v1 = client.BatchV1Api()
@@ -179,9 +184,18 @@ def cleanup_job(job_name, namespace="default"):
   except ApiException as e:
     if e.status == 404:
       # Job already deleted
-      pass
+      return
     else:
       logging.warning("Failed to delete job %s: %s", job_name, e.reason)
+      return
+
+  # Foreground deletion is async; poll until the resource is gone.
+  max_attempts = max(1, timeout // poll_interval)
+  for _ in range(max_attempts):
+    if not job_exists(job_name, namespace):
+      return
+    time.sleep(poll_interval)
+  logging.warning("Timed out waiting for job %s to be deleted", job_name)
 
 
 def job_exists(job_name, namespace="default") -> bool:
@@ -197,7 +211,7 @@ def job_exists(job_name, namespace="default") -> bool:
     raise RuntimeError(f"Failed to read job status: {e.reason}") from e
 
 
-def get_job_status(job_name, namespace="default") -> str:
+def get_job_status(job_name, namespace="default") -> JobStatus:
   """Return the current job status for async observation APIs."""
   _load_kube_config()
   batch_v1 = client.BatchV1Api()
@@ -207,19 +221,19 @@ def get_job_status(job_name, namespace="default") -> str:
     job_status = batch_v1.read_namespaced_job_status(job_name, namespace)
   except ApiException as e:
     if e.status == 404:
-      return "NOT_FOUND"
+      return JobStatus.NOT_FOUND
     raise RuntimeError(f"Failed to read job status: {e.reason}") from e
 
   if job_status.status.succeeded and job_status.status.succeeded >= 1:
-    return "SUCCEEDED"
+    return JobStatus.SUCCEEDED
   if job_status.status.failed and job_status.status.failed >= 1:
-    return "FAILED"
+    return JobStatus.FAILED
 
   pod = _select_job_pod(core_v1, job_name, namespace)
 
   if pod is not None and pod.status.phase == "Running":
-    return "RUNNING"
-  return "PENDING"
+    return JobStatus.RUNNING
+  return JobStatus.PENDING
 
 
 def get_job_pod_name(job_name, namespace="default") -> str | None:

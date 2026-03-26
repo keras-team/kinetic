@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 from absl.testing import absltest, parameterized
 
 from kinetic.data import Data
-from kinetic.infra.infra import get_default_project
+from kinetic.constants import get_default_project
 from kinetic.utils.storage import (
   _compute_total_size,
   _upload_directory,

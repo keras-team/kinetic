@@ -26,3 +26,31 @@ def zone_to_region(zone):
 def zone_to_ar_location(zone):
   """Convert a GCP zone to Artifact Registry multi-region (e.g. 'us-central1-a' -> 'us')."""
   return zone_to_region(zone).split("-")[0]
+
+
+def get_default_project() -> str | None:
+  """Get project ID from KINETIC_PROJECT or GOOGLE_CLOUD_PROJECT."""
+  return os.environ.get("KINETIC_PROJECT") or os.environ.get(
+    "GOOGLE_CLOUD_PROJECT"
+  )
+
+
+def get_required_project(project: str | None = None) -> str:
+  """Resolve the GCP project or raise a clear error."""
+  project = project or get_default_project()
+  if not project:
+    raise ValueError(
+      "project must be specified or set KINETIC_PROJECT "
+      "(or GOOGLE_CLOUD_PROJECT) environment variable"
+    )
+  return project
+
+
+def get_default_namespace(namespace: str | None = None) -> str:
+  """Return namespace from arg, KINETIC_NAMESPACE env var, or 'default'."""
+  return namespace or os.environ.get("KINETIC_NAMESPACE", "default")
+
+
+def build_bucket_name(project: str, cluster_name: str) -> str:
+  """Return the jobs bucket name for a project and cluster."""
+  return f"{project}-kn-{cluster_name}-jobs"

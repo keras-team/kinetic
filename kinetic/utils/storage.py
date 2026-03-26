@@ -10,8 +10,8 @@ from absl import logging
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
 
+from kinetic.constants import get_default_project
 from kinetic.data import Data
-from kinetic.infra.infra import get_default_project
 
 
 def upload_artifacts(

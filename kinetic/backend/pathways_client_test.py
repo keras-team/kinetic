@@ -16,10 +16,13 @@ from kinetic.backend.pathways_client import (
   get_job_logs,
   get_job_status,
   job_exists,
-  list_jobs as list_pathways_jobs,
   submit_pathways_job,
   wait_for_job,
 )
+from kinetic.backend.pathways_client import (
+  list_jobs as list_pathways_jobs,
+)
+from kinetic.job_status import JobStatus
 
 _MODULE = "kinetic.backend.pathways_client"
 
@@ -454,6 +457,7 @@ class TestCleanupJob(absltest.TestCase):
     self.mock_custom_api = self.enterContext(
       mock.patch(f"{_MODULE}.client.CustomObjectsApi")
     ).return_value
+    self.enterContext(mock.patch(f"{_MODULE}.job_exists", return_value=False))
 
   def test_deletes_lws(self):
     cleanup_job("my-job")
@@ -509,7 +513,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "RUNNING")
+    self.assertEqual(status, JobStatus.RUNNING)
 
   def test_get_job_status_succeeded_from_phase(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod(
@@ -518,7 +522,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "SUCCEEDED")
+    self.assertEqual(status, JobStatus.SUCCEEDED)
 
   def test_get_job_status_failed_from_terminated_container(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod(
@@ -527,7 +531,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "FAILED")
+    self.assertEqual(status, JobStatus.FAILED)
 
   def test_get_job_status_pending_when_lws_exists_but_pod_missing(self):
     self.mock_core.read_namespaced_pod.side_effect = ApiException(
@@ -537,7 +541,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "PENDING")
+    self.assertEqual(status, JobStatus.PENDING)
 
   def test_get_job_status_not_found_when_lws_missing(self):
     self.mock_core.read_namespaced_pod.side_effect = ApiException(
@@ -549,14 +553,14 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "NOT_FOUND")
+    self.assertEqual(status, JobStatus.NOT_FOUND)
 
   def test_get_job_status_failed_from_phase(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod("Failed")
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "FAILED")
+    self.assertEqual(status, JobStatus.FAILED)
 
   def test_get_job_status_succeeded_from_terminated_container(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod(
@@ -565,7 +569,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "SUCCEEDED")
+    self.assertEqual(status, JobStatus.SUCCEEDED)
 
   def test_get_job_status_failed_from_last_state(self):
     pod = MagicMock()
@@ -578,7 +582,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "FAILED")
+    self.assertEqual(status, JobStatus.FAILED)
 
   def test_get_job_status_succeeded_from_last_state(self):
     pod = MagicMock()
@@ -591,7 +595,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     status = get_job_status("keras-pathways-job-1")
 
-    self.assertEqual(status, "SUCCEEDED")
+    self.assertEqual(status, JobStatus.SUCCEEDED)
 
   def test_get_job_status_api_error_raises(self):
     self.mock_core.read_namespaced_pod.side_effect = ApiException(
