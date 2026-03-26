@@ -14,7 +14,6 @@ from kinetic.backend.pathways_client import (
   _get_lws_version,
   cleanup_job,
   get_job_logs,
-  get_job_pod_name,
   get_job_status,
   job_exists,
   submit_pathways_job,
@@ -625,20 +624,6 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
     with self.assertRaisesRegex(RuntimeError, "No leader pod found"):
       get_job_logs("keras-pathways-job-1")
-
-  def test_get_job_pod_name_returns_leader_pod_when_present(self):
-    self.mock_core.read_namespaced_pod.return_value = MagicMock()
-
-    pod_name = get_job_pod_name("keras-pathways-job-1")
-
-    self.assertEqual(pod_name, "keras-pathways-job-1-0")
-
-  def test_get_job_pod_name_returns_none_for_missing_pod(self):
-    self.mock_core.read_namespaced_pod.side_effect = ApiException(
-      status=404, reason="Not Found"
-    )
-
-    self.assertIsNone(get_job_pod_name("keras-pathways-job-1"))
 
   def test_job_exists_true(self):
     self.mock_custom_api.get_namespaced_custom_object.return_value = {"ok": 1}

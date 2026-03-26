@@ -1,15 +1,12 @@
-"""Async job handles and detached job operations for kinetic.
+"""Async job handles and detached job operations for Kinetic.
 
-Provides ``JobHandle`` for observing, collecting, and cleaning up
-remote jobs submitted via ``kinetic.submit()``.  Includes ``attach()``
-for cross-session reattachment and ``list_jobs()`` for discovery.
+Provides `JobHandle` for observing, collecting, and cleaning up
+remote jobs submitted via `kinetic.submit()`.  Includes `attach()`
+for cross-session reattachment and `list_jobs()` for discovery.
 """
 
-from __future__ import annotations
-
-import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,9 +17,14 @@ from kubernetes import client
 
 from kinetic.backend import gke_client, pathways_client
 from kinetic.backend.log_streaming import LogStreamer
-from kinetic.constants import get_default_cluster_name, get_default_zone
+from kinetic.constants import (
+  build_bucket_name,
+  get_default_cluster_name,
+  get_default_namespace,
+  get_default_zone,
+  get_required_project,
+)
 from kinetic.credentials import ensure_credentials
-from kinetic.infra.infra import get_default_project
 from kinetic.job_status import JobStatus  # re-export
 from kinetic.utils import storage
 
@@ -60,27 +62,6 @@ def _utcnow_iso() -> str:
   )
 
 
-def _get_default_namespace(namespace: str | None = None) -> str:
-  """Resolve the runtime namespace from an explicit value or env var."""
-  return namespace or os.environ.get("KINETIC_NAMESPACE", "default")
-
-
-def _get_required_project(project: str | None = None) -> str:
-  """Resolve the GCP project or raise a clear error."""
-  project = project or get_default_project()
-  if not project:
-    raise ValueError(
-      "project must be specified or set KINETIC_PROJECT "
-      "(or GOOGLE_CLOUD_PROJECT) environment variable"
-    )
-  return project
-
-
-def _build_bucket_name(project: str, cluster_name: str) -> str:
-  """Return the jobs bucket name for a project and cluster."""
-  return f"{project}-kn-{cluster_name}-jobs"
-
-
 def _attach_remote_traceback(
   exception: BaseException, remote_traceback: str | None
 ) -> BaseException:
@@ -95,7 +76,7 @@ def _attach_remote_traceback(
 class JobHandle:
   """Durable description of a submitted remote job.
 
-  All fields are JSON-serializable strings.  No ``func`` object or
+  All fields are JSON-serializable strings.  No `func` object or
   closure state is stored — only the metadata needed to observe,
   collect, and clean up the job from any machine.
   """
@@ -113,9 +94,6 @@ class JobHandle:
   func_name: str
   display_name: str
   created_at: str
-  _credentials_ready: bool = field(
-    default=False, init=False, repr=False, compare=False
-  )
 
   # ------------------------------------------------------------------
   # Serialisation helpers
@@ -128,8 +106,8 @@ class JobHandle:
     backend_name: str,
     namespace: str,
     k8s_name: str,
-  ) -> JobHandle:
-    """Build a ``JobHandle`` from a live ``JobContext``."""
+  ) -> "JobHandle":
+    """Build a `JobHandle` from a live `JobContext`."""
     return cls(
       job_id=ctx.job_id,
       backend=backend_name,
@@ -147,8 +125,8 @@ class JobHandle:
     )
 
   @classmethod
-  def from_dict(cls, d: dict[str, str]) -> JobHandle:
-    """Reconstruct a ``JobHandle`` from a plain dict.
+  def from_dict(cls, d: dict[str, str]) -> "JobHandle":
+    """Reconstruct a `JobHandle` from a plain dict.
 
     Unknown keys are silently ignored so that handles persisted by a
     future version (with extra fields) can still be loaded.
@@ -165,20 +143,11 @@ class JobHandle:
   # Internal helpers
   # ------------------------------------------------------------------
 
-  def _ensure_credentials(self) -> None:
-    """Lazily ensure kubeconfig and cloud credentials for k8s operations."""
-    if self._credentials_ready:
-      return
-    ensure_credentials(
-      project=self.project,
-      zone=self.zone,
-      cluster=self.cluster_name,
-    )
-    self._credentials_ready = True
-
   def _get_status(self) -> JobStatus:
     """Return the backend job status."""
-    self._ensure_credentials()
+    ensure_credentials(
+      project=self.project, zone=self.zone, cluster=self.cluster_name
+    )
     if self.backend == "gke":
       return gke_client.get_job_status(self.k8s_name, namespace=self.namespace)
     if self.backend == "pathways":
@@ -189,7 +158,9 @@ class JobHandle:
 
   def _get_pod_name(self) -> str | None:
     """Return the pod name used for log retrieval, if it exists."""
-    self._ensure_credentials()
+    ensure_credentials(
+      project=self.project, zone=self.zone, cluster=self.cluster_name
+    )
     if self.backend == "gke":
       return gke_client.get_job_pod_name(
         self.k8s_name, namespace=self.namespace
@@ -202,7 +173,9 @@ class JobHandle:
 
   def _get_logs(self, tail_lines: int | None = None) -> str:
     """Return log text for this job."""
-    self._ensure_credentials()
+    ensure_credentials(
+      project=self.project, zone=self.zone, cluster=self.cluster_name
+    )
     if self.backend == "gke":
       return gke_client.get_job_logs(
         self.k8s_name,
@@ -219,22 +192,14 @@ class JobHandle:
 
   def _cleanup_k8s_resource(self) -> None:
     """Delete the backend-specific Kubernetes resource if it exists."""
-    self._ensure_credentials()
+    ensure_credentials(
+      project=self.project, zone=self.zone, cluster=self.cluster_name
+    )
     if self.backend == "gke":
       gke_client.cleanup_job(self.k8s_name, namespace=self.namespace)
       return
     if self.backend == "pathways":
       pathways_client.cleanup_job(self.k8s_name, namespace=self.namespace)
-      return
-    raise ValueError(f"Unknown backend: {self.backend}")
-
-  def _load_kube_config(self) -> None:
-    """Load kubeconfig for follow-mode log streaming."""
-    if self.backend == "gke":
-      gke_client._load_kube_config()
-      return
-    if self.backend == "pathways":
-      pathways_client._load_kube_config()
       return
     raise ValueError(f"Unknown backend: {self.backend}")
 
@@ -284,7 +249,6 @@ class JobHandle:
 
   def _stream_logs(self) -> None:
     """Stream logs to stdout via LogStreamer (blocking)."""
-    self._load_kube_config()
     core_v1 = client.CoreV1Api()
     pod_name = self._get_pod_name()
     if pod_name is None:
@@ -320,12 +284,12 @@ class JobHandle:
     """Wait for the job result and return it or re-raise the user exception.
 
     Args:
-      timeout: Maximum seconds to wait.  ``None`` means wait forever.
-        If reached, ``TimeoutError`` is raised but the job keeps
+      timeout: Maximum seconds to wait.  `None` means wait forever.
+        If reached, `TimeoutError` is raised but the job keeps
         running and the handle remains valid.
       cleanup: When *True* (default), delete the k8s resource and
         GCS artifacts after a result payload is successfully
-        downloaded.  Matches ``run()`` semantics.
+        downloaded.  Matches `run()` semantics.
 
     Returns:
       The function's return value.
@@ -400,16 +364,16 @@ def attach(
   """Reconstruct a persisted handle from GCS.
 
   Args:
-    job_id: The job identifier (e.g. ``"job-a1b2c3d4"``).
+    job_id: The job identifier (e.g. `"job-a1b2c3d4"`).
     project: GCP project (uses default when *None*).
     cluster: GKE cluster name (uses default when *None*).
 
   Returns:
-    A hydrated ``JobHandle`` ready for ``status()``, ``result()``, etc.
+    A hydrated `JobHandle` ready for `status()`, `result()`, etc.
   """
-  project = _get_required_project(project)
+  project = get_required_project(project)
   cluster_name = cluster or get_default_cluster_name()
-  bucket_name = _build_bucket_name(project, cluster_name)
+  bucket_name = build_bucket_name(project, cluster_name)
   payload = storage.download_handle(
     bucket_name,
     job_id,
@@ -427,15 +391,15 @@ def list_jobs(
   """List live jobs by hydrating durable handles from discovered k8s jobs.
 
   Queries Kubernetes for GKE Jobs and Pathways LWS resources that
-  carry the ``app=kinetic`` / ``app=kinetic-pathways`` labels, then
-  downloads each job's ``handle.json`` from GCS.  Jobs whose
-  ``handle.json`` is missing are skipped with a warning.
+  carry the `app=kinetic` / `app=kinetic-pathways` labels, then
+  downloads each job's `handle.json` from GCS.  Jobs whose
+  `handle.json` is missing are skipped with a warning.
   """
-  project = _get_required_project(project)
+  project = get_required_project(project)
   zone = zone or get_default_zone()
   cluster_name = cluster or get_default_cluster_name()
-  namespace = _get_default_namespace(namespace)
-  bucket_name = _build_bucket_name(project, cluster_name)
+  namespace = get_default_namespace(namespace)
+  bucket_name = build_bucket_name(project, cluster_name)
 
   ensure_credentials(
     project=project,

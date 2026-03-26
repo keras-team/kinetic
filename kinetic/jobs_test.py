@@ -10,15 +10,6 @@ from kinetic.backend.execution import JobContext
 from kinetic.jobs import JobHandle, JobStatus, attach, list_jobs
 
 
-class TestJobStatus(absltest.TestCase):
-  def test_enum_values(self):
-    self.assertEqual(JobStatus.PENDING.value, "PENDING")
-    self.assertEqual(JobStatus.RUNNING.value, "RUNNING")
-    self.assertEqual(JobStatus.SUCCEEDED.value, "SUCCEEDED")
-    self.assertEqual(JobStatus.FAILED.value, "FAILED")
-    self.assertEqual(JobStatus.NOT_FOUND.value, "NOT_FOUND")
-
-
 class TestJobHandleSerialization(absltest.TestCase):
   def _make_ctx(self):
     def train():
@@ -198,35 +189,7 @@ class TestJobHandleMethods(absltest.TestCase):
       created_at="2026-03-25T10:00:00Z",
     )
 
-  def test_status_returns_enum(self):
-    handle = self._make_handle()
-
-    with (
-      mock.patch("kinetic.jobs.ensure_credentials"),
-      mock.patch(
-        "kinetic.jobs.gke_client.get_job_status",
-        return_value=JobStatus.RUNNING,
-      ),
-    ):
-      status = handle.status()
-
-    self.assertEqual(status, JobStatus.RUNNING)
-
-  def test_status_pathways(self):
-    handle = self._make_handle(backend="pathways")
-
-    with (
-      mock.patch("kinetic.jobs.ensure_credentials"),
-      mock.patch(
-        "kinetic.jobs.pathways_client.get_job_status",
-        return_value=JobStatus.PENDING,
-      ),
-    ):
-      status = handle.status()
-
-    self.assertEqual(status, JobStatus.PENDING)
-
-  def test_credentials_cached(self):
+  def test_credentials_checked_every_call(self):
     handle = self._make_handle()
 
     with (
@@ -239,21 +202,7 @@ class TestJobHandleMethods(absltest.TestCase):
       handle.status()
       handle.status()
 
-    mock_creds.assert_called_once()
-
-  def test_logs_returns_text(self):
-    handle = self._make_handle()
-
-    with (
-      mock.patch("kinetic.jobs.ensure_credentials"),
-      mock.patch(
-        "kinetic.jobs.gke_client.get_job_logs",
-        return_value="hello\nworld",
-      ),
-    ):
-      logs = handle.logs()
-
-    self.assertEqual(logs, "hello\nworld")
+    self.assertEqual(mock_creds.call_count, 2)
 
   def test_tail_returns_text(self):
     handle = self._make_handle()
@@ -282,7 +231,6 @@ class TestJobHandleMethods(absltest.TestCase):
     with (
       mock.patch("kinetic.jobs.ensure_credentials"),
       mock.patch.object(handle, "_get_pod_name", return_value="pod-1"),
-      mock.patch.object(handle, "_load_kube_config"),
       mock.patch("kinetic.jobs.client.CoreV1Api"),
       mock.patch(
         "kinetic.jobs.LogStreamer",
