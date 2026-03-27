@@ -27,3 +27,38 @@ def common_options(f):
     help=f"GKE cluster name [default: {DEFAULT_CLUSTER_NAME}]",
   )(f)
   return f
+
+
+def cleanup_options(f):
+  """Shared --cleanup-timeout and --cleanup-poll-interval options."""
+  f = click.option(
+    "--cleanup-timeout",
+    type=float,
+    default=180,
+    show_default=True,
+    help="Maximum seconds to wait for k8s resource deletion.",
+  )(f)
+  f = click.option(
+    "--cleanup-poll-interval",
+    type=float,
+    default=2,
+    show_default=True,
+    help="Seconds between k8s deletion-confirmation polls.",
+  )(f)
+  return f
+
+
+def jobs_options(f):
+  """Shared options for ``kinetic jobs`` subcommands.
+
+  Extends ``common_options`` with ``--namespace``.
+  """
+  f = common_options(f)
+  f = click.option(
+    "--namespace",
+    envvar="KINETIC_NAMESPACE",
+    default="default",
+    show_default=True,
+    help="Kubernetes namespace [env: KINETIC_NAMESPACE]",
+  )(f)
+  return f

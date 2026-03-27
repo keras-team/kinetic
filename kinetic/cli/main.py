@@ -4,6 +4,7 @@ import click
 
 from kinetic.cli.commands.config import config
 from kinetic.cli.commands.down import down
+from kinetic.cli.commands.jobs import jobs
 from kinetic.cli.commands.pool import pool
 from kinetic.cli.commands.status import status
 from kinetic.cli.commands.up import up
@@ -21,3 +22,4 @@ cli.add_command(down)
 cli.add_command(status)
 cli.add_command(config)
 cli.add_command(pool)
+cli.add_command(jobs)
