@@ -4,6 +4,7 @@ This module consolidates the common execution logic shared between different
 backend implementations, reducing code duplication and improving maintainability.
 """
 
+import concurrent.futures
 import inspect
 import os
 import tempfile
@@ -409,8 +410,12 @@ def prepare_execution(ctx: JobContext, backend: BaseK8sBackend) -> None:
 
   with tempfile.TemporaryDirectory() as tmpdir:
     _prepare_artifacts(ctx, tmpdir)
-    _build_container(ctx)
-    _upload_artifacts(ctx)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+      build_future = pool.submit(_build_container, ctx)
+      upload_future = pool.submit(_upload_artifacts, ctx)
+      # Re-raise the first exception encountered, if any.
+      build_future.result()
+      upload_future.result()
 
 
 def _download_result(ctx: JobContext) -> dict:
