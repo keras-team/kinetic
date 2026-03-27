@@ -82,7 +82,7 @@ class TestAsyncJobLifecycle(absltest.TestCase):
     handle.result(timeout=300, cleanup=False)
 
     tail_text = handle.tail(n=5)
-    lines = [l for l in tail_text.strip().splitlines() if l.strip()]
+    lines = [line for line in tail_text.strip().splitlines() if line.strip()]
     self.assertLessEqual(len(lines), 5)
 
     handle.cleanup()
