@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 
@@ -9,8 +10,8 @@ from absl import logging
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
 
+from kinetic.constants import get_default_project
 from kinetic.data import Data
-from kinetic.infra.infra import get_default_project
 
 
 def upload_artifacts(
@@ -83,6 +84,41 @@ def download_result(
   )
 
   return local_path
+
+
+def upload_handle(
+  bucket_name: str,
+  job_id: str,
+  handle_payload: dict[str, str],
+  project: str | None = None,
+) -> None:
+  """Upload a job handle to Cloud Storage as JSON."""
+  project = project or get_default_project()
+  client = storage.Client(project=project)
+  bucket = client.bucket(bucket_name)
+
+  blob = bucket.blob(f"{job_id}/handle.json")
+  blob.upload_from_string(
+    json.dumps(handle_payload, sort_keys=True),
+    content_type="application/json",
+  )
+  logging.info("Uploaded handle to gs://%s/%s/handle.json", bucket_name, job_id)
+
+
+def download_handle(
+  bucket_name: str, job_id: str, project: str | None = None
+) -> dict[str, str]:
+  """Download and deserialize a job handle from Cloud Storage."""
+  project = project or get_default_project()
+  client = storage.Client(project=project)
+  bucket = client.bucket(bucket_name)
+
+  blob = bucket.blob(f"{job_id}/handle.json")
+  handle_text = blob.download_as_text()
+  logging.info(
+    "Downloaded handle from gs://%s/%s/handle.json", bucket_name, job_id
+  )
+  return json.loads(handle_text)
 
 
 def cleanup_artifacts(

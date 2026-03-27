@@ -7,13 +7,20 @@ from unittest.mock import MagicMock
 
 from absl.testing import absltest, parameterized
 from kubernetes.config import ConfigException
+from kubernetes.client.rest import ApiException
 
+from kinetic.job_status import JobStatus
 from kinetic.backend.gke_client import (
   _check_node_pool_exists_cached,
   _check_pod_scheduling,
   _create_job_spec,
   _load_kube_config,
   _parse_accelerator,
+  get_job_logs,
+  get_job_pod_name,
+  get_job_status,
+  job_exists,
+  list_jobs as list_gke_jobs,
   wait_for_job,
 )
 
@@ -378,6 +385,157 @@ class TestWaitForJob(absltest.TestCase):
 
     self.assertEqual(result, "success")
     self.mock_streamer.start.assert_not_called()
+
+
+class TestAsyncObservationHelpers(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    self.enterContext(
+      mock.patch("kinetic.backend.gke_client._load_kube_config")
+    )
+    self.mock_batch = self.enterContext(
+      mock.patch("kinetic.backend.gke_client.client.BatchV1Api")
+    ).return_value
+    self.mock_core = self.enterContext(
+      mock.patch("kinetic.backend.gke_client.client.CoreV1Api")
+    ).return_value
+
+  def _make_job_status(self, *, succeeded=None, failed=None):
+    job_status = MagicMock()
+    job_status.status.succeeded = succeeded
+    job_status.status.failed = failed
+    return job_status
+
+  def _make_pod(self, phase, name="pod-1"):
+    pod = MagicMock()
+    pod.status.phase = phase
+    pod.metadata.name = name
+    return pod
+
+  def test_get_job_status_succeeded(self):
+    self.mock_batch.read_namespaced_job_status.return_value = (
+      self._make_job_status(succeeded=1)
+    )
+
+    status = get_job_status("kinetic-job-1")
+
+    self.assertEqual(status, JobStatus.SUCCEEDED)
+
+  def test_get_job_status_failed(self):
+    self.mock_batch.read_namespaced_job_status.return_value = (
+      self._make_job_status(failed=1)
+    )
+
+    status = get_job_status("kinetic-job-1")
+
+    self.assertEqual(status, JobStatus.FAILED)
+
+  def test_get_job_status_running(self):
+    self.mock_batch.read_namespaced_job_status.return_value = (
+      self._make_job_status()
+    )
+    self.mock_core.list_namespaced_pod.return_value.items = [
+      self._make_pod("Running")
+    ]
+
+    status = get_job_status("kinetic-job-1")
+
+    self.assertEqual(status, JobStatus.RUNNING)
+
+  def test_get_job_status_pending_when_no_pod_yet(self):
+    self.mock_batch.read_namespaced_job_status.return_value = (
+      self._make_job_status()
+    )
+    self.mock_core.list_namespaced_pod.return_value.items = []
+
+    status = get_job_status("kinetic-job-1")
+
+    self.assertEqual(status, JobStatus.PENDING)
+
+  def test_get_job_status_not_found(self):
+    self.mock_batch.read_namespaced_job_status.side_effect = ApiException(
+      status=404, reason="Not Found"
+    )
+
+    status = get_job_status("kinetic-job-1")
+
+    self.assertEqual(status, JobStatus.NOT_FOUND)
+
+  def test_get_job_pod_name_prefers_running_pod(self):
+    self.mock_core.list_namespaced_pod.return_value.items = [
+      self._make_pod("Pending", name="pending-pod"),
+      self._make_pod("Running", name="running-pod"),
+    ]
+
+    pod_name = get_job_pod_name("kinetic-job-1")
+
+    self.assertEqual(pod_name, "running-pod")
+
+  def test_get_job_logs_reads_selected_pod(self):
+    self.mock_core.list_namespaced_pod.return_value.items = [
+      self._make_pod("Running", name="running-pod")
+    ]
+    self.mock_core.read_namespaced_pod_log.return_value = "log output"
+
+    logs = get_job_logs("kinetic-job-1", tail_lines=20)
+
+    self.assertEqual(logs, "log output")
+    self.mock_core.read_namespaced_pod_log.assert_called_once_with(
+      "running-pod",
+      "default",
+      tail_lines=20,
+    )
+
+  def test_get_job_logs_missing_pod_raises(self):
+    self.mock_core.list_namespaced_pod.return_value.items = []
+
+    with self.assertRaisesRegex(RuntimeError, "No pod found"):
+      get_job_logs("kinetic-job-1")
+
+  def test_job_exists_true(self):
+    self.mock_batch.read_namespaced_job_status.return_value = (
+      self._make_job_status()
+    )
+
+    self.assertTrue(job_exists("kinetic-job-1"))
+
+  def test_job_exists_false_for_404(self):
+    self.mock_batch.read_namespaced_job_status.side_effect = ApiException(
+      status=404, reason="Not Found"
+    )
+
+    self.assertFalse(job_exists("kinetic-job-1"))
+
+  def test_job_exists_raises_on_non_404(self):
+    self.mock_batch.read_namespaced_job_status.side_effect = ApiException(
+      status=500, reason="Internal Server Error"
+    )
+
+    with self.assertRaisesRegex(RuntimeError, "Failed to read job status"):
+      job_exists("kinetic-job-1")
+
+  def test_list_jobs_returns_labelled_jobs(self):
+    job_with_label = MagicMock()
+    job_with_label.metadata.labels = {"job-id": "job-1"}
+    job_with_label.metadata.name = "kinetic-job-1"
+    job_without_label = MagicMock()
+    job_without_label.metadata.labels = {}
+    job_without_label.metadata.name = "ignored"
+    self.mock_batch.list_namespaced_job.return_value.items = [
+      job_with_label,
+      job_without_label,
+    ]
+
+    jobs = list_gke_jobs("team-ns")
+
+    self.assertEqual(
+      jobs,
+      [{"job_id": "job-1", "k8s_name": "kinetic-job-1"}],
+    )
+    self.mock_batch.list_namespaced_job.assert_called_once_with(
+      namespace="team-ns",
+      label_selector="app=kinetic",
+    )
 
 
 class TestLoadKubeConfig(absltest.TestCase):

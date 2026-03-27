@@ -13,6 +13,7 @@ from kubernetes.client.rest import ApiException
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.core import accelerators
 from kinetic.core.accelerators import TpuConfig
+from kinetic.job_status import JobStatus
 
 
 def submit_k8s_job(
@@ -158,12 +159,16 @@ def wait_for_job(job, namespace="default", timeout=3600, poll_interval=10):
       time.sleep(poll_interval)
 
 
-def cleanup_job(job_name, namespace="default"):
+def cleanup_job(job_name, namespace="default", timeout=180, poll_interval=2):
   """Delete completed Kubernetes Job and its pods.
+
+  Blocks until the API confirms the resource is gone (404).
 
   Args:
       job_name: Name of the Kubernetes Job
       namespace: Kubernetes namespace
+      timeout: Maximum seconds to wait for deletion (default 180)
+      poll_interval: Seconds between existence checks (default 2)
   """
   _load_kube_config()
   batch_v1 = client.BatchV1Api()
@@ -179,9 +184,110 @@ def cleanup_job(job_name, namespace="default"):
   except ApiException as e:
     if e.status == 404:
       # Job already deleted
-      pass
+      return
     else:
       logging.warning("Failed to delete job %s: %s", job_name, e.reason)
+      return
+
+  # Foreground deletion is async; poll until the resource is gone.
+  max_attempts = max(1, timeout // poll_interval)
+  for _ in range(max_attempts):
+    if not job_exists(job_name, namespace):
+      return
+    time.sleep(poll_interval)
+  logging.warning("Timed out waiting for job %s to be deleted", job_name)
+
+
+def job_exists(job_name, namespace="default") -> bool:
+  """Return whether a namespaced GKE Job currently exists."""
+  _load_kube_config()
+  batch_v1 = client.BatchV1Api()
+  try:
+    batch_v1.read_namespaced_job_status(job_name, namespace)
+    return True
+  except ApiException as e:
+    if e.status == 404:
+      return False
+    raise RuntimeError(f"Failed to read job status: {e.reason}") from e
+
+
+def get_job_status(job_name, namespace="default") -> JobStatus:
+  """Return the current job status for async observation APIs."""
+  _load_kube_config()
+  batch_v1 = client.BatchV1Api()
+  core_v1 = client.CoreV1Api()
+
+  try:
+    job_status = batch_v1.read_namespaced_job_status(job_name, namespace)
+  except ApiException as e:
+    if e.status == 404:
+      return JobStatus.NOT_FOUND
+    raise RuntimeError(f"Failed to read job status: {e.reason}") from e
+
+  if job_status.status.succeeded and job_status.status.succeeded >= 1:
+    return JobStatus.SUCCEEDED
+  if job_status.status.failed and job_status.status.failed >= 1:
+    return JobStatus.FAILED
+
+  pod = _select_job_pod(core_v1, job_name, namespace)
+
+  if pod is not None and pod.status.phase == "Running":
+    return JobStatus.RUNNING
+  return JobStatus.PENDING
+
+
+def get_job_pod_name(job_name, namespace="default") -> str | None:
+  """Return the most relevant pod name for a GKE Job, if any exists."""
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+  pod = _select_job_pod(core_v1, job_name, namespace)
+  if pod is None:
+    return None
+  return pod.metadata.name
+
+
+def get_job_logs(
+  job_name, namespace="default", tail_lines: int | None = None
+) -> str:
+  """Return logs for the active pod of a GKE Job."""
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+  pod = _select_job_pod(core_v1, job_name, namespace)
+  if pod is None:
+    raise RuntimeError(f"No pod found for GKE job {job_name}")
+
+  log_kwargs = {}
+  if tail_lines is not None:
+    log_kwargs["tail_lines"] = tail_lines
+  return core_v1.read_namespaced_pod_log(
+    pod.metadata.name,
+    namespace,
+    **log_kwargs,
+  )
+
+
+def list_jobs(namespace="default") -> list[dict[str, str]]:
+  """List live GKE Jobs managed by Kinetic in a namespace."""
+  _load_kube_config()
+  batch_v1 = client.BatchV1Api()
+  jobs = batch_v1.list_namespaced_job(
+    namespace=namespace,
+    label_selector="app=kinetic",
+  )
+
+  results = []
+  for job in jobs.items:
+    labels = job.metadata.labels or {}
+    job_id = labels.get("job-id")
+    if job_id is None:
+      continue
+    results.append(
+      {
+        "job_id": job_id,
+        "k8s_name": job.metadata.name,
+      }
+    )
+  return results
 
 
 def validate_preflight(
@@ -416,16 +522,30 @@ def _create_job_spec(
 def _print_pod_logs(core_v1, job_name, namespace):
   """Print pod logs for debugging failed jobs."""
   with suppress(ApiException):
-    pods = core_v1.list_namespaced_pod(
-      namespace, label_selector=f"job-name={job_name}"
-    )
-
-    for pod in pods.items:
+    for pod in _list_job_pods(core_v1, job_name, namespace):
       with suppress(ApiException):
         logs = core_v1.read_namespaced_pod_log(
           pod.metadata.name, namespace, tail_lines=100
         )
         logging.info("Pod %s logs:\n%s", pod.metadata.name, logs)
+
+
+def _list_job_pods(core_v1, job_name, namespace):
+  pods = core_v1.list_namespaced_pod(
+    namespace, label_selector=f"job-name={job_name}"
+  )
+  return pods.items
+
+
+def _select_job_pod(core_v1, job_name, namespace):
+  pods = _list_job_pods(core_v1, job_name, namespace)
+  for phase in ("Running", "Pending"):
+    for pod in pods:
+      if pod.status.phase == phase:
+        return pod
+  if not pods:
+    return None
+  return pods[0]
 
 
 @functools.lru_cache(maxsize=16)

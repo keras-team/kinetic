@@ -7,7 +7,7 @@ from kinetic.backend.execution import (
   PathwaysBackend,
   execute_remote,
 )
-from kinetic.constants import DEFAULT_CLUSTER_NAME
+from kinetic.constants import DEFAULT_CLUSTER_NAME, get_default_namespace
 from kinetic.core import accelerators
 from kinetic.data import Data
 
@@ -147,8 +147,7 @@ def _execute_on_gke(
   # Get GKE-specific defaults
   if not cluster:
     cluster = os.environ.get("KINETIC_CLUSTER", DEFAULT_CLUSTER_NAME)
-  if not namespace:
-    namespace = os.environ.get("KINETIC_NAMESPACE", "default")
+  namespace = get_default_namespace(namespace)
 
   ctx = JobContext.from_params(
     func,
@@ -183,8 +182,7 @@ def _execute_on_pathways(
   """Execute function on GKE cluster via ML Pathways."""
   if not cluster:
     cluster = os.environ.get("KINETIC_CLUSTER", DEFAULT_CLUSTER_NAME)
-  if not namespace:
-    namespace = os.environ.get("KINETIC_NAMESPACE", "default")
+  namespace = get_default_namespace(namespace)
 
   ctx = JobContext.from_params(
     func,

@@ -1,5 +1,6 @@
 """Tests for kinetic.utils.storage — Cloud Storage operations."""
 
+import json
 import os
 import pathlib
 import tempfile
@@ -9,12 +10,14 @@ from unittest.mock import MagicMock
 from absl.testing import absltest, parameterized
 
 from kinetic.data import Data
-from kinetic.infra.infra import get_default_project
+from kinetic.constants import get_default_project
 from kinetic.utils.storage import (
   _compute_total_size,
   _upload_directory,
   cleanup_artifacts,
+  download_handle,
   download_result,
+  upload_handle,
   upload_artifacts,
   upload_data,
 )
@@ -80,6 +83,36 @@ class TestDownloadResult(_GcsTestBase):
   def test_returns_path_with_job_id(self):
     result = download_result("my-bucket", "job-xyz", project="proj")
     self.assertIn("result-job-xyz.pkl", result)
+
+
+class TestHandleStorage(_GcsTestBase):
+  def test_upload_handle_writes_json_blob(self):
+    mock_bucket = self.mock_gcs.bucket.return_value
+    mock_blob = mock_bucket.blob.return_value
+    handle = {"job_id": "job-abc", "backend": "gke"}
+
+    upload_handle("my-bucket", "job-abc", handle, project="proj")
+
+    mock_bucket.blob.assert_called_once_with("job-abc/handle.json")
+    payload = mock_blob.upload_from_string.call_args[0][0]
+    self.assertEqual(json.loads(payload), handle)
+    self.assertEqual(
+      mock_blob.upload_from_string.call_args.kwargs["content_type"],
+      "application/json",
+    )
+
+  def test_download_handle_reads_json_blob(self):
+    mock_bucket = self.mock_gcs.bucket.return_value
+    mock_blob = mock_bucket.blob.return_value
+    mock_blob.download_as_text.return_value = json.dumps(
+      {"job_id": "job-xyz", "backend": "pathways"}
+    )
+
+    handle = download_handle("my-bucket", "job-xyz", project="proj")
+
+    mock_bucket.blob.assert_called_once_with("job-xyz/handle.json")
+    self.assertEqual(handle["job_id"], "job-xyz")
+    self.assertEqual(handle["backend"], "pathways")
 
 
 class TestCleanupArtifacts(_GcsTestBase):

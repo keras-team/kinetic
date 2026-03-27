@@ -17,14 +17,15 @@ from google.api_core import exceptions as google_exceptions
 
 from kinetic.backend import gke_client, pathways_client
 from kinetic.constants import (
+  build_bucket_name,
   get_default_cluster_name,
   get_default_zone,
+  get_required_project,
   zone_to_region,
 )
 from kinetic.credentials import ensure_credentials
 from kinetic.data import _make_data_ref
 from kinetic.infra import container_builder
-from kinetic.infra.infra import get_default_project
 from kinetic.utils import packager, storage
 
 
@@ -67,7 +68,7 @@ class JobContext:
   image_uri: Optional[str] = None
 
   def __post_init__(self):
-    self.bucket_name = f"{self.project}-kn-{self.cluster_name}-jobs"
+    self.bucket_name = build_bucket_name(self.project, self.cluster_name)
     self.region = zone_to_region(self.zone)
     self.display_name = f"kinetic-{self.func.__name__}-{self.job_id}"
     if self.working_dir is None:
@@ -92,12 +93,7 @@ class JobContext:
     if not zone:
       zone = get_default_zone()
     if not project:
-      project = get_default_project()
-      if not project:
-        raise ValueError(
-          "project must be specified or set KINETIC_PROJECT"
-          " (or GOOGLE_CLOUD_PROJECT) environment variable"
-        )
+      project = get_required_project()
     if not cluster_name:
       cluster_name = get_default_cluster_name()
 
