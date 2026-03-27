@@ -9,6 +9,7 @@ import tempfile
 from absl import logging
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
+from google.cloud.storage.retry import DEFAULT_RETRY
 
 from kinetic.constants import get_default_project
 from kinetic.data import Data
@@ -37,14 +38,14 @@ def upload_artifacts(
 
   # Upload payload
   blob = bucket.blob(f"{job_id}/payload.pkl")
-  blob.upload_from_filename(payload_path)
+  blob.upload_from_filename(payload_path, retry=DEFAULT_RETRY)
   logging.info(
     "Uploaded payload to gs://%s/%s/payload.pkl", bucket_name, job_id
   )
 
   # Upload context
   blob = bucket.blob(f"{job_id}/context.zip")
-  blob.upload_from_filename(context_path)
+  blob.upload_from_filename(context_path, retry=DEFAULT_RETRY)
   logging.info(
     "Uploaded context to gs://%s/%s/context.zip", bucket_name, job_id
   )
