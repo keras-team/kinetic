@@ -13,6 +13,7 @@ from kubernetes.client.rest import ApiException
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.core import accelerators
 from kinetic.core.accelerators import TpuConfig
+from kinetic.credentials import invalidate_credential_cache
 from kinetic.job_status import JobStatus
 
 
@@ -69,7 +70,8 @@ def submit_k8s_job(
     )
     return created_job
   except ApiException as e:
-    if e.status == 403:
+    if e.status in (401, 403):
+      invalidate_credential_cache()
       raise RuntimeError(
         f"Permission denied creating K8s Job. Ensure your kubeconfig "
         f"has 'create' permission for Jobs in namespace '{namespace}'. "

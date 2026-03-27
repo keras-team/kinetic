@@ -22,12 +22,35 @@ _cache_lock = threading.Lock()
 _CREDENTIAL_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
+def invalidate_credential_cache(
+  project: str | None = None,
+  zone: str | None = None,
+  cluster: str | None = None,
+) -> None:
+  """Invalidate cached credential validation results.
+
+  Call this when credentials are known to have changed (e.g. after a
+  re-login or kubeconfig update) so that the next
+  ``ensure_credentials`` call performs a fresh check.
+
+  If all three arguments are provided, only that specific entry is
+  removed.  Otherwise the entire cache is cleared.
+  """
+  with _cache_lock:
+    if project is not None and zone is not None and cluster is not None:
+      _credential_cache.pop((project, zone, cluster), None)
+    else:
+      _credential_cache.clear()
+
+
 def ensure_credentials(project: str, zone: str, cluster: str) -> None:
   """Ensure all credentials needed for remote execution are available.
 
   Results are cached per (project, zone, cluster) tuple for 5 minutes
   to avoid repeated subprocess calls and kubeconfig parsing during
-  tight polling loops (e.g. ``JobHandle.result()``).
+  tight polling loops (e.g. ``JobHandle.result()``).  Call
+  ``invalidate_credential_cache()`` to force a fresh check before the
+  TTL expires (e.g. after a re-login or kubeconfig change).
 
   Checks and auto-configures credentials in order:
   1. gcloud CLI (must be installed)

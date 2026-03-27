@@ -14,6 +14,7 @@ from kinetic.backend.gke_client import (
 )
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.core import accelerators
+from kinetic.credentials import invalidate_credential_cache
 from kinetic.job_status import JobStatus
 
 LWS_GROUP = "leaderworkerset.x-k8s.io"
@@ -120,6 +121,8 @@ def submit_pathways_job(
         "official LWS installation guide."
       ) from e
     else:
+      if e.status in (401, 403):
+        invalidate_credential_cache()
       raise RuntimeError(
         f"Kubernetes API error: {e.status} - {e.reason}: {e.body}"
       ) from e

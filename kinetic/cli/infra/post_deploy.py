@@ -11,6 +11,7 @@ from kinetic.cli.constants import (
   LWS_INSTALL_URL,
   NVIDIA_DRIVER_DAEMONSET_URL,
 )
+from kinetic.credentials import invalidate_credential_cache
 
 
 def configure_kubectl(cluster_name, zone, project):
@@ -36,6 +37,8 @@ def configure_kubectl(cluster_name, zone, project):
     capture_output=True,
     env=env,
   )
+  # Kubeconfig changed — invalidate so ensure_credentials() re-validates.
+  invalidate_credential_cache(project, zone, cluster_name)
 
 
 def install_gpu_drivers():
