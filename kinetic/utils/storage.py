@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 
 from absl import logging
 from google.cloud import storage
@@ -15,13 +16,15 @@ from kinetic.constants import get_default_project
 from kinetic.data import Data
 
 _cached_clients: dict[str | None, storage.Client] = {}
+_client_lock = threading.Lock()
 
 
 def _get_client(project: str | None) -> storage.Client:
   """Return a cached storage client for the given project."""
-  if project not in _cached_clients:
-    _cached_clients[project] = storage.Client(project=project)
-  return _cached_clients[project]
+  with _client_lock:
+    if project not in _cached_clients:
+      _cached_clients[project] = storage.Client(project=project)
+    return _cached_clients[project]
 
 
 def upload_artifacts(
