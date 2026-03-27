@@ -11,12 +11,14 @@ in the CLI layer convert these to ``click.ClickException`` as needed.
 import os
 import shutil
 import subprocess
+import threading
 import time
 
 from absl import logging
 from kubernetes import config
 
 _credential_cache: dict[tuple[str, str, str], float] = {}
+_cache_lock = threading.Lock()
 _CREDENTIAL_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
@@ -42,20 +44,20 @@ def ensure_credentials(project: str, zone: str, cluster: str) -> None:
       RuntimeError: If a required credential cannot be configured.
   """
   cache_key = (project, zone, cluster)
-  now = time.monotonic()
-  last_validated = _credential_cache.get(cache_key)
-  if (
-    last_validated is not None
-    and now - last_validated < _CREDENTIAL_CACHE_TTL_SECONDS
-  ):
-    return
+  with _cache_lock:
+    last_validated = _credential_cache.get(cache_key)
+    if (
+      last_validated is not None
+      and time.monotonic() - last_validated < _CREDENTIAL_CACHE_TTL_SECONDS
+    ):
+      return
 
-  ensure_gcloud()
-  ensure_gke_auth_plugin()
-  ensure_adc()
-  ensure_kubeconfig(project, zone, cluster)
+    ensure_gcloud()
+    ensure_gke_auth_plugin()
+    ensure_adc()
+    ensure_kubeconfig(project, zone, cluster)
 
-  _credential_cache[cache_key] = now
+    _credential_cache[cache_key] = time.monotonic()
 
 
 def ensure_gcloud() -> None:
