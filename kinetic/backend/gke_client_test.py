@@ -210,9 +210,6 @@ class TestCreateJobSpec(absltest.TestCase):
 class TestWaitForJob(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.enterContext(
-      mock.patch("kinetic.backend.gke_client._load_kube_config")
-    )
 
     self.mock_streamer = MagicMock()
     self.enterContext(
@@ -241,11 +238,11 @@ class TestWaitForJob(absltest.TestCase):
 
     with (
       mock.patch(
-        "kinetic.backend.gke_client.client.BatchV1Api",
+        "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client.client.CoreV1Api",
+        "kinetic.backend.gke_client._core_v1",
         return_value=mock_core,
       ),
     ):
@@ -265,11 +262,11 @@ class TestWaitForJob(absltest.TestCase):
 
     with (
       mock.patch(
-        "kinetic.backend.gke_client.client.BatchV1Api",
+        "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client.client.CoreV1Api",
+        "kinetic.backend.gke_client._core_v1",
         return_value=mock_core,
       ),
       self.assertRaisesRegex(RuntimeError, "failed"),
@@ -285,10 +282,10 @@ class TestWaitForJob(absltest.TestCase):
 
     with (
       mock.patch(
-        "kinetic.backend.gke_client.client.BatchV1Api",
+        "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
-      mock.patch("kinetic.backend.gke_client.client.CoreV1Api"),
+      mock.patch("kinetic.backend.gke_client._core_v1"),
       mock.patch("kinetic.backend.gke_client.time.sleep"),
       self.assertRaisesRegex(RuntimeError, "timed out"),
     ):
@@ -309,11 +306,11 @@ class TestWaitForJob(absltest.TestCase):
 
     with (
       mock.patch(
-        "kinetic.backend.gke_client.client.BatchV1Api",
+        "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client.client.CoreV1Api",
+        "kinetic.backend.gke_client._core_v1",
         return_value=mock_core,
       ),
       mock.patch("kinetic.backend.gke_client.time.sleep") as mock_sleep,
@@ -341,11 +338,11 @@ class TestWaitForJob(absltest.TestCase):
 
     with (
       mock.patch(
-        "kinetic.backend.gke_client.client.BatchV1Api",
+        "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client.client.CoreV1Api",
+        "kinetic.backend.gke_client._core_v1",
         return_value=mock_core,
       ),
       mock.patch("kinetic.backend.gke_client.time.sleep"),
@@ -374,11 +371,11 @@ class TestWaitForJob(absltest.TestCase):
 
     with (
       mock.patch(
-        "kinetic.backend.gke_client.client.BatchV1Api",
+        "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client.client.CoreV1Api",
+        "kinetic.backend.gke_client._core_v1",
         return_value=mock_core,
       ),
       mock.patch("kinetic.backend.gke_client.time.sleep"),
@@ -392,14 +389,11 @@ class TestWaitForJob(absltest.TestCase):
 class TestAsyncObservationHelpers(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.enterContext(
-      mock.patch("kinetic.backend.gke_client._load_kube_config")
-    )
     self.mock_batch = self.enterContext(
-      mock.patch("kinetic.backend.gke_client.client.BatchV1Api")
+      mock.patch("kinetic.backend.gke_client._batch_v1")
     ).return_value
     self.mock_core = self.enterContext(
-      mock.patch("kinetic.backend.gke_client.client.CoreV1Api")
+      mock.patch("kinetic.backend.gke_client._core_v1")
     ).return_value
 
   def _make_job_status(self, *, succeeded=None, failed=None):
@@ -541,6 +535,11 @@ class TestAsyncObservationHelpers(absltest.TestCase):
 
 
 class TestLoadKubeConfig(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    _load_kube_config.cache_clear()
+    self.addCleanup(_load_kube_config.cache_clear)
+
   def test_kubeconfig_fallback(self):
     """Falls back to local kubeconfig when in-cluster config is unavailable."""
     with (

@@ -28,10 +28,6 @@ _MODULE = "kinetic.backend.pathways_client"
 
 
 class TestGetLwsVersion(absltest.TestCase):
-  def setUp(self):
-    super().setUp()
-    self.enterContext(mock.patch(f"{_MODULE}._load_kube_config"))
-
   def test_returns_preferred_version(self):
     """Test that if the LWS API group is found, we return its preferred version."""
     mock_api = MagicMock()
@@ -40,7 +36,7 @@ class TestGetLwsVersion(absltest.TestCase):
     group.preferred_version.version = "v2"
     mock_api.get_api_versions.return_value.groups = [group]
 
-    with mock.patch(f"{_MODULE}.client.ApisApi", return_value=mock_api):
+    with mock.patch(f"{_MODULE}._apis_api", return_value=mock_api):
       self.assertEqual(_get_lws_version(), "v2")
 
   def test_group_not_found_falls_back(self):
@@ -50,7 +46,7 @@ class TestGetLwsVersion(absltest.TestCase):
     other_group.name = "other.group.io"
     mock_api.get_api_versions.return_value.groups = [other_group]
 
-    with mock.patch(f"{_MODULE}.client.ApisApi", return_value=mock_api):
+    with mock.patch(f"{_MODULE}._apis_api", return_value=mock_api):
       self.assertEqual(_get_lws_version(), LWS_VERSION)
 
   def test_api_exception_falls_back(self):
@@ -60,7 +56,7 @@ class TestGetLwsVersion(absltest.TestCase):
       status=500, reason="Server Error"
     )
 
-    with mock.patch(f"{_MODULE}.client.ApisApi", return_value=mock_api):
+    with mock.patch(f"{_MODULE}._apis_api", return_value=mock_api):
       self.assertEqual(_get_lws_version(), LWS_VERSION)
 
 
@@ -242,12 +238,11 @@ class TestCreateLwsSpec(absltest.TestCase):
 class TestSubmitPathwaysJob(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.enterContext(mock.patch(f"{_MODULE}._load_kube_config"))
     self.enterContext(
       mock.patch(f"{_MODULE}._get_lws_version", return_value="v1")
     )
     self.mock_custom_api = self.enterContext(
-      mock.patch(f"{_MODULE}.client.CustomObjectsApi")
+      mock.patch(f"{_MODULE}._custom_api")
     ).return_value
 
   def _call(self, **overrides):
@@ -293,7 +288,6 @@ class TestSubmitPathwaysJob(absltest.TestCase):
 class TestWaitForJob(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.enterContext(mock.patch(f"{_MODULE}._load_kube_config"))
     self.mock_print_pod_logs = self.enterContext(
       mock.patch(f"{_MODULE}._print_pod_logs")
     )
@@ -305,7 +299,7 @@ class TestWaitForJob(absltest.TestCase):
       mock.patch(f"{_MODULE}.time.time", return_value=0)
     )
     self.mock_core = self.enterContext(
-      mock.patch(f"{_MODULE}.client.CoreV1Api")
+      mock.patch(f"{_MODULE}._core_v1")
     ).return_value
 
     self.mock_streamer = MagicMock()
@@ -450,12 +444,11 @@ class TestWaitForJob(absltest.TestCase):
 class TestCleanupJob(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.enterContext(mock.patch(f"{_MODULE}._load_kube_config"))
     self.enterContext(
       mock.patch(f"{_MODULE}._get_lws_version", return_value="v1")
     )
     self.mock_custom_api = self.enterContext(
-      mock.patch(f"{_MODULE}.client.CustomObjectsApi")
+      mock.patch(f"{_MODULE}._custom_api")
     ).return_value
     self.enterContext(mock.patch(f"{_MODULE}.job_exists", return_value=False))
 
@@ -485,15 +478,14 @@ class TestCleanupJob(absltest.TestCase):
 class TestAsyncObservationHelpers(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.enterContext(mock.patch(f"{_MODULE}._load_kube_config"))
     self.enterContext(
       mock.patch(f"{_MODULE}._get_lws_version", return_value="v1")
     )
     self.mock_core = self.enterContext(
-      mock.patch(f"{_MODULE}.client.CoreV1Api")
+      mock.patch(f"{_MODULE}._core_v1")
     ).return_value
     self.mock_custom_api = self.enterContext(
-      mock.patch(f"{_MODULE}.client.CustomObjectsApi")
+      mock.patch(f"{_MODULE}._custom_api")
     ).return_value
 
   def _make_pod(self, phase, exit_code=None):

@@ -40,9 +40,6 @@ def submit_k8s_job(
   Returns:
       kubernetes.client.V1Job object
   """
-  # Load kubeconfig
-  _load_kube_config()
-
   # Parse accelerator configuration
   accel_config = _parse_accelerator(accelerator, spot=spot)
 
@@ -58,7 +55,7 @@ def submit_k8s_job(
   )
 
   # Submit job
-  batch_v1 = client.BatchV1Api()
+  batch_v1 = _batch_v1()
 
   try:
     created_job = batch_v1.create_namespaced_job(namespace=namespace, body=job)
@@ -106,9 +103,8 @@ def wait_for_job(job, namespace="default", timeout=3600, poll_interval=10):
   Raises:
       RuntimeError: If job fails or times out
   """
-  _load_kube_config()
-  batch_v1 = client.BatchV1Api()
-  core_v1 = client.CoreV1Api()
+  batch_v1 = _batch_v1()
+  core_v1 = _core_v1()
 
   job_name = job.metadata.name
   start_time = time.time()
@@ -172,8 +168,7 @@ def cleanup_job(
       timeout: Maximum seconds to wait for deletion (default 180)
       poll_interval: Seconds between existence checks (default 2)
   """
-  _load_kube_config()
-  batch_v1 = client.BatchV1Api()
+  batch_v1 = _batch_v1()
 
   try:
     # Delete job with propagation policy to also delete pods
@@ -202,8 +197,7 @@ def cleanup_job(
 
 def job_exists(job_name, namespace="default") -> bool:
   """Return whether a namespaced GKE Job currently exists."""
-  _load_kube_config()
-  batch_v1 = client.BatchV1Api()
+  batch_v1 = _batch_v1()
   try:
     batch_v1.read_namespaced_job_status(job_name, namespace)
     return True
@@ -215,9 +209,8 @@ def job_exists(job_name, namespace="default") -> bool:
 
 def get_job_status(job_name, namespace="default") -> JobStatus:
   """Return the current job status for async observation APIs."""
-  _load_kube_config()
-  batch_v1 = client.BatchV1Api()
-  core_v1 = client.CoreV1Api()
+  batch_v1 = _batch_v1()
+  core_v1 = _core_v1()
 
   try:
     job_status = batch_v1.read_namespaced_job_status(job_name, namespace)
@@ -240,8 +233,7 @@ def get_job_status(job_name, namespace="default") -> JobStatus:
 
 def get_job_pod_name(job_name, namespace="default") -> str | None:
   """Return the most relevant pod name for a GKE Job, if any exists."""
-  _load_kube_config()
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
   pod = _select_job_pod(core_v1, job_name, namespace)
   if pod is None:
     return None
@@ -252,8 +244,7 @@ def get_job_logs(
   job_name, namespace="default", tail_lines: int | None = None
 ) -> str:
   """Return logs for the active pod of a GKE Job."""
-  _load_kube_config()
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
   pod = _select_job_pod(core_v1, job_name, namespace)
   if pod is None:
     raise RuntimeError(f"No pod found for GKE job {job_name}")
@@ -270,8 +261,7 @@ def get_job_logs(
 
 def list_jobs(namespace="default") -> list[dict[str, str]]:
   """List live GKE Jobs managed by Kinetic in a namespace."""
-  _load_kube_config()
-  batch_v1 = client.BatchV1Api()
+  batch_v1 = _batch_v1()
   jobs = batch_v1.list_namespaced_job(
     namespace=namespace,
     label_selector="app=kinetic",
@@ -307,14 +297,13 @@ def validate_preflight(
   Raises:
       RuntimeError: If no nodes match the required accelerator selector.
   """
-  _load_kube_config()
   accel_config = _parse_accelerator(accelerator)
   node_selector = accel_config.get("node_selector")
 
   if not node_selector:
     return  # CPU or no selector required
 
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
   try:
     # Construct label selector string: "key1=val1,key2=val2"
     label_selector = ",".join([f"{k}={v}" for k, v in node_selector.items()])
@@ -398,8 +387,9 @@ def _parse_accelerator(accelerator, spot=False):
   return config
 
 
+@functools.lru_cache(maxsize=1)
 def _load_kube_config():
-  """Load Kubernetes configuration.
+  """Load Kubernetes configuration (one-shot, cached).
 
   Attempts to load config in order:
   1. In-cluster config (if running inside K8s)
@@ -425,6 +415,20 @@ def _load_kube_config():
       f"Ensure you have run 'gcloud container clusters get-credentials <cluster-name>' "
       f"or have a valid kubeconfig. Error: {e}"
     ) from e
+
+
+@functools.lru_cache(maxsize=1)
+def _batch_v1():
+  """Return a cached BatchV1Api client, loading kubeconfig on first call."""
+  _load_kube_config()
+  return client.BatchV1Api()
+
+
+@functools.lru_cache(maxsize=1)
+def _core_v1():
+  """Return a cached CoreV1Api client, loading kubeconfig on first call."""
+  _load_kube_config()
+  return client.CoreV1Api()
 
 
 def _create_job_spec(

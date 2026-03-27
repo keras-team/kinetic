@@ -1,5 +1,6 @@
 """Pathways (LeaderWorkerSet) job submission for kinetic."""
 
+import functools
 import time
 
 from absl import logging
@@ -8,6 +9,7 @@ from kubernetes.client.rest import ApiException
 
 from kinetic.backend.gke_client import (
   _check_pod_scheduling,
+  _core_v1,
   _load_kube_config,
   _parse_accelerator,
   _print_pod_logs,
@@ -21,6 +23,20 @@ LWS_VERSION = "v1"
 LWS_PLURAL = "leaderworkersets"
 
 
+@functools.lru_cache(maxsize=1)
+def _custom_api():
+  """Return a cached CustomObjectsApi client, loading kubeconfig on first call."""
+  _load_kube_config()
+  return client.CustomObjectsApi()
+
+
+@functools.lru_cache(maxsize=1)
+def _apis_api():
+  """Return a cached ApisApi client, loading kubeconfig on first call."""
+  _load_kube_config()
+  return client.ApisApi()
+
+
 def _get_job_name(job_id: str) -> str:
   """Get the standardized Pathways job name for a given job ID."""
   return f"keras-pathways-{job_id}"
@@ -28,8 +44,7 @@ def _get_job_name(job_id: str) -> str:
 
 def _get_lws_version(group=LWS_GROUP):
   """Get the preferred version for the LeaderWorkerSet API."""
-  _load_kube_config()
-  api = client.ApisApi()
+  api = _apis_api()
   try:
     api_groups = api.get_api_versions().groups
     for api_group in api_groups:
@@ -70,7 +85,6 @@ def submit_pathways_job(
   Returns:
       dict: The created LeaderWorkerSet object
   """
-  _load_kube_config()
   lws_version = _get_lws_version()
 
   parsed_config = accelerators.parse_accelerator(accelerator, spot=spot)
@@ -96,7 +110,7 @@ def submit_pathways_job(
     version=lws_version,
   )
 
-  custom_api = client.CustomObjectsApi()
+  custom_api = _custom_api()
 
   try:
     created_lws = custom_api.create_namespaced_custom_object(
@@ -127,8 +141,7 @@ def submit_pathways_job(
 
 def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
   """Wait for Pathways Job (LeaderWorkerSet) to complete."""
-  _load_kube_config()
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
 
   job_name = _get_job_name(job_id)
   start_time = time.time()
@@ -221,9 +234,8 @@ def cleanup_job(
       timeout: Maximum seconds to wait for deletion (default 180)
       poll_interval: Seconds between existence checks (default 2)
   """
-  _load_kube_config()
   lws_version = _get_lws_version()
-  custom_api = client.CustomObjectsApi()
+  custom_api = _custom_api()
 
   try:
     custom_api.delete_namespaced_custom_object(
@@ -259,9 +271,8 @@ def cleanup_job(
 
 def job_exists(job_name, namespace="default") -> bool:
   """Return whether a namespaced LeaderWorkerSet currently exists."""
-  _load_kube_config()
   lws_version = _get_lws_version()
-  custom_api = client.CustomObjectsApi()
+  custom_api = _custom_api()
   try:
     custom_api.get_namespaced_custom_object(
       group=LWS_GROUP,
@@ -281,8 +292,7 @@ def job_exists(job_name, namespace="default") -> bool:
 
 def get_job_status(job_name, namespace="default") -> JobStatus:
   """Return the current Pathways job status for async observation APIs."""
-  _load_kube_config()
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
   leader_pod_name = _get_leader_pod_name(job_name)
 
   try:
@@ -323,8 +333,7 @@ def get_job_logs(
   job_name, namespace="default", tail_lines: int | None = None
 ) -> str:
   """Return logs for the leader pod of a Pathways job."""
-  _load_kube_config()
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
   leader_pod_name = _get_leader_pod_name(job_name)
 
   log_kwargs = {}
@@ -346,8 +355,7 @@ def get_job_logs(
 
 def get_job_pod_name(job_name, namespace="default") -> str | None:
   """Return the leader pod name for a Pathways job if it exists."""
-  _load_kube_config()
-  core_v1 = client.CoreV1Api()
+  core_v1 = _core_v1()
   leader_pod_name = _get_leader_pod_name(job_name)
   try:
     core_v1.read_namespaced_pod(leader_pod_name, namespace)
@@ -360,9 +368,8 @@ def get_job_pod_name(job_name, namespace="default") -> str | None:
 
 def list_jobs(namespace="default") -> list[dict[str, str]]:
   """List live Pathways jobs managed by Kinetic in a namespace."""
-  _load_kube_config()
   lws_version = _get_lws_version()
-  custom_api = client.CustomObjectsApi()
+  custom_api = _custom_api()
   objects = custom_api.list_namespaced_custom_object(
     group=LWS_GROUP,
     version=lws_version,
