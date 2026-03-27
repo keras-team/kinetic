@@ -342,6 +342,20 @@ def get_job_logs(
     raise RuntimeError(f"Failed to read leader pod logs: {e.reason}") from e
 
 
+def get_job_pod_name(job_name, namespace="default") -> str | None:
+  """Return the leader pod name for a Pathways job if it exists."""
+  _load_kube_config()
+  core_v1 = client.CoreV1Api()
+  leader_pod_name = _get_leader_pod_name(job_name)
+  try:
+    core_v1.read_namespaced_pod(leader_pod_name, namespace)
+  except ApiException as e:
+    if e.status == 404:
+      return None
+    raise RuntimeError(f"Failed to read leader pod status: {e.reason}") from e
+  return leader_pod_name
+
+
 def list_jobs(namespace="default") -> list[dict[str, str]]:
   """List live Pathways jobs managed by Kinetic in a namespace."""
   _load_kube_config()
