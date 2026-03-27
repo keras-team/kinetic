@@ -102,6 +102,7 @@ def upload_handle(
   blob.upload_from_string(
     json.dumps(handle_payload, sort_keys=True),
     content_type="application/json",
+    retry=DEFAULT_RETRY,
   )
   logging.info("Uploaded handle to gs://%s/%s/handle.json", bucket_name, job_id)
 
@@ -220,10 +221,10 @@ def upload_data(
   else:
     filename = os.path.basename(data.path)
     blob = bucket.blob(f"{cache_prefix}/{filename}")
-    blob.upload_from_filename(data.path)
+    blob.upload_from_filename(data.path, retry=DEFAULT_RETRY)
 
   # Write sentinel last — signals upload-complete
-  marker_blob.upload_from_string("")
+  marker_blob.upload_from_string("", retry=DEFAULT_RETRY)
   logging.info("Data uploaded to gs://%s/%s/", bucket_name, cache_prefix)
   return f"gs://{bucket_name}/{cache_prefix}"
 
