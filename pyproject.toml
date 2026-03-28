@@ -52,6 +52,7 @@ docs = [
     "sphinx",
     "sphinx_autobuild",
     "sphinx_book_theme",
+    "sphinx-click",
 ]
 
 [project.scripts]

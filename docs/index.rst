@@ -1,12 +1,32 @@
-Kinetic Documentation
-=====================
+Kinetic: Run Keras and JAX workloads on cloud TPUs and GPUs
+=============================================================
 
-Run ML workloads on cloud TPUs and GPUs with a simple decorator. No
-infrastructure management required.
+.. toctree::
+   :maxdepth: 2
+   :caption: Documentation
+   :hidden:
 
-.. code-block:: shell
+   getting_started
+   usage
+   troubleshooting
 
-   pip install keras-kinetic
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+   :hidden:
+
+   api
+   cli
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Community
+   :hidden:
+
+   contributing
+   code-of-conduct
+
+Run Keras and JAX workloads on cloud TPUs and GPUs with a simple decorator. No infrastructure management required.
 
 .. code-block:: python
 
@@ -32,6 +52,9 @@ When you call a decorated function, Kinetic handles the entire remote execution 
 3. **Runs the job** on a GKE cluster with the requested accelerator (TPU or GPU).
 4. **Returns the result** to your local machine.
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`

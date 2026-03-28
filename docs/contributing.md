@@ -56,7 +56,7 @@ Before submitting a pull request, please ensure your changes pass linting and un
 - **E2E tests:** End-to-end tests run real workloads against a GKE cluster. They live in `tests/e2e/` and are skipped by default unless explicitly enabled.
 
   **Prerequisites:**
-  - A GCP project with a provisioned GKE cluster (see [Quick Start](../README.md#quick-start))
+  - A GCP project with a provisioned GKE cluster.
   - Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
   - GKE credentials configured: `gcloud container clusters get-credentials <KINETIC_CLUSTER> --zone <KINETIC_ZONE> --project <KINETIC_PROJECT>`
   - Test dependencies installed: `uv pip install -e ".[test,cli]"`

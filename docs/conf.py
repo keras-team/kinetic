@@ -33,11 +33,13 @@ version = ""
 # -- General configuration
 
 extensions = [
-  "myst_nb",
-  "sphinx.ext.intersphinx",
-  "sphinx.ext.napoleon",
-  "sphinx.ext.autodoc",
-  "sphinx.ext.autosummary",
+    'myst_nb',
+    'sphinx_click',
+    'sphinx.ext.intersphinx',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.viewcode',
 ]
 
 intersphinx_mapping = {

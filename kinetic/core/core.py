@@ -157,7 +157,7 @@ def run(
     container_image: Custom container image URI (optional)
     zone: GCP zone (default: from KINETIC_ZONE or 'us-central1-a')
     project: GCP project (default: from KINETIC_PROJECT)
-    capture_env_vars: List of environment variable names or patterns (ending in *)
+    capture_env_vars: List of environment variable names or patterns (ending in ``*``)
       to propagate to the remote environment. Defaults to None.
     cluster: GKE cluster name (default: from KINETIC_CLUSTER)
     backend: Backend to use ('gke' or 'pathways')
