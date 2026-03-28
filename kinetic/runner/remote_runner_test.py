@@ -580,6 +580,24 @@ class TestRunGcsMode(absltest.TestCase):
     self.assertTrue(result["success"])
     self.assertEqual(result["result"], "mounted")
 
+  def test_unpicklable_exception_produces_fallback_result(self):
+    """When the exception can't be pickled, a RuntimeError fallback is written."""
+
+    class UnpicklableError(Exception):
+      def __reduce__(self):
+        raise TypeError("cannot pickle UnpicklableError")
+
+    def raise_unpicklable():
+      raise UnpicklableError("boom")
+
+    exit_code, result = self._run_gcs_mode(raise_unpicklable)
+
+    self.assertEqual(exit_code, 1)
+    self.assertFalse(result["success"])
+    self.assertIsInstance(result["exception"], RuntimeError)
+    self.assertIn("Result serialization failed", str(result["exception"]))
+    self.assertIn("UnpicklableError", result["traceback"])
+
   def test_no_data_no_volumes_unchanged(self):
     """Original behavior preserved when no Data args or volumes."""
 

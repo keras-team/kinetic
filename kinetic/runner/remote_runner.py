@@ -6,6 +6,7 @@ Artifacts are downloaded from and uploaded to Cloud Storage (GCS).
 """
 
 import os
+import pickle
 import shutil
 import sys
 import tempfile
@@ -125,8 +126,22 @@ def run_gcs_mode():
       "traceback": remote_traceback,
     }
 
-    with open(result_path, "wb") as f:
-      cloudpickle.dump(result_payload, f)
+    try:
+      with open(result_path, "wb") as f:
+        cloudpickle.dump(result_payload, f)
+    except (pickle.PicklingError, TypeError) as serialize_err:
+      logging.error("Failed to serialize result: %s", serialize_err)
+      fallback_payload = {
+        "success": False,
+        "result": None,
+        "exception": RuntimeError(
+          f"Result serialization failed: {serialize_err}\n"
+          f"Original traceback:\n{remote_traceback or 'N/A'}"
+        ),
+        "traceback": remote_traceback,
+      }
+      with open(result_path, "wb") as f:
+        cloudpickle.dump(fallback_payload, f)
 
     # Upload result to Cloud Storage
     logging.info("Uploading result...")
