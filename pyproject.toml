@@ -22,6 +22,7 @@ dependencies = [
     "google-cloud-artifact-registry>=1.11",
     "google-cloud-storage>=3.9",
     "google-cloud-build>=3.24",
+    "google-cloud-container>=2.3",
     "kubernetes>=35.0",
 ]
 

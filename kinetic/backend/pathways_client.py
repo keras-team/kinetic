@@ -7,13 +7,7 @@ from absl import logging
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from kinetic.backend.gke_client import (
-  _check_pod_scheduling,
-  _core_v1,
-  _load_kube_config,
-  _parse_accelerator,
-  _print_pod_logs,
-)
+from kinetic.backend import k8s_utils
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.core import accelerators
 from kinetic.credentials import invalidate_credential_cache
@@ -27,14 +21,14 @@ LWS_PLURAL = "leaderworkersets"
 @functools.lru_cache(maxsize=1)
 def _custom_api():
   """Return a cached CustomObjectsApi client, loading kubeconfig on first call."""
-  _load_kube_config()
+  k8s_utils.load_kube_config()
   return client.CustomObjectsApi()
 
 
 @functools.lru_cache(maxsize=1)
 def _apis_api():
   """Return a cached ApisApi client, loading kubeconfig on first call."""
-  _load_kube_config()
+  k8s_utils.load_kube_config()
   return client.ApisApi()
 
 
@@ -89,7 +83,7 @@ def submit_pathways_job(
   lws_version = _get_lws_version()
 
   parsed_config = accelerators.parse_accelerator(accelerator, spot=spot)
-  accel_config = _parse_accelerator(accelerator, spot=spot)
+  accel_config = k8s_utils.parse_accelerator(accelerator, spot=spot)
   job_name = _get_job_name(job_id)
 
   if (
@@ -144,7 +138,7 @@ def submit_pathways_job(
 
 def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
   """Wait for Pathways Job (LeaderWorkerSet) to complete."""
-  core_v1 = _core_v1()
+  core_v1 = k8s_utils.core_v1()
 
   job_name = _get_job_name(job_id)
   start_time = time.time()
@@ -173,11 +167,13 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
           return "success"
 
         if pod.status.phase == "Failed":
-          _print_pod_logs(core_v1, job_name, namespace)
+          k8s_utils.print_pod_logs(core_v1, job_name, namespace)
           raise RuntimeError(f"Pathways job {job_name} failed")
 
         elif pod.status.phase == "Pending":
-          _check_pod_scheduling(core_v1, job_name, namespace, logged_pending)
+          k8s_utils.check_pod_scheduling(
+            core_v1, job_name, namespace, logged_pending
+          )
           logging.debug("Pod is Pending...")
 
         elif pod.status.phase == "Running":
@@ -201,7 +197,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
             logging.info(f"[REMOTE] Job {job_name} completed successfully")
             return "success"
           else:
-            _print_pod_logs(core_v1, job_name, namespace)
+            k8s_utils.print_pod_logs(core_v1, job_name, namespace)
             raise RuntimeError(
               f"Pathways job {job_name} failed with exit code "
               f"{container_status.state.terminated.exit_code}"
@@ -215,7 +211,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
             )
             return "success"
           else:
-            _print_pod_logs(core_v1, job_name, namespace)
+            k8s_utils.print_pod_logs(core_v1, job_name, namespace)
             raise RuntimeError(
               f"Pathways job {job_name} failed previously with "
               f"exit code {container_status.last_state.terminated.exit_code}"
@@ -295,7 +291,7 @@ def job_exists(job_name, namespace="default") -> bool:
 
 def get_job_status(job_name, namespace="default") -> JobStatus:
   """Return the current Pathways job status for async observation APIs."""
-  core_v1 = _core_v1()
+  core_v1 = k8s_utils.core_v1()
   leader_pod_name = _get_leader_pod_name(job_name)
 
   try:
@@ -336,7 +332,7 @@ def get_job_logs(
   job_name, namespace="default", tail_lines: int | None = None
 ) -> str:
   """Return logs for the leader pod of a Pathways job."""
-  core_v1 = _core_v1()
+  core_v1 = k8s_utils.core_v1()
   leader_pod_name = _get_leader_pod_name(job_name)
 
   log_kwargs = {}
@@ -358,7 +354,7 @@ def get_job_logs(
 
 def get_job_pod_name(job_name, namespace="default") -> str | None:
   """Return the leader pod name for a Pathways job if it exists."""
-  core_v1 = _core_v1()
+  core_v1 = k8s_utils.core_v1()
   leader_pod_name = _get_leader_pod_name(job_name)
   try:
     core_v1.read_namespaced_pod(leader_pod_name, namespace)

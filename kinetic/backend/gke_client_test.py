@@ -1,20 +1,13 @@
 """Tests for kinetic.backend.gke_client — K8s job submission and monitoring."""
 
-import json
-import subprocess
 from unittest import mock
 from unittest.mock import MagicMock
 
-from absl.testing import absltest, parameterized
+from absl.testing import absltest
 from kubernetes.client.rest import ApiException
-from kubernetes.config import ConfigException
 
 from kinetic.backend.gke_client import (
-  _check_node_pool_exists_cached,
-  _check_pod_scheduling,
   _create_job_spec,
-  _load_kube_config,
-  _parse_accelerator,
   get_job_logs,
   get_job_pod_name,
   get_job_status,
@@ -25,99 +18,6 @@ from kinetic.backend.gke_client import (
   list_jobs as list_gke_jobs,
 )
 from kinetic.job_status import JobStatus
-
-
-class TestParseAccelerator(absltest.TestCase):
-  def test_cpu(self):
-    result = _parse_accelerator("cpu")
-    self.assertEqual(result["node_selector"], {})
-    self.assertEqual(result["resource_limits"], {})
-    self.assertEqual(result["resource_requests"], {})
-    self.assertEqual(result["tolerations"], [])
-    self.assertEqual(result["jax_platform"], "cpu")
-
-  def test_gpu_l4(self):
-    result = _parse_accelerator("l4")
-    self.assertEqual(
-      result["node_selector"],
-      {"cloud.google.com/gke-accelerator": "nvidia-l4"},
-    )
-    self.assertEqual(result["resource_limits"], {"nvidia.com/gpu": "1"})
-    self.assertEqual(result["resource_requests"], {"nvidia.com/gpu": "1"})
-    self.assertEqual(result["jax_platform"], "gpu")
-    self.assertLen(result["tolerations"], 1)
-    self.assertEqual(result["tolerations"][0]["key"], "nvidia.com/gpu")
-    self.assertEqual(result["tolerations"][0]["operator"], "Exists")
-    self.assertEqual(result["tolerations"][0]["effect"], "NoSchedule")
-
-  def test_gpu_a100x4(self):
-    result = _parse_accelerator("a100x4")
-    self.assertEqual(result["resource_limits"], {"nvidia.com/gpu": "4"})
-    self.assertEqual(result["resource_requests"], {"nvidia.com/gpu": "4"})
-
-  def test_tpu_v3_8(self):
-    result = _parse_accelerator("v3-4")
-    self.assertIn(
-      "cloud.google.com/gke-tpu-accelerator", result["node_selector"]
-    )
-    self.assertIn("cloud.google.com/gke-tpu-topology", result["node_selector"])
-    self.assertEqual(result["resource_limits"], {"google.com/tpu": "4"})
-    self.assertEqual(result["resource_requests"], {"google.com/tpu": "4"})
-    self.assertEqual(result["jax_platform"], "tpu")
-    self.assertLen(result["tolerations"], 1)
-    self.assertEqual(result["tolerations"][0]["key"], "google.com/tpu")
-
-  def test_tpu_v3_16_multi_node(self):
-    # v3-16 has 4 nodes and 16 total chips -> 4 chips per node
-    result = _parse_accelerator("v3-16")
-    self.assertEqual(result["resource_limits"], {"google.com/tpu": "4"})
-    self.assertEqual(result["resource_requests"], {"google.com/tpu": "4"})
-    self.assertEqual(
-      result["node_selector"]["cloud.google.com/gke-tpu-topology"], "4x4"
-    )
-
-  def test_tpu_v5litepod_4(self):
-    result = _parse_accelerator("v5litepod-4")
-    self.assertEqual(
-      result["node_selector"],
-      {
-        "cloud.google.com/gke-tpu-accelerator": "tpu-v5-lite-podslice",
-        "cloud.google.com/gke-tpu-topology": "2x2",
-      },
-    )
-    self.assertEqual(result["resource_limits"], {"google.com/tpu": "4"})
-
-  def test_spot_gpu(self):
-    result = _parse_accelerator("l4:spot")
-    self.assertEqual(
-      result["node_selector"]["cloud.google.com/gke-spot"], "true"
-    )
-    # Check for spot toleration
-    spot_tol = [
-      t
-      for t in result["tolerations"]
-      if t.get("key") == "cloud.google.com/gke-spot"
-    ]
-    self.assertLen(spot_tol, 1)
-    self.assertEqual(spot_tol[0]["value"], "true")
-
-  def test_spot_tpu(self):
-    result = _parse_accelerator("v6e-8:spot")
-    self.assertEqual(
-      result["node_selector"]["cloud.google.com/gke-spot"], "true"
-    )
-    # Check for spot toleration
-    spot_tol = [
-      t
-      for t in result["tolerations"]
-      if t.get("key") == "cloud.google.com/gke-spot"
-    ]
-    self.assertLen(spot_tol, 1)
-    self.assertEqual(spot_tol[0]["value"], "true")
-    # Should still have TPU toleration
-    self.assertTrue(
-      any(t.get("key") == "google.com/tpu" for t in result["tolerations"])
-    )
 
 
 class TestCreateJobSpec(absltest.TestCase):
@@ -242,7 +142,7 @@ class TestWaitForJob(absltest.TestCase):
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client._core_v1",
+        "kinetic.backend.k8s_utils.core_v1",
         return_value=mock_core,
       ),
     ):
@@ -266,7 +166,7 @@ class TestWaitForJob(absltest.TestCase):
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client._core_v1",
+        "kinetic.backend.k8s_utils.core_v1",
         return_value=mock_core,
       ),
       self.assertRaisesRegex(RuntimeError, "failed"),
@@ -285,7 +185,7 @@ class TestWaitForJob(absltest.TestCase):
         "kinetic.backend.gke_client._batch_v1",
         return_value=mock_batch,
       ),
-      mock.patch("kinetic.backend.gke_client._core_v1"),
+      mock.patch("kinetic.backend.k8s_utils.core_v1"),
       mock.patch("kinetic.backend.gke_client.time.sleep"),
       self.assertRaisesRegex(RuntimeError, "timed out"),
     ):
@@ -310,7 +210,7 @@ class TestWaitForJob(absltest.TestCase):
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client._core_v1",
+        "kinetic.backend.k8s_utils.core_v1",
         return_value=mock_core,
       ),
       mock.patch("kinetic.backend.gke_client.time.sleep") as mock_sleep,
@@ -342,7 +242,7 @@ class TestWaitForJob(absltest.TestCase):
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client._core_v1",
+        "kinetic.backend.k8s_utils.core_v1",
         return_value=mock_core,
       ),
       mock.patch("kinetic.backend.gke_client.time.sleep"),
@@ -375,7 +275,7 @@ class TestWaitForJob(absltest.TestCase):
         return_value=mock_batch,
       ),
       mock.patch(
-        "kinetic.backend.gke_client._core_v1",
+        "kinetic.backend.k8s_utils.core_v1",
         return_value=mock_core,
       ),
       mock.patch("kinetic.backend.gke_client.time.sleep"),
@@ -393,7 +293,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
       mock.patch("kinetic.backend.gke_client._batch_v1")
     ).return_value
     self.mock_core = self.enterContext(
-      mock.patch("kinetic.backend.gke_client._core_v1")
+      mock.patch("kinetic.backend.k8s_utils.core_v1")
     ).return_value
 
   def _make_job_status(self, *, succeeded=None, failed=None):
@@ -532,253 +432,6 @@ class TestAsyncObservationHelpers(absltest.TestCase):
       namespace="team-ns",
       label_selector="app=kinetic",
     )
-
-
-class TestLoadKubeConfig(absltest.TestCase):
-  def setUp(self):
-    super().setUp()
-    _load_kube_config.cache_clear()
-    self.addCleanup(_load_kube_config.cache_clear)
-
-  def test_kubeconfig_fallback(self):
-    """Falls back to local kubeconfig when in-cluster config is unavailable."""
-    with (
-      mock.patch(
-        "kinetic.backend.gke_client.config.load_incluster_config",
-        side_effect=ConfigException("not in cluster"),
-      ),
-      mock.patch("kinetic.backend.gke_client.config.load_kube_config"),
-    ):
-      _load_kube_config()
-
-
-class TestCheckNodePoolExistsCached(absltest.TestCase):
-  def setUp(self):
-    super().setUp()
-    _check_node_pool_exists_cached.cache_clear()
-
-    self.enterContext(
-      mock.patch(
-        "kinetic.backend.gke_client.config.kube_config.list_kube_config_contexts",
-        return_value=(
-          None,
-          {"name": "gke_test-project_us-central1-c_test-cluster"},
-        ),
-      )
-    )
-    self.mock_run = self.enterContext(
-      mock.patch(
-        "kinetic.backend.gke_client.subprocess.check_output",
-        text=True,
-        stderr=subprocess.DEVNULL,
-      )
-    )
-    self.mock_warning = self.enterContext(
-      mock.patch("kinetic.backend.gke_client.logging.warning")
-    )
-
-  def test_gpu_match(self):
-    self.mock_run.return_value = json.dumps(
-      [
-        {
-          "config": {
-            "accelerators": [{"acceleratorType": "nvidia-l4"}],
-            "labels": {"existing-label": "true"},
-          }
-        }
-      ]
-    )
-
-    result = _check_node_pool_exists_cached(
-      (("cloud.google.com/gke-accelerator", "nvidia-l4"),)
-    )
-    self.assertTrue(result)
-
-  def test_tpu_match(self):
-    self.mock_run.return_value = json.dumps(
-      [
-        {
-          "config": {
-            "machineType": "ct5lp-hightpu-4t",
-            "accelerators": [{"acceleratorType": "tpu-v5-lite-podslice"}],
-            "labels": {},
-          }
-        }
-      ]
-    )
-
-    result = _check_node_pool_exists_cached(
-      (
-        ("cloud.google.com/gke-tpu-accelerator", "tpu-v5-lite-podslice"),
-        ("cloud.google.com/gke-tpu-topology", "2x2"),
-      )
-    )
-    self.assertTrue(result)
-
-  def test_tpu_multi_node_match(self):
-    """Test that it correctly identifies a 4-chip-per-node pool for v6e-16."""
-    self.mock_run.return_value = json.dumps(
-      [
-        {
-          "config": {
-            "machineType": "ct6e-standard-4t",
-            "accelerators": [{"acceleratorType": "tpu-v6e-slice"}],
-            "labels": {},
-          }
-        }
-      ]
-    )
-
-    result = _check_node_pool_exists_cached(
-      (
-        ("cloud.google.com/gke-tpu-accelerator", "tpu-v6e-slice"),
-        ("cloud.google.com/gke-tpu-topology", "4x4"),
-        ("cloud.google.com/gke-accelerator-count", "4"),
-      )
-    )
-    self.assertTrue(result)
-
-  def test_no_match(self):
-    self.mock_run.return_value = json.dumps(
-      [
-        {
-          "config": {
-            "accelerators": [{"acceleratorType": "nvidia-t4"}],
-          }
-        }
-      ]
-    )
-
-    result = _check_node_pool_exists_cached(
-      (("cloud.google.com/gke-accelerator", "nvidia-l4"),)
-    )
-    self.assertFalse(result)
-
-  def test_graceful_degradation_on_subprocess_error(self):
-    self.mock_run.side_effect = Exception("gcloud not found")
-
-    result = _check_node_pool_exists_cached(
-      (("cloud.google.com/gke-accelerator", "nvidia-l4"),)
-    )
-    self.assertTrue(result)
-    self.mock_warning.assert_called_once()
-    self.assertIn(
-      "Could not verify node pool existence", self.mock_warning.call_args[0][0]
-    )
-
-  def test_kubeconfig_parse_missing_context(self):
-    with mock.patch(
-      "kinetic.backend.gke_client.config.kube_config.list_kube_config_contexts",
-      return_value=(None, {"name": "minikube"}),
-    ):
-      self.mock_run.return_value = "[]"
-      _check_node_pool_exists_cached(
-        (("cloud.google.com/gke-accelerator", "nvidia-l4"),)
-      )
-      cmd = self.mock_run.call_args[0][0]
-      self.assertEqual(
-        cmd, ["gcloud", "container", "node-pools", "list", "--format", "json"]
-      )
-
-  def test_kubeconfig_parse_success(self):
-    self.mock_run.return_value = "[]"
-    _check_node_pool_exists_cached(
-      (("cloud.google.com/gke-accelerator", "nvidia-l4"),)
-    )
-    cmd = self.mock_run.call_args[0][0]
-    self.assertIn("--cluster", cmd)
-    self.assertIn("test-cluster", cmd)
-    self.assertIn("--location", cmd)
-    self.assertIn("us-central1-c", cmd)
-    self.assertIn("--project", cmd)
-    self.assertIn("test-project", cmd)
-
-
-class TestCheckPodScheduling(parameterized.TestCase):
-  def _make_pending_pod(self, message, node_selector=None):
-    pod = MagicMock()
-    pod.status.phase = "Pending"
-    pod.spec.node_selector = node_selector
-    condition = MagicMock()
-    condition.type = "PodScheduled"
-    condition.status = "False"
-    condition.message = message
-    pod.status.conditions = [condition]
-    return pod
-
-  @parameterized.named_parameters(
-    dict(
-      testcase_name="insufficient_gpu",
-      condition_message="Insufficient nvidia.com/gpu",
-      log_match="Insufficient nvidia.com/gpu",
-      node_selector=None,
-    ),
-    dict(
-      testcase_name="node_selector_mismatch",
-      condition_message="didn't match Pod's node affinity/selector",
-      log_match="Selector: cloud.google.com/gke-accelerator: nvidia-l4",
-      node_selector={"cloud.google.com/gke-accelerator": "nvidia-l4"},
-    ),
-  )
-  @mock.patch(
-    "kinetic.backend.gke_client._validate_node_pool_exists",
-    return_value=True,
-  )
-  @mock.patch("kinetic.backend.gke_client.logging.info")
-  def test_scheduling_failure_logs(
-    self, mock_info, mock_validate, condition_message, log_match, node_selector
-  ):
-    mock_core = MagicMock()
-    pod = self._make_pending_pod(condition_message, node_selector=node_selector)
-    mock_core.list_namespaced_pod.return_value.items = [pod]
-
-    _check_pod_scheduling(mock_core, "job-1", "default", set())
-
-    # Verify it was called with something that contains log_match
-    self.assertTrue(mock_info.called)
-    if len(mock_info.call_args[0]) > 1:
-      call_arg = mock_info.call_args[0][0] % mock_info.call_args[0][1:]
-    else:
-      call_arg = mock_info.call_args[0][0]
-    self.assertIn(log_match, call_arg)
-
-  @mock.patch(
-    "kinetic.backend.gke_client._validate_node_pool_exists",
-    return_value=False,
-  )
-  def test_scheduling_failure_raises_missing_node_pool(self, mock_validate):
-    mock_core = MagicMock()
-    node_selector = {"cloud.google.com/gke-accelerator": "nvidia-l4"}
-    pod = self._make_pending_pod(
-      "didn't match Pod's node affinity/selector", node_selector=node_selector
-    )
-    mock_core.list_namespaced_pod.return_value.items = [pod]
-
-    error_match = "No GKE node pool exists.*kinetic pool add"
-    with self.assertRaisesRegex(RuntimeError, error_match):
-      _check_pod_scheduling(mock_core, "job-1", "default", set())
-
-  def test_running_pod_no_error(self):
-    mock_core = MagicMock()
-    pod = MagicMock()
-    pod.status.phase = "Running"
-    pod.status.conditions = []
-    mock_core.list_namespaced_pod.return_value.items = [pod]
-
-    _check_pod_scheduling(
-      mock_core, "job-1", "default", set()
-    )  # should not raise
-
-  def test_pending_no_conditions(self):
-    mock_core = MagicMock()
-    pod = MagicMock()
-    pod.status.phase = "Pending"
-    pod.status.conditions = None
-    mock_core.list_namespaced_pod.return_value.items = [pod]
-
-    _check_pod_scheduling(
-      mock_core, "job-1", "default", set()
-    )  # should not raise
 
 
 if __name__ == "__main__":

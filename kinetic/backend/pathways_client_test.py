@@ -289,17 +289,17 @@ class TestWaitForJob(absltest.TestCase):
   def setUp(self):
     super().setUp()
     self.mock_print_pod_logs = self.enterContext(
-      mock.patch(f"{_MODULE}._print_pod_logs")
+      mock.patch("kinetic.backend.k8s_utils.print_pod_logs")
     )
     self.mock_check_pod_scheduling = self.enterContext(
-      mock.patch(f"{_MODULE}._check_pod_scheduling")
+      mock.patch("kinetic.backend.k8s_utils.check_pod_scheduling")
     )
     self.mock_sleep = self.enterContext(mock.patch(f"{_MODULE}.time.sleep"))
     self.mock_time = self.enterContext(
       mock.patch(f"{_MODULE}.time.time", return_value=0)
     )
     self.mock_core = self.enterContext(
-      mock.patch(f"{_MODULE}._core_v1")
+      mock.patch("kinetic.backend.k8s_utils.core_v1")
     ).return_value
 
     self.mock_streamer = MagicMock()
@@ -482,7 +482,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
       mock.patch(f"{_MODULE}._get_lws_version", return_value="v1")
     )
     self.mock_core = self.enterContext(
-      mock.patch(f"{_MODULE}._core_v1")
+      mock.patch("kinetic.backend.k8s_utils.core_v1")
     ).return_value
     self.mock_custom_api = self.enterContext(
       mock.patch(f"{_MODULE}._custom_api")
