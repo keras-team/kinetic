@@ -16,7 +16,7 @@ import cloudpickle
 from absl import logging
 from google.api_core import exceptions as google_exceptions
 
-from kinetic.backend import gke_client, pathways_client
+from kinetic.backend import gke_client, k8s_utils, pathways_client
 from kinetic.constants import (
   build_bucket_name,
   get_default_cluster_name,
@@ -158,13 +158,7 @@ class GKEBackend(BaseK8sBackend):
 
   def validate_preflight(self, ctx: JobContext) -> None:
     """Check if the required node pool exists for the accelerator."""
-    gke_client.validate_preflight(
-      accelerator=ctx.accelerator,
-      project=ctx.project,
-      cluster=self.cluster,
-      zone=ctx.zone,
-      namespace=self.namespace,
-    )
+    k8s_utils.validate_preflight(accelerator=ctx.accelerator)
 
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit job to GKE cluster."""
@@ -214,14 +208,7 @@ class PathwaysBackend(BaseK8sBackend):
 
   def validate_preflight(self, ctx: JobContext) -> None:
     """Preflight checks for Pathways (currently same as GKE)."""
-    # Pathways also runs on GKE nodes with specific labels
-    gke_client.validate_preflight(
-      accelerator=ctx.accelerator,
-      project=ctx.project,
-      cluster=self.cluster,
-      zone=ctx.zone,
-      namespace=self.namespace,
-    )
+    k8s_utils.validate_preflight(accelerator=ctx.accelerator)
 
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit LWS job to GKE cluster."""

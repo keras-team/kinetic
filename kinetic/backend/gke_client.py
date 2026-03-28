@@ -283,46 +283,6 @@ def list_jobs(namespace="default") -> list[dict[str, str]]:
   return results
 
 
-def validate_preflight(
-  accelerator, project, cluster, zone, namespace="default"
-):
-  """Check if the required node pool exists for the accelerator.
-
-  Args:
-      accelerator: Accelerator string (e.g., 'l4', 'v3-8')
-      project: GCP project ID
-      cluster: GKE cluster name
-      zone: GCP zone
-      namespace: Kubernetes namespace
-
-  Raises:
-      RuntimeError: If no nodes match the required accelerator selector.
-  """
-  accel_config = k8s_utils.parse_accelerator(accelerator)
-  node_selector = accel_config.get("node_selector")
-
-  if not node_selector:
-    return  # CPU or no selector required
-
-  core_v1 = k8s_utils.core_v1()
-  try:
-    # Construct label selector string: "key1=val1,key2=val2"
-    label_selector = ",".join([f"{k}={v}" for k, v in node_selector.items()])
-    nodes = core_v1.list_node(label_selector=label_selector)
-
-    if not nodes.items:
-      selector_str = ", ".join([f"{k}: {v}" for k, v in node_selector.items()])
-      logging.info(
-        "Preflight check: No currently running nodes match selector: %s. "
-        "Proceeding under the assumption that the cluster will auto-provision with scale-to-zero enabled.",
-        selector_str,
-      )
-  except ApiException as e:
-    # If we can't list nodes due to permissions, log a warning but proceed
-    # to avoid blocking users with restricted kubeconfig.
-    logging.warning("Preflight check: Failed to query nodes: %s", e.reason)
-
-
 @functools.lru_cache(maxsize=1)
 def _batch_v1():
   """Return a cached BatchV1Api client, loading kubeconfig on first call."""

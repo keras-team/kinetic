@@ -248,6 +248,37 @@ def _validate_node_pool_exists(selector: dict) -> bool:
   return _check_node_pool_exists_cached(tuple(sorted(selector.items())))
 
 
+def validate_preflight(accelerator):
+  """Check if any nodes match the required accelerator selector.
+
+  Args:
+      accelerator: Accelerator string (e.g., 'l4', 'v3-8')
+  """
+  accel_config = parse_accelerator(accelerator)
+  node_selector = accel_config.get("node_selector")
+
+  if not node_selector:
+    return  # CPU or no selector required
+
+  core_v1_client = core_v1()
+  try:
+    # Construct label selector string: "key1=val1,key2=val2"
+    label_selector = ",".join([f"{k}={v}" for k, v in node_selector.items()])
+    nodes = core_v1_client.list_node(label_selector=label_selector)
+
+    if not nodes.items:
+      selector_str = ", ".join([f"{k}: {v}" for k, v in node_selector.items()])
+      logging.info(
+        "Preflight check: No currently running nodes match selector: %s. "
+        "Proceeding under the assumption that the cluster will auto-provision with scale-to-zero enabled.",
+        selector_str,
+      )
+  except ApiException as e:
+    # If we can't list nodes due to permissions, log a warning but proceed
+    # to avoid blocking users with restricted kubeconfig.
+    logging.warning("Preflight check: Failed to query nodes: %s", e.reason)
+
+
 def check_pod_scheduling(core_v1_client, job_name, namespace, logged_pending):
   """Check for pod scheduling issues and raise helpful errors."""
   with suppress(ApiException):
