@@ -1,5 +1,5 @@
 [project]
-name = "kinetic"
+name = "keras-kinetic"
 version = "0.0.1"
 authors = [
     {name = "Keras team", email = "keras-users@googlegroups.com"},
@@ -39,8 +39,8 @@ test = [
 dev = [
     "pre-commit",
     "ruff",
-    "kinetic[cli]",
-    "kinetic[test]",
+    "keras-kinetic[cli]",
+    "keras-kinetic[test]",
 ]
 demo = [
     "jax",
@@ -70,6 +70,9 @@ requires = [
     "twine",
 ]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kinetic"]
 
 [tool.ruff]
 indent-width = 2

@@ -12,7 +12,7 @@ from kinetic.cli.commands.up import up
 
 
 @click.group()
-@click.version_option(package_name="kinetic")
+@click.version_option(package_name="keras-kinetic")
 def cli():
   """kinetic: Provision and manage GCP infrastructure for remote Keras
   execution."""
