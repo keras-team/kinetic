@@ -748,3 +748,4 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 **Maintained by the Keras team at Google.**
 
 - [Report Issues](https://github.com/keras-team/kinetic/issues)
+- [Discussions](https://github.com/keras-team/kinetic/discussions)
