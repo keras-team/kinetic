@@ -59,16 +59,15 @@ kinetic up --project=my-project --accelerator=t4 --yes
 
 ## Run Your First Job
 
-```python
-import kinetic
-
-@kinetic.run(accelerator="v5litepod-1")
-def hello_tpu():
-    import jax
-    return f"Running on {jax.devices()}"
-
-result = hello_tpu()
-print(result)
+```{literalinclude} ../examples/fashion_mnist.py
+    :language: python
 ```
 
-> **First run timing:** The initial execution takes longer (~5 minutes) because it builds a container image with your dependencies. Subsequent runs with unchanged dependencies use the cached image and start in less than a minute.
+> **First run timing:** The initial execution takes longer (~5 minutes) because
+> it builds a container image with your dependencies. Subsequent runs with
+> unchanged dependencies use the cached image and start in less than a minute.
+
+Once this works, you can try:
+
+- More complex examples like [fine-tuning LLMs](guides/llm_finetuning.md)
+- Running on different [accelerators and topologies](accelerators.md)
