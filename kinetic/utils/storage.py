@@ -186,6 +186,79 @@ def cleanup_artifacts(
   )
 
 
+def upload_manifest(
+  bucket_name: str,
+  group_id: str,
+  manifest: dict,
+  project: str | None = None,
+) -> None:
+  """Upload a group manifest to Cloud Storage."""
+  project = project or get_default_project()
+  client = _get_client(project)
+  bucket = client.bucket(bucket_name)
+
+  blob = bucket.blob(f"_groups/{group_id}/manifest.json")
+  blob.upload_from_string(
+    json.dumps(manifest, sort_keys=True),
+    content_type="application/json",
+    retry=DEFAULT_RETRY,
+  )
+  logging.info(
+    "Uploaded manifest to gs://%s/_groups/%s/manifest.json",
+    bucket_name,
+    group_id,
+  )
+
+
+def download_manifest(
+  bucket_name: str,
+  group_id: str,
+  project: str | None = None,
+) -> dict:
+  """Download and deserialize a group manifest from Cloud Storage."""
+  project = project or get_default_project()
+  client = _get_client(project)
+  bucket = client.bucket(bucket_name)
+
+  blob = bucket.blob(f"_groups/{group_id}/manifest.json")
+  manifest_text = blob.download_as_text()
+  logging.info(
+    "Downloaded manifest from gs://%s/_groups/%s/manifest.json",
+    bucket_name,
+    group_id,
+  )
+  return json.loads(manifest_text)
+
+
+def cleanup_manifest(
+  bucket_name: str,
+  group_id: str,
+  project: str | None = None,
+) -> None:
+  """Delete a group manifest and its GCS prefix."""
+  project = project or get_default_project()
+  client = _get_client(project)
+  bucket = client.bucket(bucket_name)
+
+  blobs = list(bucket.list_blobs(prefix=f"_groups/{group_id}/"))
+  if not blobs:
+    return
+
+  try:
+    bucket.delete_blobs(blobs, retry=DEFAULT_RETRY)
+  except cloud_exceptions.NotFound:
+    logging.warning(
+      "Some manifest blobs missing during cleanup for group %s",
+      group_id,
+    )
+  logging.info(
+    "Cleaned up manifest for group %s from gs://%s/_groups/%s/",
+    group_id,
+    bucket_name,
+    group_id,
+  )
+
+
 def upload_data(
   bucket_name: str,
   data: Data,

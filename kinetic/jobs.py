@@ -50,6 +50,10 @@ _HANDLE_FIELDS = (
   "func_name",
   "display_name",
   "created_at",
+  # Group fields (optional — omitted from JSON when None).
+  "group_id",
+  "group_kind",
+  "group_index",
 )
 
 
@@ -101,6 +105,11 @@ class JobHandle:
   display_name: str
   created_at: str
 
+  # Optional group membership (set for collection children, None otherwise).
+  group_id: str | None = None
+  group_kind: str | None = None
+  group_index: int | None = None
+
   # ------------------------------------------------------------------
   # Serialisation helpers
   # ------------------------------------------------------------------
@@ -142,7 +151,9 @@ class JobHandle:
   def to_dict(self) -> dict[str, str]:
     """Serialize the handle to a JSON-safe payload."""
     return {
-      field_name: getattr(self, field_name) for field_name in _HANDLE_FIELDS
+      field_name: getattr(self, field_name)
+      for field_name in _HANDLE_FIELDS
+      if getattr(self, field_name) is not None
     }
 
   # ------------------------------------------------------------------
