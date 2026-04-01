@@ -243,6 +243,7 @@ class JobHandle:
 
   def _stream_logs(self) -> None:
     """Stream logs to stdout via LogStreamer (blocking)."""
+    self._ensure_credentials()
     core_v1 = client.CoreV1Api()
     pod_name = self._get_pod_name()
     if pod_name is None:
@@ -308,10 +309,11 @@ class JobHandle:
     """
     deadline = None if timeout is None else time.monotonic() + timeout
     observed_status = None
+    streamer_ctx = None
 
-    streamer_ctx = (
-      LogStreamer(client.CoreV1Api(), self.namespace) if stream_logs else None
-    )
+    if stream_logs:
+      self._ensure_credentials()
+      streamer_ctx = LogStreamer(client.CoreV1Api(), self.namespace)
 
     with streamer_ctx if streamer_ctx is not None else contextlib.nullcontext():
       while True:
@@ -322,7 +324,7 @@ class JobHandle:
           raise TimeoutError(
             f"Timed out waiting for job {self.job_id} after {timeout}s"
           )
-        if streamer_ctx is not None:
+        if streamer_ctx is not None and streamer_ctx._thread is None:
           pod_name = self._get_pod_name()
           if pod_name is not None:
             streamer_ctx.start(pod_name)
