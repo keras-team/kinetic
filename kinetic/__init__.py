@@ -21,7 +21,7 @@ from kinetic.version import __version__ as __version__
 
 logging.use_absl_handler()
 
-# Use rich to format the absl logs, making them slightly dimmed and links clickable
+# Use rich to format the absl logs.
 console = Console(stderr=True)
 rich_handler = RichHandler(
   console=console,
@@ -30,7 +30,6 @@ rich_handler = RichHandler(
   show_level=False,
   markup=True,
 )
-rich_handler.setFormatter(python_logging.Formatter("[dim]%(message)s[/dim]"))
 
 absl_logger = logging.get_absl_logger()
 absl_logger.handlers = [rich_handler]
