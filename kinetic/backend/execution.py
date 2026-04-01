@@ -117,7 +117,7 @@ class JobContext:
       working_dir=_resolve_working_dir(func),
       volumes=volumes,
       spot=spot,
-      checkpoint_dir=checkpoint_dir,
+      checkpoint_dir=checkpoint_dir or os.environ.get("KINETIC_CHECKPOINT_DIR"),
     )
 
 
