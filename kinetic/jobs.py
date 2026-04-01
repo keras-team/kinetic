@@ -324,7 +324,11 @@ class JobHandle:
           raise TimeoutError(
             f"Timed out waiting for job {self.job_id} after {timeout}s"
           )
-        if streamer_ctx is not None and streamer_ctx._thread is None:
+        if (
+          streamer_ctx is not None
+          and streamer_ctx._thread is None
+          and observed_status == JobStatus.RUNNING
+        ):
           pod_name = self._get_pod_name()
           if pod_name is not None:
             streamer_ctx.start(pod_name)
