@@ -13,9 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-import cloudpickle
 from absl import logging
-from google.api_core import exceptions as google_exceptions
 
 from kinetic.backend import gke_client, k8s_utils, pathways_client
 from kinetic.constants import (
@@ -28,7 +26,7 @@ from kinetic.constants import (
 from kinetic.credentials import ensure_credentials
 from kinetic.data import _make_data_ref
 from kinetic.infra import container_builder
-from kinetic.jobs import JobHandle, attach_remote_traceback
+from kinetic.jobs import JobHandle
 from kinetic.utils import packager, storage
 
 
@@ -412,89 +410,6 @@ def prepare_execution(ctx: JobContext, backend: BaseK8sBackend) -> None:
       # Re-raise the first exception encountered, if any.
       build_future.result()
       upload_future.result()
-
-
-def _download_result(ctx: JobContext) -> dict:
-  """Download and deserialize result from Cloud Storage."""
-  logging.info("Downloading result...")
-  result_path = storage.download_result(
-    ctx.bucket_name, ctx.job_id, project=ctx.project
-  )
-
-  with open(result_path, "rb") as f:
-    return cloudpickle.load(f)
-
-
-def _cleanup_and_return(ctx: JobContext, result_payload: dict) -> Any:
-  """Handle result — return value or re-raise remote exception.
-
-  GCS artifact cleanup is handled by the finally block in execute_remote().
-  """
-  if result_payload["success"]:
-    logging.info("Remote execution completed successfully")
-    return result_payload["result"]
-  else:
-    logging.error("Remote execution failed:\n%s", result_payload["traceback"])
-    raise attach_remote_traceback(
-      result_payload["exception"],
-      result_payload.get("traceback"),
-    )
-
-
-def execute_remote(ctx: JobContext, backend: BaseK8sBackend) -> Any:
-  """Execute a function remotely using the specified backend.
-
-  This is the unified executor that handles all common phases
-  and delegates backend-specific operations to the backend client.
-
-  Args:
-      ctx: Job context with function and configuration
-      backend: Backend instance (GKEBackend or PathwaysBackend)
-
-  Returns:
-      The result of the remote function execution
-
-  Raises:
-      Exception: Re-raised from remote execution if it failed
-  """
-  prepare_execution(ctx, backend)
-
-  try:
-    job = backend.submit_job(ctx)
-
-    # Step 4: Wait for completion (with cleanup on failure)
-    job_error = None
-    try:
-      backend.wait_for_job(job, ctx)
-    except RuntimeError as e:
-      job_error = e
-    finally:
-      backend.cleanup_job(job, ctx)
-
-    # Step 6: Download and deserialize result
-    # Try even if the job failed — the runner may have captured a user
-    # exception and uploaded the result before exiting with non-zero.
-    if job_error is not None:
-      try:
-        result_payload = _download_result(ctx)
-      except google_exceptions.NotFound:
-        # Result wasn't uploaded (infrastructure failure), surface the
-        # original job error.
-        raise job_error from None
-    else:
-      result_payload = _download_result(ctx)
-
-    # Step 7: Return result or raise remote exception
-    return _cleanup_and_return(ctx, result_payload)
-  finally:
-    # Always attempt GCS cleanup, even if download or deserialization
-    # fails unexpectedly. This prevents orphaned artifacts.
-    try:
-      storage.cleanup_artifacts(
-        ctx.bucket_name, ctx.job_id, project=ctx.project
-      )
-    except Exception:
-      logging.warning("Failed to clean up GCS artifacts for job %s", ctx.job_id)
 
 
 def submit_remote(ctx: JobContext, backend: BaseK8sBackend) -> JobHandle:

@@ -32,9 +32,7 @@ kinetic/
   → _build_container()              # Build or retrieve cached Docker image
   → _upload_artifacts()             # Upload payload.pkl, context.zip to GCS
   → backend.submit_job()            # Create K8s Job (GKE) or LeaderWorkerSet (Pathways)
-  → backend.wait_for_job()          # Poll until completion
-  → _download_result()              # Fetch result.pkl from GCS
-  → _cleanup_and_return()           # Delete artifacts, return result or re-raise exception
+  → handle.result()                 # Poll until completion, stream logs, download result
 ```
 
 ## Key Modules
@@ -44,7 +42,7 @@ kinetic/
 | `core/core.py`               | `@run()` decorator, backend routing, env var capture                                                      |
 | `core/accelerators.py`       | Accelerator registry (`GPUS`, `TPUS`), parser (`parse_accelerator`)                                       |
 | `credentials.py`             | Credential verification & auto-setup (gcloud, ADC, kubeconfig)                                            |
-| `backend/execution.py`       | `JobContext` dataclass (carries `cluster_name`), `BaseK8sBackend` base class, `execute_remote()` pipeline |
+| `backend/execution.py`       | `JobContext` dataclass (carries `cluster_name`), `BaseK8sBackend` base class, `submit_remote()` pipeline |
 | `backend/gke_client.py`      | K8s Job creation, status polling, pod log retrieval                                                       |
 | `backend/pathways_client.py` | LeaderWorkerSet creation for multi-host TPUs                                                              |
 | `infra/container_builder.py` | Content-hashed Docker image building via Cloud Build                                                      |

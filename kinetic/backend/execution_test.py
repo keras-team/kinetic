@@ -1,4 +1,4 @@
-"""Tests for kinetic.backend.execution — JobContext and execute_remote."""
+"""Tests for kinetic.backend.execution — JobContext and submit_remote."""
 
 import os
 import pathlib
@@ -10,13 +10,11 @@ from unittest.mock import MagicMock
 
 import cloudpickle
 from absl.testing import absltest
-from google.api_core import exceptions as google_exceptions
 
 from kinetic.backend.execution import (
   JobContext,
   _find_requirements,
   _prepare_artifacts,
-  execute_remote,
   submit_remote,
 )
 from kinetic.data import Data
@@ -231,93 +229,6 @@ class TestFindRequirements(absltest.TestCase):
       _find_requirements(str(child)),
       str(child / "requirements.txt"),
     )
-
-
-class TestExecuteRemote(absltest.TestCase):
-  def _make_func(self):
-    def my_train():
-      return 42
-
-    return my_train
-
-  def _make_ctx(self, container_image=None):
-    return JobContext(
-      func=self._make_func(),
-      args=(),
-      kwargs={},
-      env_vars={},
-      accelerator="cpu",
-      container_image=container_image,
-      zone="us-central1-a",
-      project="proj",
-      cluster_name="kinetic-cluster",
-    )
-
-  def test_success_flow(self):
-    with (
-      mock.patch("kinetic.backend.execution.prepare_execution"),
-      mock.patch(
-        "kinetic.backend.execution._download_result",
-        return_value={"success": True, "result": 42},
-      ),
-      mock.patch(
-        "kinetic.backend.execution._cleanup_and_return",
-        return_value=42,
-      ),
-      mock.patch("kinetic.backend.execution.storage.cleanup_artifacts"),
-    ):
-      ctx = self._make_ctx()
-      backend = MagicMock()
-
-      result = execute_remote(ctx, backend)
-
-      backend.submit_job.assert_called_once_with(ctx)
-      backend.wait_for_job.assert_called_once()
-      backend.cleanup_job.assert_called_once()
-      self.assertEqual(result, 42)
-
-  def test_cleanup_on_wait_failure(self):
-    with (
-      mock.patch("kinetic.backend.execution.prepare_execution"),
-      mock.patch(
-        "kinetic.backend.execution._download_result",
-        side_effect=google_exceptions.NotFound("no result uploaded"),
-      ),
-      mock.patch("kinetic.backend.execution.storage.cleanup_artifacts"),
-    ):
-      ctx = self._make_ctx()
-      backend = MagicMock()
-      backend.wait_for_job.side_effect = RuntimeError("job failed")
-
-      with self.assertRaisesRegex(RuntimeError, "job failed"):
-        execute_remote(ctx, backend)
-
-      # cleanup_job is called in finally block even when wait fails
-      backend.cleanup_job.assert_called_once()
-
-  def test_gcs_cleanup_always_attempted(self):
-    with (
-      mock.patch("kinetic.backend.execution.prepare_execution"),
-      mock.patch(
-        "kinetic.backend.execution._download_result",
-        return_value={"success": True, "result": 42},
-      ),
-      mock.patch(
-        "kinetic.backend.execution._cleanup_and_return",
-        return_value=42,
-      ),
-      mock.patch(
-        "kinetic.backend.execution.storage.cleanup_artifacts"
-      ) as mock_gcs,
-    ):
-      ctx = self._make_ctx()
-      backend = MagicMock()
-
-      execute_remote(ctx, backend)
-
-      mock_gcs.assert_called_once_with(
-        ctx.bucket_name, ctx.job_id, project=ctx.project
-      )
 
 
 class TestPrepareArtifacts(absltest.TestCase):
