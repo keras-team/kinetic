@@ -1,4 +1,4 @@
-"""Tests for kinetic.runner.remote_runner — GCS helpers and execution."""
+"""Tests for kinetic.runner.remote_runner — helpers and execution."""
 
 import os
 import pathlib
@@ -20,7 +20,6 @@ from kinetic.runner.remote_runner import (
   main,
   resolve_data_refs,
   resolve_volumes,
-  run_gcs_mode,
 )
 
 
@@ -397,7 +396,7 @@ class TestResolveVolumes(absltest.TestCase):
     self.assertTrue(os.path.isdir(path2))
 
 
-class TestRunGcsMode(absltest.TestCase):
+class TestMain(absltest.TestCase):
   def setUp(self):
     super().setUp()
     original_path = sys.path[:]
@@ -440,8 +439,8 @@ class TestRunGcsMode(absltest.TestCase):
 
     return mock_client, fake_download
 
-  def _run_gcs_mode(self, func, args=(), env_vars=None, volumes=None):
-    """Set up fixtures, run run_gcs_mode(), return (exit_code, result)."""
+  def _run_main(self, func, args=(), env_vars=None, volumes=None):
+    """Set up fixtures, run main(), return (exit_code, result)."""
     tmp_path = _make_temp_path(self)
     mock_client, fake_download = self._setup_gcs_test(
       tmp_path,
@@ -474,7 +473,7 @@ class TestRunGcsMode(absltest.TestCase):
       ),
     ):
       with self.assertRaises(SystemExit) as cm:
-        run_gcs_mode()
+        main()
 
       result_path = mock_upload.call_args[0][1]
       with open(result_path, "rb") as f:
@@ -486,7 +485,7 @@ class TestRunGcsMode(absltest.TestCase):
     def add(a, b):
       return a + b
 
-    exit_code, result = self._run_gcs_mode(add, args=(2, 3))
+    exit_code, result = self._run_main(add, args=(2, 3))
 
     self.assertEqual(exit_code, 0)
     self.assertTrue(result["success"])
@@ -496,7 +495,7 @@ class TestRunGcsMode(absltest.TestCase):
     def bad_func():
       raise ValueError("test error")
 
-    exit_code, result = self._run_gcs_mode(bad_func)
+    exit_code, result = self._run_main(bad_func)
 
     self.assertEqual(exit_code, 1)
     self.assertFalse(result["success"])
@@ -508,7 +507,7 @@ class TestRunGcsMode(absltest.TestCase):
     def read_env():
       return os.environ.get("TEST_REMOTE_VAR")
 
-    exit_code, result = self._run_gcs_mode(
+    exit_code, result = self._run_main(
       read_env, env_vars={"TEST_REMOTE_VAR": "hello"}
     )
 
@@ -537,7 +536,7 @@ class TestRunGcsMode(absltest.TestCase):
 
       mock_dl.side_effect = fake_dl
 
-      exit_code, result = self._run_gcs_mode(check_is_string, args=(ref,))
+      exit_code, result = self._run_main(check_is_string, args=(ref,))
 
     self.assertEqual(exit_code, 0)
     self.assertTrue(result["success"])
@@ -570,7 +569,7 @@ class TestRunGcsMode(absltest.TestCase):
 
       mock_dl.side_effect = fake_dl
 
-      exit_code, result = self._run_gcs_mode(
+      exit_code, result = self._run_main(
         check_mount,
         args=(mount_path,),
         volumes=volume_refs,
@@ -590,7 +589,7 @@ class TestRunGcsMode(absltest.TestCase):
     def raise_unpicklable():
       raise UnpicklableError("boom")
 
-    exit_code, result = self._run_gcs_mode(raise_unpicklable)
+    exit_code, result = self._run_main(raise_unpicklable)
 
     self.assertEqual(exit_code, 1)
     self.assertFalse(result["success"])
@@ -604,14 +603,14 @@ class TestRunGcsMode(absltest.TestCase):
     def identity(x):
       return x
 
-    exit_code, result = self._run_gcs_mode(identity, args=(42,))
+    exit_code, result = self._run_main(identity, args=(42,))
 
     self.assertEqual(exit_code, 0)
     self.assertTrue(result["success"])
     self.assertEqual(result["result"], 42)
 
 
-class TestMain(absltest.TestCase):
+class TestMainArgValidation(absltest.TestCase):
   def test_too_few_args(self):
     with mock.patch("sys.argv", ["remote_runner.py"]):
       with self.assertRaises(SystemExit) as cm:
@@ -625,22 +624,6 @@ class TestMain(absltest.TestCase):
       with self.assertRaises(SystemExit) as cm:
         main()
       self.assertEqual(cm.exception.code, 1)
-
-  def test_correct_args_calls_run_gcs_mode(self):
-    with (
-      mock.patch(
-        "sys.argv",
-        [
-          "remote_runner.py",
-          "gs://bucket/context.zip",
-          "gs://bucket/payload.pkl",
-          "gs://bucket/result.pkl",
-        ],
-      ),
-      mock.patch("kinetic.runner.remote_runner.run_gcs_mode") as mock_run,
-    ):
-      main()
-      mock_run.assert_called_once()
 
 
 if __name__ == "__main__":

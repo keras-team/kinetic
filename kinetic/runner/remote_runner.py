@@ -37,22 +37,11 @@ def main():
     )
     sys.exit(1)
 
-  run_gcs_mode()
-
-
-def run_gcs_mode():
-  """Execute with Cloud Storage artifacts.
-
-  Args from sys.argv:
-      sys.argv[1]: GCS path to context.zip
-      sys.argv[2]: GCS path to payload.pkl
-      sys.argv[3]: GCS path to result.pkl (output)
-  """
   context_gcs = sys.argv[1]
   payload_gcs = sys.argv[2]
   result_gcs = sys.argv[3]
 
-  logging.info("Starting GCS execution mode")
+  logging.info("Starting remote execution")
 
   # Define local paths using tempfile
   context_path = os.path.join(TEMP_DIR, "context.zip")
