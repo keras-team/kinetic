@@ -8,6 +8,7 @@ import abc
 import concurrent.futures
 import inspect
 import os
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ class JobContext:
   zone: str
   project: str
   cluster_name: str
+  base_image_repo: Optional[str] = None
   working_dir: Optional[str] = None
 
   # Generated identifiers
@@ -95,6 +97,7 @@ class JobContext:
     volumes: Optional[dict] = None,
     spot: bool = False,
     output_dir: Optional[str] = None,
+    base_image_repo: Optional[str] = None,
   ) -> "JobContext":
     """Factory method with default resolution for zone/project/cluster."""
     if not zone:
@@ -111,6 +114,7 @@ class JobContext:
       env_vars=env_vars,
       accelerator=accelerator,
       container_image=container_image,
+      base_image_repo=base_image_repo,
       zone=zone,
       project=project,
       cluster_name=cluster_name,
@@ -175,6 +179,7 @@ class GKEBackend(BaseK8sBackend):
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit job to GKE cluster."""
     logging.info("Submitting job to GKEBackend...")
+    requirements_uri = _requirements_uri(ctx)
     return gke_client.submit_k8s_job(
       display_name=ctx.display_name,
       container_uri=ctx.image_uri,
@@ -184,6 +189,7 @@ class GKEBackend(BaseK8sBackend):
       bucket_name=ctx.bucket_name,
       namespace=self.namespace,
       spot=ctx.spot,
+      requirements_uri=requirements_uri,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -227,6 +233,7 @@ class PathwaysBackend(BaseK8sBackend):
   def submit_job(self, ctx: JobContext) -> Any:
     """Submit LWS job to GKE cluster."""
     logging.info("Submitting job to PathwaysBackend...")
+    requirements_uri = _requirements_uri(ctx)
     return pathways_client.submit_pathways_job(
       display_name=ctx.display_name,
       container_uri=ctx.image_uri,
@@ -236,6 +243,7 @@ class PathwaysBackend(BaseK8sBackend):
       bucket_name=ctx.bucket_name,
       namespace=self.namespace,
       spot=ctx.spot,
+      requirements_uri=requirements_uri,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -366,17 +374,23 @@ def _prepare_artifacts(ctx: JobContext, tmpdir: str) -> None:
     logging.info("No requirements.txt or pyproject.toml found")
 
 
-def _build_container(ctx: JobContext) -> None:
-  """Build or get cached container image."""
-  if ctx.container_image:
-    ctx.image_uri = ctx.container_image
-    logging.info("Using custom container: %s", ctx.image_uri)
-  else:
-    import sys
+def _is_prebuilt(ctx: JobContext) -> bool:
+  """Return True if prebuilt image mode is active."""
+  return ctx.container_image is None or ctx.container_image == "prebuilt"
 
+
+def _build_container(ctx: JobContext) -> str:
+  """Build or get cached container image. Returns the image URI."""
+  if _is_prebuilt(ctx):
+    image_uri = container_builder.get_prebuilt_image(
+      accelerator_type=ctx.accelerator,
+      base_image_repo=ctx.base_image_repo,
+    )
+    logging.info("Using prebuilt base image: %s", image_uri)
+  elif ctx.container_image == "bundled":
     logging.info("Building container image...")
     py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-    ctx.image_uri = container_builder.get_or_build_container(
+    image_uri = container_builder.get_or_build_container(
       base_image=f"python:{py_version}-slim",
       requirements_path=ctx.requirements_path,
       accelerator_type=ctx.accelerator,
@@ -384,20 +398,49 @@ def _build_container(ctx: JobContext) -> None:
       zone=ctx.zone,
       cluster_name=ctx.cluster_name,
     )
+  else:
+    assert ctx.container_image is not None
+    image_uri = ctx.container_image
+    logging.info("Using custom container: %s", image_uri)
+  return image_uri
 
 
-def _upload_artifacts(ctx: JobContext) -> None:
-  """Upload artifacts to Cloud Storage."""
+def _upload_artifacts(ctx: JobContext) -> bool:
+  """Upload artifacts to Cloud Storage.
+
+  Returns True if requirements content was resolved (prebuilt mode),
+  False if requirements should be cleared.
+  """
   if ctx.payload_path is None or ctx.context_path is None:
     raise ValueError("payload_path and context_path must be set before upload")
   logging.info("Uploading artifacts to Cloud Storage (job: %s)...", ctx.job_id)
+
+  # In prebuilt mode, upload filtered requirements for runtime install.
+  requirements_content = None
+  has_requirements = True
+  if _is_prebuilt(ctx):
+    requirements_content = container_builder.prepare_requirements_content(
+      ctx.requirements_path
+    )
+    if requirements_content is None:
+      has_requirements = False
+
   storage.upload_artifacts(
     bucket_name=ctx.bucket_name,
     job_id=ctx.job_id,
     payload_path=ctx.payload_path,
     context_path=ctx.context_path,
     project=ctx.project,
+    requirements_content=requirements_content,
   )
+  return has_requirements
+
+
+def _requirements_uri(ctx: JobContext) -> str | None:
+  """Return the GCS URI for requirements.txt if prebuilt mode is active."""
+  if _is_prebuilt(ctx) and ctx.requirements_path is not None:
+    return f"gs://{ctx.bucket_name}/{ctx.job_id}/requirements.txt"
+  return None
 
 
 def prepare_execution(ctx: JobContext, backend: BaseK8sBackend) -> None:
@@ -414,9 +457,11 @@ def prepare_execution(ctx: JobContext, backend: BaseK8sBackend) -> None:
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
       build_future = pool.submit(_build_container, ctx)
       upload_future = pool.submit(_upload_artifacts, ctx)
-      # Re-raise the first exception encountered, if any.
-      build_future.result()
-      upload_future.result()
+      # Collect results on the main thread — avoid mutating ctx in workers.
+      ctx.image_uri = build_future.result()
+      has_requirements = upload_future.result()
+      if not has_requirements:
+        ctx.requirements_path = None
 
 
 def submit_remote(ctx: JobContext, backend: BaseK8sBackend) -> JobHandle:

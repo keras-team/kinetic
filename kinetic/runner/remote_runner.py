@@ -8,6 +8,7 @@ Artifacts are downloaded from and uploaded to Cloud Storage (GCS).
 import os
 import pickle
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -28,18 +29,20 @@ DATA_DIR = os.path.join(TEMP_DIR, "data")
 def main():
   """Main entry point for remote execution.
 
-  Usage: python remote_runner.py gs://bucket/context.zip gs://bucket/payload.pkl gs://bucket/result.pkl
+  Usage: python remote_runner.py <context_gcs> <payload_gcs> <result_gcs> [requirements_gcs]
   """
 
   if len(sys.argv) < 4:
     logging.error(
       "Usage: remote_runner.py <context_gcs> <payload_gcs> <result_gcs>"
+      " [requirements_gcs]"
     )
     sys.exit(1)
 
   context_gcs = sys.argv[1]
   payload_gcs = sys.argv[2]
   result_gcs = sys.argv[3]
+  requirements_gcs = sys.argv[4] if len(sys.argv) > 4 else None
 
   logging.info("Starting remote execution")
 
@@ -56,6 +59,10 @@ def main():
     logging.info("Downloading artifacts...")
     _download_from_gcs(storage_client, context_gcs, context_path)
     _download_from_gcs(storage_client, payload_gcs, payload_path)
+
+    # Install user requirements at startup (prebuilt image mode)
+    if requirements_gcs:
+      _install_requirements(storage_client, requirements_gcs)
 
     # Extract context
     if os.path.exists(workspace_dir):
@@ -142,6 +149,37 @@ def main():
     logging.fatal("%s", e)
     traceback.print_exc()
     sys.exit(1)
+
+
+def _install_requirements(storage_client, requirements_gcs):
+  """Download and install user requirements via `uv pip install`.
+
+  Used in prebuilt image mode where user dependencies are not baked
+  into the container image.
+
+  Args:
+      storage_client: Cloud Storage client.
+      requirements_gcs: GCS URI to the requirements.txt file.
+  """
+  requirements_path = os.path.join(TEMP_DIR, "user_requirements.txt")
+  _download_from_gcs(storage_client, requirements_gcs, requirements_path)
+
+  if os.path.getsize(requirements_path) == 0:
+    logging.info("No user requirements to install")
+    return
+
+  logging.info("Installing user requirements...")
+  result = subprocess.run(
+    ["uv", "pip", "install", "--system", "-r", requirements_path],
+    capture_output=True,
+    text=True,
+  )
+  if result.returncode != 0:
+    raise RuntimeError(
+      f"Failed to install requirements (exit {result.returncode}).\n"
+      f"stderr:\n{result.stderr}"
+    )
+  logging.info("User requirements installed successfully")
 
 
 def resolve_volumes(volume_refs, storage_client):

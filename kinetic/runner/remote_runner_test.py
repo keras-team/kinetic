@@ -16,6 +16,7 @@ from kinetic.runner.remote_runner import (
   _DOWNLOAD_BATCH_SIZE,
   _download_data,
   _download_from_gcs,
+  _install_requirements,
   _upload_to_gcs,
   main,
   resolve_data_refs,
@@ -608,6 +609,146 @@ class TestMain(absltest.TestCase):
     self.assertEqual(exit_code, 0)
     self.assertTrue(result["success"])
     self.assertEqual(result["result"], 42)
+
+
+class TestInstallRequirements(absltest.TestCase):
+  def test_successful_install(self):
+    mock_client = MagicMock()
+    tmp = _make_temp_path(self)
+    req_path = tmp / "requirements.txt"
+    req_path.write_text("numpy==1.26\n")
+
+    def fake_download(client, gcs_path, local_path):
+      shutil.copy(str(req_path), local_path)
+
+    with (
+      mock.patch(
+        "kinetic.runner.remote_runner._download_from_gcs",
+        side_effect=fake_download,
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner.subprocess.run",
+      ) as mock_run,
+    ):
+      mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+      _install_requirements(mock_client, "gs://bucket/requirements.txt")
+
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    self.assertEqual(args[:4], ["uv", "pip", "install", "--system"])
+
+  def test_failed_install_raises(self):
+    mock_client = MagicMock()
+    tmp = _make_temp_path(self)
+    req_path = tmp / "requirements.txt"
+    req_path.write_text("nonexistent-package\n")
+
+    def fake_download(client, gcs_path, local_path):
+      shutil.copy(str(req_path), local_path)
+
+    with (
+      mock.patch(
+        "kinetic.runner.remote_runner._download_from_gcs",
+        side_effect=fake_download,
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner.subprocess.run",
+      ) as mock_run,
+    ):
+      mock_run.return_value = MagicMock(
+        returncode=1, stderr="ERROR: package not found"
+      )
+      with self.assertRaisesRegex(RuntimeError, "Failed to install"):
+        _install_requirements(mock_client, "gs://bucket/requirements.txt")
+
+  def test_empty_requirements_skipped(self):
+    mock_client = MagicMock()
+    tmp = _make_temp_path(self)
+    req_path = tmp / "requirements.txt"
+    req_path.write_text("")
+
+    def fake_download(client, gcs_path, local_path):
+      shutil.copy(str(req_path), local_path)
+
+    with (
+      mock.patch(
+        "kinetic.runner.remote_runner._download_from_gcs",
+        side_effect=fake_download,
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner.subprocess.run",
+      ) as mock_run,
+    ):
+      _install_requirements(mock_client, "gs://bucket/requirements.txt")
+
+    mock_run.assert_not_called()
+
+
+class TestMainWithRequirements(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    original_path = sys.path[:]
+    self.addCleanup(setattr, sys, "path", original_path)
+
+  def test_4th_arg_triggers_install(self):
+    """When a 4th arg is provided, _install_requirements is called."""
+
+    def add(a, b):
+      return a + b
+
+    tmp_path = _make_temp_path(self)
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    context_zip = src_dir / "context.zip"
+    with zipfile.ZipFile(context_zip, "w") as z:
+      z.writestr("dummy.py", "x = 1")
+
+    payload = {"func": add, "args": (2, 3), "kwargs": {}, "env_vars": {}}
+    payload_pkl = src_dir / "payload.pkl"
+    with open(payload_pkl, "wb") as f:
+      cloudpickle.dump(payload, f)
+
+    mock_client = MagicMock()
+
+    def fake_download(client, gcs_path, local_path):
+      if "context.zip" in gcs_path:
+        shutil.copy(str(context_zip), local_path)
+      elif "payload.pkl" in gcs_path:
+        shutil.copy(str(payload_pkl), local_path)
+
+    with (
+      mock.patch(
+        "sys.argv",
+        [
+          "remote_runner.py",
+          "gs://bucket/context.zip",
+          "gs://bucket/payload.pkl",
+          "gs://bucket/result.pkl",
+          "gs://bucket/requirements.txt",
+        ],
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner._download_from_gcs",
+        side_effect=fake_download,
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner._upload_to_gcs",
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner.storage.Client",
+        return_value=mock_client,
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner._install_requirements",
+      ) as mock_install,
+      self.assertRaises(SystemExit),
+    ):
+      main()
+
+    mock_install.assert_called_once_with(
+      mock_client, "gs://bucket/requirements.txt"
+    )
 
 
 class TestMainArgValidation(absltest.TestCase):
