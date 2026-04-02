@@ -212,7 +212,7 @@ TPUS: dict[str, TpuSpec] = {
   ),
 }
 
-_TPU_ALIASES: dict[str, str] = {
+TPU_ALIASES: dict[str, str] = {
   "v5e": "v5litepod",
 }
 
@@ -226,7 +226,7 @@ _TPU_TOPO_RE = re.compile(
 DEFAULT_GPU = "l4"
 DEFAULT_TPU = "v5litepod"
 
-_PREFERRED_GPUS = [
+PREFERRED_GPUS = [
   "h100",
   "a100-80gb",
   "a100",
@@ -236,7 +236,7 @@ _PREFERRED_GPUS = [
   "p100",
   "p4",
 ]
-_PREFERRED_TPUS = ["v6e", "v5p", "v5litepod", "v4", "v3"]
+PREFERRED_TPUS = ["v6e", "v5p", "v5litepod", "v4", "v3"]
 
 
 def _resolve_gpu_alias(name: str) -> str:
@@ -244,7 +244,7 @@ def _resolve_gpu_alias(name: str) -> str:
 
 
 def _resolve_tpu_alias(name: str) -> str:
-  return _TPU_ALIASES.get(name, name)
+  return TPU_ALIASES.get(name, name)
 
 
 def parse_accelerator(accel_str: str, spot: bool = False) -> Accelerator:
@@ -289,7 +289,7 @@ def parse_accelerator(accel_str: str, spot: bool = False) -> Accelerator:
 
   if gpu_str.isdigit():
     count = int(gpu_str)
-    for gpu_name in _PREFERRED_GPUS:
+    for gpu_name in PREFERRED_GPUS:
       if gpu_name in GPUS and count in GPUS[gpu_name].counts:
         return make_gpu(gpu_name, count, spot=spot)
     if is_gpu_explicit:
@@ -319,7 +319,7 @@ def parse_accelerator(accel_str: str, spot: bool = False) -> Accelerator:
 
   if tpu_str.isdigit():
     chips = int(tpu_str)
-    for tpu_name in _PREFERRED_TPUS:
+    for tpu_name in PREFERRED_TPUS:
       if tpu_name in TPUS and chips in TPUS[tpu_name].topologies:
         return make_tpu(tpu_name, chips, spot=spot)
     if is_tpu_explicit:
