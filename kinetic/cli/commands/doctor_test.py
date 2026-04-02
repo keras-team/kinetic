@@ -78,6 +78,8 @@ def _make_run_side_effect(
       "artifactregistry.googleapis.com",
       "storage.googleapis.com",
       "container.googleapis.com",
+      "secretmanager.googleapis.com",
+      "iam.googleapis.com",
     ]
   if node_pools is None:
     node_pools = [{"name": "default-pool", "status": "RUNNING", "config": {}}]

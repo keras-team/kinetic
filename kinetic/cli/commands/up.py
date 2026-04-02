@@ -6,15 +6,10 @@ import click
 
 from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
-from kinetic.cli.infra.post_deploy import (
-  configure_kubectl,
-  install_gpu_drivers,
-  install_lws,
-)
+from kinetic.cli.infra.post_deploy import configure_kubectl
 from kinetic.cli.infra.state import apply_update, load_state
 from kinetic.cli.options import common_options
 from kinetic.cli.output import (
-  LiveOutputPanel,
   banner,
   config_summary,
   console,
@@ -23,7 +18,7 @@ from kinetic.cli.output import (
 from kinetic.cli.prerequisites_check import check_all
 from kinetic.cli.prompts import prompt_accelerator, resolve_project
 from kinetic.core import accelerators
-from kinetic.core.accelerators import GpuConfig, generate_pool_name
+from kinetic.core.accelerators import generate_pool_name
 
 
 @click.command()
@@ -75,7 +70,11 @@ def up(project, zone, accelerator, cluster_name, min_nodes, yes):
     check_prerequisites=False,
   )
 
-  config = InfraConfig(project=project, zone=zone, cluster_name=cluster_name)
+  config = InfraConfig(
+    project=project,
+    zone=zone,
+    cluster_name=cluster_name,
+  )
 
   if state.node_pools:
     config.node_pools = list(state.node_pools)
@@ -98,56 +97,27 @@ def up(project, zone, accelerator, cluster_name, min_nodes, yes):
   console.print()
 
   pulumi_ok = apply_update(config)
-  pulumi_failed = not pulumi_ok
 
-  if pulumi_failed:
-    warning("Attempting post-deploy configuration anyway...")
-
-  # Post-deploy steps
-  steps = [
-    (
-      "kubectl configuration",
-      lambda: configure_kubectl(
-        cluster_name,
-        zone,
-        project,
-      ),
-    ),
-    ("LWS CRD installation", install_lws),
-  ]
-  if any(isinstance(np.accelerator, GpuConfig) for np in config.node_pools):
-    steps.append(("GPU driver installation", install_gpu_drivers))
-
-  failures = []
-  with LiveOutputPanel("Post-deploy configuration", transient=True) as panel:
-    for name, fn in steps:
-      panel.on_output(f"{name}...")
-      try:
-        fn()
-        panel.on_output(f"{name} complete.")
-      except subprocess.CalledProcessError as e:
-        failures.append(name)
-        panel.on_output(f"{name} failed: {e}")
-        if e.stderr:
-          stderr_text = e.stderr.decode("utf-8", errors="replace").strip()
-          if stderr_text:
-            for line in stderr_text.splitlines():
-              panel.on_output(f"  {line}")
-        panel.mark_error()
+  # Configure local kubectl context so the user can interact with the
+  # cluster immediately.  Non-fatal — the user can always run
+  # `gcloud container clusters get-credentials` manually.
+  try:
+    configure_kubectl(cluster_name, zone, project)
+  except subprocess.CalledProcessError:
+    warning(
+      "kubectl configuration failed. Run manually:\n"
+      f"  gcloud container clusters get-credentials {cluster_name}"
+      f" --zone={zone} --project={project}"
+    )
 
   # Final summary
   console.print()
-  if pulumi_failed or failures:
+  if not pulumi_ok:
     banner("Setup Completed With Warnings")
     console.print()
-    if pulumi_failed:
-      warning("Pulumi provisioning encountered errors (see above).")
-    if failures:
-      warning(f"Post-deploy steps failed: {', '.join(failures)}")
+    warning("Pulumi provisioning encountered errors (see above).")
     console.print()
-    console.print(
-      "You may re-run [bold]kinetic up[/bold] to retry failed steps."
-    )
+    console.print("You may re-run [bold]kinetic up[/bold] to retry.")
   else:
     banner("Setup Complete")
 

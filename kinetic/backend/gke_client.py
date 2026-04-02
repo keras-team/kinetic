@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 
 from kinetic.backend import k8s_utils
 from kinetic.backend.log_streaming import LogStreamer
+from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.credentials import invalidate_credential_cache
 from kinetic.job_status import JobStatus
 
@@ -350,6 +351,7 @@ def _create_job_spec(
     "containers": [container],
     "tolerations": tolerations if tolerations else None,
     "restart_policy": "Never",
+    "service_account_name": KINETIC_KSA_NAME,
   }
   # Only set node_selector if non-empty (for GPU nodes)
   if accel_config.get("node_selector"):

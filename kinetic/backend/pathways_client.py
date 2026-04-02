@@ -9,6 +9,7 @@ from kubernetes.client.rest import ApiException
 
 from kinetic.backend import k8s_utils
 from kinetic.backend.log_streaming import LogStreamer
+from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.core import accelerators
 from kinetic.credentials import invalidate_credential_cache
 from kinetic.job_status import JobStatus
@@ -438,6 +439,7 @@ def _create_lws_spec(
       }
     },
     "spec": {
+      "serviceAccountName": KINETIC_KSA_NAME,
       "containers": [
         {
           "name": "kinetic-worker",
