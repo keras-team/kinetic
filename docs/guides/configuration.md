@@ -4,13 +4,14 @@ Kinetic uses environment variables to manage default settings across the CLI and
 
 ## Environment Variables
 
-| Variable             | Required | Default            | Description                                                  |
-| -------------------- | -------- | ------------------ | ------------------------------------------------------------ |
-| `KINETIC_PROJECT`    | Yes      | —                  | Google Cloud project ID                                      |
-| `KINETIC_ZONE`       | No       | `us-central1-a`    | Default compute zone                                         |
-| `KINETIC_CLUSTER`    | No       | `kinetic-cluster`  | GKE cluster name                                             |
-| `KINETIC_NAMESPACE`  | No       | `default`          | Kubernetes namespace                                         |
-| `KINETIC_LOG_LEVEL`  | No       | `INFO`             | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
+| Variable                  | Required | Default            | Description                                                  |
+| ------------------------- | -------- | ------------------ | ------------------------------------------------------------ |
+| `KINETIC_PROJECT`         | Yes      | —                  | Google Cloud project ID                                      |
+| `KINETIC_ZONE`            | No       | `us-central1-a`    | Default compute zone                                         |
+| `KINETIC_CLUSTER`         | No       | `kinetic-cluster`  | GKE cluster name                                             |
+| `KINETIC_BASE_IMAGE_REPO` | No       | `kinetic`          | Docker repository for prebuilt base images                   |
+| `KINETIC_NAMESPACE`       | No       | `default`          | Kubernetes namespace                                         |
+| `KINETIC_LOG_LEVEL`       | No       | `INFO`             | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
 
 ## Setting Variables
 
