@@ -12,6 +12,7 @@ from kinetic.core.accelerators import GpuConfig, TpuConfig
 with mock.patch.dict(
   "sys.modules",
   {
+    "pulumi_command": mock.MagicMock(),
     "pulumi_gcp": mock.MagicMock(),
     "pulumi_kubernetes": mock.MagicMock(),
   },
@@ -97,6 +98,7 @@ class TestGpuDriverConditional(absltest.TestCase):
     config = config or _make_config()
     with (
       mock.patch.object(program, "pulumi"),
+      mock.patch.object(program, "command"),
       mock.patch.object(program, "gcp"),
       mock.patch.object(program, "k8s") as k8s_mock,
     ):
