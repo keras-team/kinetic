@@ -411,7 +411,9 @@ class TestUploadArtifactsRequirementsFlag(absltest.TestCase):
   )
   def test_returns_false_when_content_is_none(self, mock_prepare, mock_upload):
     """has_requirements is False when prepare_requirements_content returns None."""
-    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    ctx = self._make_ctx(
+      requirements_path="/tmp/requirements.txt", container_image="prebuilt"
+    )
     has_requirements = _upload_artifacts(ctx)
     self.assertFalse(has_requirements)
 
@@ -424,7 +426,9 @@ class TestUploadArtifactsRequirementsFlag(absltest.TestCase):
     self, mock_prepare, mock_upload
   ):
     """_requirements_uri returns None after caller clears requirements_path."""
-    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    ctx = self._make_ctx(
+      requirements_path="/tmp/requirements.txt", container_image="prebuilt"
+    )
     has_requirements = _upload_artifacts(ctx)
     if not has_requirements:
       ctx.requirements_path = None
@@ -437,7 +441,9 @@ class TestUploadArtifactsRequirementsFlag(absltest.TestCase):
   )
   def test_returns_true_when_content_exists(self, mock_prepare, mock_upload):
     """has_requirements is True when prepare_requirements_content returns content."""
-    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    ctx = self._make_ctx(
+      requirements_path="/tmp/requirements.txt", container_image="prebuilt"
+    )
     has_requirements = _upload_artifacts(ctx)
     self.assertTrue(has_requirements)
 
@@ -450,7 +456,9 @@ class TestUploadArtifactsRequirementsFlag(absltest.TestCase):
     self, mock_prepare, mock_upload
   ):
     """_requirements_uri returns a GCS URI when requirements content exists."""
-    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    ctx = self._make_ctx(
+      requirements_path="/tmp/requirements.txt", container_image="prebuilt"
+    )
     _upload_artifacts(ctx)
     self.assertEqual(
       _requirements_uri(ctx),

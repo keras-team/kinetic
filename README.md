@@ -392,20 +392,22 @@ If both files exist in the same directory, `requirements.txt` takes precedence.
 
 Kinetic supports three container image modes controlled by the `container_image` parameter.
 
-#### Prebuilt Mode (Default)
+#### Bundled Mode (Default)
 
-The default mode uses a pre-published base image with the accelerator runtime already installed. Your project dependencies are installed at pod startup via `uv pip install` — no Cloud Build step required.
+The default mode builds a custom container image via Cloud Build with all dependencies baked in. Images are cached by dependency hash — unchanged dependencies reuse the cached image.
 
 ```python
-# These are equivalent — both use prebuilt mode:
+# These are equivalent — both use bundled mode:
 @kinetic.run(accelerator="v5e-1")
 def train():
     ...
 
-@kinetic.run(accelerator="v5e-1", container_image="prebuilt")
+@kinetic.run(accelerator="v5e-1", container_image="bundled")
 def train():
     ...
 ```
+
+> **First run timing:** The initial build takes ~2-5 minutes. Subsequent runs with unchanged dependencies start within a few seconds.
 
 To use your own prebuilt images instead of the official ones, build and push them with `kinetic build-base`, then point Kinetic at your repository:
 
@@ -422,17 +424,15 @@ def train():
     ...
 ```
 
-#### Bundled Mode
+#### Prebuilt Mode
 
-Bundled mode builds a custom container image via Cloud Build with all dependencies baked in. Images are cached by dependency hash — unchanged dependencies reuse the cached image.
+Prebuilt mode uses a pre-published base image with the accelerator runtime already installed. Your project dependencies are installed at pod startup via `uv pip install` — no Cloud Build step required.
 
 ```python
-@kinetic.run(accelerator="v5e-1", container_image="bundled")
+@kinetic.run(accelerator="v5e-1", container_image="prebuilt")
 def train():
     ...
 ```
-
-> **First run timing:** The initial build takes ~2-5 minutes. Subsequent runs with unchanged dependencies start within a few seconds.
 
 #### Custom Image Mode
 
@@ -540,7 +540,7 @@ Kinetic uses `absl-py` for logging. Set `KINETIC_LOG_LEVEL=DEBUG` for verbose ou
 ```python
 @kinetic.run(
     accelerator="v5e-1",       # TPU/GPU type (default: "v5e-1")
-    container_image=None,      # None/"prebuilt", "bundled", or a custom image URI
+    container_image=None,      # None/"bundled", "prebuilt", or a custom image URI
     base_image_repo=None,      # Prebuilt image repo (default: KINETIC_BASE_IMAGE_REPO)
     zone=None,                 # Override default zone
     project=None,              # Override default project

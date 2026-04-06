@@ -161,15 +161,15 @@ def run(
   Args:
     accelerator: TPU/GPU type (e.g., 'v3-8', 'v5litepod-4', 'l4', 'a100')
     container_image: Controls the container image used for execution.
-      `None` or `"prebuilt"` (default) uses a prebuilt base image and
-      installs user requirements at pod startup via `uv pip install`.
-      `"bundled"` builds a custom image with all dependencies baked in
-      via Cloud Build.  Any other string is treated as a custom container
-      image URI.
+      `None` or `"bundled"` (default) builds a custom image with all
+      dependencies baked in via Cloud Build.  `"prebuilt"` uses a
+      prebuilt base image and installs user requirements at pod startup
+      via `uv pip install`.  Any other string is treated as a custom
+      container image URI.
     base_image_repo: Docker Hub repository for prebuilt base images
       (e.g., `"mycompany/kinetic"`). Defaults to `KINETIC_BASE_IMAGE_REPO`
       env var, then `"kinetic"`. Only used when `container_image` is
-      `None` or `"prebuilt"`.
+      `"prebuilt"`.
     zone: GCP zone (default: from KINETIC_ZONE or 'us-central1-a')
     project: GCP project (default: from KINETIC_PROJECT)
     capture_env_vars: List of environment variable names or patterns (ending in `*`)

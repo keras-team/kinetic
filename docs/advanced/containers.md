@@ -2,24 +2,40 @@
 
 Kinetic supports three container image modes that control how your remote execution environment is built and deployed. Choose the mode that best fits your workflow by setting the `container_image` parameter in the `@kinetic.run()` or `@kinetic.submit()` decorator.
 
-| Mode                   | `container_image=`     | Build step                       | Dependencies installed              |
-| ---------------------- | ---------------------- | -------------------------------- | ----------------------------------- |
-| **Prebuilt** (default) | `None` or `"prebuilt"` | None                             | At pod startup via `uv pip install` |
-| **Bundled**            | `"bundled"`            | Cloud Build (cached by dep hash) | Baked into the image                |
-| **Custom**             | `"<image-uri>"`        | None (you manage it)             | Whatever is in your image           |
+| Mode                  | `container_image=`    | Build step                       | Dependencies installed              |
+| --------------------- | --------------------- | -------------------------------- | ----------------------------------- |
+| **Bundled** (default) | `None` or `"bundled"` | Cloud Build (cached by dep hash) | Baked into the image                |
+| **Prebuilt**          | `"prebuilt"`          | None                             | At pod startup via `uv pip install` |
+| **Custom**            | `"<image-uri>"`       | None (you manage it)             | Whatever is in your image           |
 
-## Prebuilt Mode (Default)
+## Bundled Mode (Default)
 
-Prebuilt mode uses a pre-published base image that already contains the accelerator runtime (JAX, CUDA/TPU libraries) and core dependencies. Your project's `requirements.txt` or `pyproject.toml` dependencies are installed at pod startup via `uv pip install`, so there is no Cloud Build step.
+Bundled mode builds a custom container image via Cloud Build with all your dependencies baked in. The image is tagged by a hash of your dependencies, so unchanged dependencies reuse the cached image.
 
 ```python
 import kinetic
 
-# Prebuilt mode — these are equivalent:
+# Bundled mode — these are equivalent:
 @kinetic.run(accelerator="v6e-8")
 def train():
     ...
 
+@kinetic.run(accelerator="v6e-8", container_image="bundled")
+def train():
+    ...
+```
+
+### Tradeoffs
+
+- **Reproducible**: The exact environment is frozen in the image.
+- **First-run cost**: The initial build takes ~2-5 minutes. Subsequent runs with unchanged dependencies use the cached image and start within a few seconds.
+- **Good for**: Production workloads, large dependency sets where you want to avoid per-run install overhead, or when you need a fully reproducible environment.
+
+## Prebuilt Mode
+
+Prebuilt mode uses a pre-published base image that already contains the accelerator runtime (JAX, CUDA/TPU libraries) and core dependencies. Your project's `requirements.txt` or `pyproject.toml` dependencies are installed at pod startup via `uv pip install`, so there is no Cloud Build step.
+
+```python
 @kinetic.run(accelerator="v6e-8", container_image="prebuilt")
 def train():
     ...
@@ -62,22 +78,6 @@ def train():
 ```
 
 See [`kinetic build-base`](#kinetic-build-base) for the full command reference.
-
-## Bundled Mode
-
-Bundled mode builds a custom container image via Cloud Build with all your dependencies baked in. The image is tagged by a hash of your dependencies, so unchanged dependencies reuse the cached image.
-
-```python
-@kinetic.run(accelerator="v6e-8", container_image="bundled")
-def train():
-    ...
-```
-
-### Tradeoffs
-
-- **Reproducible**: The exact environment is frozen in the image.
-- **First-run cost**: The initial build takes ~2-5 minutes. Subsequent runs with unchanged dependencies use the cached image and start within a few seconds.
-- **Good for**: Production workloads, large dependency sets where you want to avoid per-run install overhead, or when you need a fully reproducible environment.
 
 ## Custom Image Mode
 

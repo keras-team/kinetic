@@ -376,7 +376,7 @@ def _prepare_artifacts(ctx: JobContext, tmpdir: str) -> None:
 
 def _is_prebuilt(ctx: JobContext) -> bool:
   """Return True if prebuilt image mode is active."""
-  return ctx.container_image is None or ctx.container_image == "prebuilt"
+  return ctx.container_image == "prebuilt"
 
 
 def _build_container(ctx: JobContext) -> str:
@@ -387,7 +387,7 @@ def _build_container(ctx: JobContext) -> str:
       base_image_repo=ctx.base_image_repo,
     )
     logging.info("Using prebuilt base image: %s", image_uri)
-  elif ctx.container_image == "bundled":
+  elif ctx.container_image is None or ctx.container_image == "bundled":
     logging.info("Building container image...")
     py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     image_uri = container_builder.get_or_build_container(
