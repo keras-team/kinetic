@@ -34,6 +34,7 @@ def upload_artifacts(
   payload_path: str,
   context_path: str,
   project: str | None = None,
+  requirements_content: str | None = None,
 ) -> None:
   """Upload execution artifacts to Cloud Storage.
 
@@ -43,6 +44,8 @@ def upload_artifacts(
       payload_path: Local path to payload.pkl
       context_path: Local path to context.zip
       project: GCP project ID (optional, uses env vars if not provided)
+      requirements_content: Filtered requirements text for runtime install
+          (prebuilt image mode only). Uploaded as `requirements.txt`.
   """
   project = project or get_default_project()
 
@@ -62,6 +65,16 @@ def upload_artifacts(
   logging.info(
     "Uploaded context to gs://%s/%s/context.zip", bucket_name, job_id
   )
+
+  # Upload requirements (prebuilt mode only)
+  if requirements_content is not None:
+    blob = bucket.blob(f"{job_id}/requirements.txt")
+    blob.upload_from_string(requirements_content, retry=DEFAULT_RETRY)
+    logging.info(
+      "Uploaded requirements to gs://%s/%s/requirements.txt",
+      bucket_name,
+      job_id,
+    )
 
   # Get project ID for console link
   project = client.project

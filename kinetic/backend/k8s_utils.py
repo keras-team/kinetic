@@ -279,14 +279,49 @@ def validate_preflight(accelerator):
     logging.warning("Preflight check: Failed to query nodes: %s", e.reason)
 
 
+_IMAGE_PULL_ERROR_REASONS = frozenset(
+  {
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "ErrImageNeverPull",
+    "InvalidImageName",
+  }
+)
+
+
+def _check_image_pull_errors(pod) -> None:
+  """Raise a clear error if any container is stuck on an image pull failure."""
+  all_statuses = list(pod.status.init_container_statuses or []) + list(
+    pod.status.container_statuses or []
+  )
+  for cs in all_statuses:
+    waiting = cs.state.waiting if cs.state else None
+    if waiting and waiting.reason in _IMAGE_PULL_ERROR_REASONS:
+      image = cs.image or "unknown"
+      detail = waiting.message or waiting.reason
+      raise RuntimeError(
+        f"Container image pull failed for '{image}': {detail}\n"
+        f"If using prebuilt images, either:\n"
+        f"  1. If using custom prebuilt images, ensure you have built and\n"
+        f"     pushed the image (kinetic build-base --repo <repo>) and set\n"
+        f"     KINETIC_BASE_IMAGE_REPO=<repo>.\n"
+        f"  2. Use bundled mode: @kinetic.run(..., container_image='bundled')\n"
+        f"  3. If using official kinetic images, report the issue at:\n"
+        f"     https://github.com/keras-team/kinetic/issues"
+      )
+
+
 def check_pod_scheduling(core_v1_client, job_name, namespace, logged_pending):
-  """Check for pod scheduling issues and raise helpful errors."""
+  """Check for pod scheduling and image pull issues, raising helpful errors."""
   with suppress(ApiException):
     pods = core_v1_client.list_namespaced_pod(
       namespace, label_selector=f"job-name={job_name}"
     )
     for pod in pods.items:
       pod_name = pod.metadata.name
+      # Check for image pull failures (can occur in any phase).
+      _check_image_pull_errors(pod)
+
       if pod.status.phase == "Pending":
         for condition in pod.status.conditions or []:
           if condition.type == "PodScheduled" and condition.status == "False":

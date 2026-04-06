@@ -17,6 +17,7 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import artifactregistry_v1, storage
 from google.cloud.devtools import cloudbuild_v1
 
+from kinetic import version
 from kinetic.constants import (
   get_default_cluster_name,
   get_default_zone,
@@ -54,6 +55,8 @@ _JAX_INSTALL = {
 
 # Core Python packages installed in every kinetic container image.
 _CORE_DEPS = ["keras", "cloudpickle", "google-cloud-storage"]
+
+_DEFAULT_BASE_IMAGE_REPO = "kinetic"
 
 
 def _filter_jax_requirements(requirements_content: str) -> str:
@@ -421,6 +424,67 @@ def _upload_build_source(
   )
 
   return gcs_uri
+
+
+def get_prebuilt_image(
+  accelerator_type: str,
+  base_image_repo: str | None = None,
+) -> str:
+  """Return the Docker Hub URI for a prebuilt base image.
+
+  The image repository is resolved in order:
+  1. `base_image_repo` parameter (if not None)
+  2. `KINETIC_BASE_IMAGE_REPO` environment variable
+  3. Default: `"kinetic"`
+
+  Args:
+      accelerator_type: TPU/GPU type (e.g., 'v3-8', 'l4', 'a100').
+      base_image_repo: Docker Hub repository override.
+
+  Returns:
+      Docker Hub image URI, e.g. `kinetic/base-gpu:0.0.1`.
+  """
+  repo = (
+    base_image_repo
+    or os.environ.get("KINETIC_BASE_IMAGE_REPO")
+    or _DEFAULT_BASE_IMAGE_REPO
+  )
+  category = accelerators.get_category(accelerator_type)
+  return f"{repo}/base-{category}:{version.__version__}"
+
+
+def prepare_requirements_content(
+  requirements_path: str | None,
+) -> str | None:
+  """Read, parse, and filter user requirements for runtime installation.
+
+  Handles both `requirements.txt` and `pyproject.toml` (extracting
+  `[project.dependencies]`).  JAX-related packages are filtered out
+  to prevent conflicts with accelerator-specific installations in the
+  prebuilt base image.
+
+  Args:
+      requirements_path: Path to `requirements.txt` or `pyproject.toml`,
+          or None.
+
+  Returns:
+      Filtered requirements content suitable for `uv pip install -r`,
+      or None if no dependencies were found.
+  """
+  if not requirements_path or not os.path.exists(requirements_path):
+    return None
+
+  if requirements_path.endswith(".toml"):
+    raw = _parse_pyproject_dependencies(requirements_path)
+  else:
+    with open(requirements_path, "r") as f:
+      raw = f.read()
+
+  if not raw:
+    return None
+
+  filtered = _filter_jax_requirements(raw)
+  return filtered if filtered.strip() else None
 
 
 def _prepare_dockerfile(

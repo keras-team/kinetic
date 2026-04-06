@@ -15,6 +15,8 @@ from kinetic.backend.execution import (
   JobContext,
   _find_requirements,
   _prepare_artifacts,
+  _requirements_uri,
+  _upload_artifacts,
   submit_remote,
 )
 from kinetic.data import Data
@@ -378,6 +380,96 @@ class TestPrepareArtifacts(absltest.TestCase):
     self.assertEqual(
       ctx.requirements_path, str(working_dir / "requirements.txt")
     )
+
+
+class TestUploadArtifactsRequirementsFlag(absltest.TestCase):
+  """Tests that _upload_artifacts returns the correct has_requirements flag."""
+
+  def _make_ctx(self, requirements_path=None, container_image=None):
+    def train():
+      return 1
+
+    return JobContext(
+      func=train,
+      args=(),
+      kwargs={},
+      env_vars={},
+      accelerator="v6e-8",
+      container_image=container_image,
+      zone="us-central1-a",
+      project="proj",
+      cluster_name="cluster",
+      payload_path="/tmp/payload.pkl",
+      context_path="/tmp/context.zip",
+      requirements_path=requirements_path,
+    )
+
+  @mock.patch("kinetic.backend.execution.storage.upload_artifacts")
+  @mock.patch(
+    "kinetic.backend.execution.container_builder.prepare_requirements_content",
+    return_value=None,
+  )
+  def test_returns_false_when_content_is_none(self, mock_prepare, mock_upload):
+    """has_requirements is False when prepare_requirements_content returns None."""
+    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    has_requirements = _upload_artifacts(ctx)
+    self.assertFalse(has_requirements)
+
+  @mock.patch("kinetic.backend.execution.storage.upload_artifacts")
+  @mock.patch(
+    "kinetic.backend.execution.container_builder.prepare_requirements_content",
+    return_value=None,
+  )
+  def test_requirements_uri_returns_none_when_path_cleared(
+    self, mock_prepare, mock_upload
+  ):
+    """_requirements_uri returns None after caller clears requirements_path."""
+    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    has_requirements = _upload_artifacts(ctx)
+    if not has_requirements:
+      ctx.requirements_path = None
+    self.assertIsNone(_requirements_uri(ctx))
+
+  @mock.patch("kinetic.backend.execution.storage.upload_artifacts")
+  @mock.patch(
+    "kinetic.backend.execution.container_builder.prepare_requirements_content",
+    return_value="numpy==1.26\n",
+  )
+  def test_returns_true_when_content_exists(self, mock_prepare, mock_upload):
+    """has_requirements is True when prepare_requirements_content returns content."""
+    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    has_requirements = _upload_artifacts(ctx)
+    self.assertTrue(has_requirements)
+
+  @mock.patch("kinetic.backend.execution.storage.upload_artifacts")
+  @mock.patch(
+    "kinetic.backend.execution.container_builder.prepare_requirements_content",
+    return_value="numpy==1.26\n",
+  )
+  def test_requirements_uri_returned_when_content_exists(
+    self, mock_prepare, mock_upload
+  ):
+    """_requirements_uri returns a GCS URI when requirements content exists."""
+    ctx = self._make_ctx(requirements_path="/tmp/requirements.txt")
+    _upload_artifacts(ctx)
+    self.assertEqual(
+      _requirements_uri(ctx),
+      f"gs://{ctx.bucket_name}/{ctx.job_id}/requirements.txt",
+    )
+
+  @mock.patch("kinetic.backend.execution.storage.upload_artifacts")
+  def test_non_prebuilt_skips_filtering(self, mock_upload):
+    """Non-prebuilt mode does not call prepare_requirements_content."""
+    ctx = self._make_ctx(
+      requirements_path="/tmp/requirements.txt",
+      container_image="gcr.io/my-proj/custom:latest",
+    )
+    with mock.patch(
+      "kinetic.backend.execution.container_builder.prepare_requirements_content"
+    ) as mock_prepare:
+      has_requirements = _upload_artifacts(ctx)
+      mock_prepare.assert_not_called()
+    self.assertTrue(has_requirements)
 
 
 class TestSubmitRemote(absltest.TestCase):

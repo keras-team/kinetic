@@ -72,6 +72,7 @@ def _resolve_backend_name(accelerator, backend, spot=False):
 def _make_decorator(
   accelerator,
   container_image,
+  base_image_repo,
   zone,
   project,
   capture_env_vars,
@@ -86,8 +87,8 @@ def _make_decorator(
   """Build a decorator that submits the wrapped function for remote execution.
 
   Args:
-    sync: If True, block on result (``run()`` semantics).
-      If False, return a ``JobHandle`` immediately (``submit()`` semantics).
+    sync: If True, block on result (`run()` semantics).
+      If False, return a `JobHandle` immediately (`submit()` semantics).
   """
   _validate_volumes(volumes)
 
@@ -121,6 +122,7 @@ def _make_decorator(
         volumes=volumes,
         spot=spot,
         output_dir=output_dir,
+        base_image_repo=base_image_repo,
       )
 
       if resolved_backend == "pathways":
@@ -143,6 +145,7 @@ def _make_decorator(
 def run(
   accelerator: str = "v5e-1",
   container_image: str | None = None,
+  base_image_repo: str | None = None,
   zone: str | None = None,
   project: str | None = None,
   capture_env_vars: list[str] | None = None,
@@ -157,23 +160,33 @@ def run(
 
   Args:
     accelerator: TPU/GPU type (e.g., 'v3-8', 'v5litepod-4', 'l4', 'a100')
-    container_image: Custom container image URI (optional)
+    container_image: Controls the container image used for execution.
+      `None` or `"prebuilt"` (default) uses a prebuilt base image and
+      installs user requirements at pod startup via `uv pip install`.
+      `"bundled"` builds a custom image with all dependencies baked in
+      via Cloud Build.  Any other string is treated as a custom container
+      image URI.
+    base_image_repo: Docker Hub repository for prebuilt base images
+      (e.g., `"mycompany/kinetic"`). Defaults to `KINETIC_BASE_IMAGE_REPO`
+      env var, then `"kinetic"`. Only used when `container_image` is
+      `None` or `"prebuilt"`.
     zone: GCP zone (default: from KINETIC_ZONE or 'us-central1-a')
     project: GCP project (default: from KINETIC_PROJECT)
-    capture_env_vars: List of environment variable names or patterns (ending in ``*``)
+    capture_env_vars: List of environment variable names or patterns (ending in `*`)
       to propagate to the remote environment. Defaults to None.
     cluster: GKE cluster name (default: from KINETIC_CLUSTER)
     backend: Backend to use ('gke' or 'pathways')
     namespace: Kubernetes namespace (default: None, resolved via
       KINETIC_NAMESPACE env var or 'default')
     volumes: Dict mapping absolute mount paths to Data objects, e.g.
-      ``{"/data": Data("./dataset/")}``. Data is downloaded to these
+      `{"/data": Data("./dataset/")}`. Data is downloaded to these
       paths on the pod before function execution.
     spot: If True, use preemptible/spot VMs for the job.
   """
   return _make_decorator(
     accelerator,
     container_image,
+    base_image_repo,
     zone,
     project,
     capture_env_vars,
@@ -190,6 +203,7 @@ def run(
 def submit(
   accelerator: str = "v5e-1",
   container_image: str | None = None,
+  base_image_repo: str | None = None,
   zone: str | None = None,
   project: str | None = None,
   capture_env_vars: list[str] | None = None,
@@ -200,18 +214,19 @@ def submit(
   spot: bool = False,
   output_dir: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., JobHandle]]:
-  """Submit function for remote execution, returning a ``JobHandle``.
+  """Submit function for remote execution, returning a `JobHandle`.
 
-  Same parameters as ``run()``.  Blocks through container build and
+  Same parameters as `run()`.  Blocks through container build and
   artifact upload, but returns immediately after k8s submission.
-  Use the returned ``JobHandle`` to observe, collect, or cancel.
+  Use the returned `JobHandle` to observe, collect, or cancel.
 
   Returns:
-    A decorator whose wrapper returns a ``JobHandle``.
+    A decorator whose wrapper returns a `JobHandle`.
   """
   return _make_decorator(
     accelerator,
     container_image,
+    base_image_repo,
     zone,
     project,
     capture_env_vars,
