@@ -354,7 +354,7 @@ def build_base(
 
   if successes:
     console.print("Pushed:")
-    for cat, tag_name, _ in successes:
+    for _, tag_name, _ in successes:
       console.print(f"  - {tag_name}")
 
   if failures:
