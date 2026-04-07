@@ -19,7 +19,7 @@ dependencies = [
     "numpy",
     "keras",
     "rich>=14.0",
-    "google-auth>=2.20",
+    "google-auth>=2.49",
     "google-cloud-artifact-registry>=1.11",
     "google-cloud-billing>=1.19",
     "google-cloud-compute>=1.47",
