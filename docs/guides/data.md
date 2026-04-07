@@ -154,3 +154,46 @@ Kinetic implements content-addressed caching for all local data uploads.
 ## Automatic Zip Exclusion
 
 When you use `Data("./path/to/data")`, and that path is within your project root, Kinetic automatically excludes it from the `context.zip` payload. This prevents redundant uploads and keeps your project payload small.
+
+---
+
+## Internals
+
+This section describes how the Data API works under the hood. You don't need to read this to use Kinetic — it's here for contributors and anyone debugging data-related issues.
+
+### Data Reference Serialization
+
+`Data` objects can't be sent directly to the remote pod. During `_prepare_artifacts()`, each `Data` is uploaded to GCS and replaced with a serializable `__data_ref__` dict:
+
+```python
+{
+    "__data_ref__": True,
+    "gcs_uri": "gs://bucket/namespace/data-cache/abc123",
+    "is_dir": True,
+    "mount_path": "/data",      # None for function-argument Data
+    "fuse": False,              # True when fuse=True was passed
+}
+```
+
+On the remote pod, `resolve_data_refs()` in `remote_runner.py` recursively walks the deserialized args/kwargs and replaces these dicts with local filesystem paths.
+
+### Upload and Caching Pipeline
+
+Local data is uploaded to `gs://{bucket}/{namespace}/data-cache/{hash}/`, where `{hash}` is a SHA-256 computed over sorted file contents. The upload flow:
+
+1. Compute content hash (deterministic: sorted DFS order, per-file SHA-256, then combined)
+2. Check for sentinel blob at `{namespace}/data-markers/{hash}` — if present, skip upload
+3. Upload files preserving directory structure under the hash prefix
+4. Write the sentinel blob last (signals upload-complete)
+
+For single files, the blob is stored at `{hash}/{filename}`. For directories, the full tree is preserved under `{hash}/`. The returned GCS URI always points to the hash prefix directory, not individual files.
+
+### FUSE Mount Implementation
+
+GCS FUSE can only mount directories, not individual files. The system handles this through several layers:
+
+**Volume spec construction** (`execution.py`): For `fuse=True` Data, a FUSE volume spec is built with `gcs_uri`, `mount_path`, `is_dir`, and `read_only`. These specs are stored on `ctx.fuse_volume_specs` and passed to the backend.
+
+**URI adjustment for uploaded single files**: `upload_data()` returns a directory-level URI (`gs://bucket/ns/data-cache/{hash}`) since the hash prefix is a directory. For FUSE single-file mounts, `_fuse_gcs_uri()` appends the original filename (e.g., `gs://bucket/ns/data-cache/{hash}/config.json`) so that the `only-dir` mount option scopes to the hash directory rather than the entire `data-cache/` tree. The data ref retains the directory-level URI for download compatibility.
+
+**K8s volume generation**: Each spec becomes an inline ephemeral CSI volume. The `only-dir` mount option scopes the mount to a specific GCS prefix. For single files (`is_dir=False`), the parent directory is mounted. The pod receives a `gke-gcsfuse/volumes: "true"` annotation to trigger the GCS FUSE sidecar injection.
