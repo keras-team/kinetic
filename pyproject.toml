@@ -20,6 +20,7 @@ dependencies = [
     "keras",
     "rich>=14.0",
     "google-auth>=2.49",
+    "requests>=2.33",
     "google-cloud-artifact-registry>=1.11",
     "google-cloud-billing>=1.19",
     "google-cloud-compute>=1.47",

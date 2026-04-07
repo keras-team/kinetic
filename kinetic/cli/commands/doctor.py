@@ -10,7 +10,10 @@ from enum import Enum
 
 import click
 import google.auth
+import google.auth.compute_engine
 import google.auth.exceptions
+import google.auth.identity_pool
+import google.auth.transport.requests
 import google.oauth2.credentials
 import google.oauth2.service_account
 from google.api_core import exceptions as google_exceptions
@@ -151,10 +154,25 @@ def _check_adc():
       "Service account: export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json",
     )
 
+  try:
+    creds.refresh(google.auth.transport.requests.Request())
+  except google.auth.exceptions.RefreshError:
+    return CheckResult(
+      "Application Default Credentials",
+      CheckStatus.FAIL,
+      "Credentials expired or revoked",
+      "Run: gcloud auth application-default revoke && "
+      "gcloud auth application-default login",
+    )
+
   if isinstance(creds, google.oauth2.service_account.Credentials):
     cred_label = "Service account"
   elif isinstance(creds, google.oauth2.credentials.Credentials):
     cred_label = "User credentials (gcloud ADC)"
+  elif isinstance(creds, google.auth.compute_engine.Credentials):
+    cred_label = "GCE Metadata Server"
+  elif isinstance(creds, google.auth.identity_pool.Credentials):
+    cred_label = "Workload Identity Federation"
   else:
     cred_label = type(creds).__name__
 
