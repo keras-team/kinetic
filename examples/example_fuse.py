@@ -32,10 +32,6 @@ def _fresh_dir(name: str) -> str:
 
 print(f"Temp root: {_tmp_root}\n")
 
-# ---------------------------------------------------------------------------
-# 1. FUSE volume — directory mounted at a fixed path
-# ---------------------------------------------------------------------------
-
 dataset_dir = _fresh_dir("dataset")
 with open(os.path.join(dataset_dir, "train.csv"), "w") as f:
   f.write("feature,label\n1,100\n2,200\n3,300\n")
@@ -46,6 +42,7 @@ with open(os.path.join(dataset_dir, "train.csv"), "w") as f:
   volumes={"/data": Data(dataset_dir, fuse=True)},
 )
 def read_fuse_volume():
+  """1. FUSE volume — directory mounted at a fixed path."""
   files = sorted(os.listdir("/data"))
   with open("/data/train.csv") as f:
     content = f.read()
@@ -56,10 +53,6 @@ result = read_fuse_volume()
 print(f"Test 1 (fuse volume): {result}")
 assert result["files"] == ["train.csv"]
 assert "1,100" in result["content"]
-
-# ---------------------------------------------------------------------------
-# 2. FUSE volume preserves nested directories
-# ---------------------------------------------------------------------------
 
 nested_dataset = _fresh_dir("nested")
 with open(os.path.join(nested_dataset, "root.txt"), "w") as f:
@@ -75,6 +68,7 @@ with open(os.path.join(sub, "nested.txt"), "w") as f:
   volumes={"/data": Data(nested_dataset, fuse=True)},
 )
 def read_nested():
+  """2. FUSE volume preserves nested directories."""
   root_files = sorted(os.listdir("/data"))
   with open("/data/subdir/nested.txt") as f:
     nested = f.read()
@@ -86,10 +80,6 @@ print(f"Test 2 (nested dirs): {result}")
 assert "subdir" in result["root_files"]
 assert "root.txt" in result["root_files"]
 assert "nested" in result["nested"]
-
-# ---------------------------------------------------------------------------
-# 3. Multiple FUSE volumes
-# ---------------------------------------------------------------------------
 
 data_dir = _fresh_dir("data")
 with open(os.path.join(data_dir, "data.csv"), "w") as f:
@@ -108,6 +98,7 @@ with open(os.path.join(weights_dir, "model.bin"), "w") as f:
   },
 )
 def check_multiple_volumes():
+  """3. Multiple FUSE volumes."""
   return {
     "data_files": sorted(os.listdir("/data")),
     "weight_files": sorted(os.listdir("/weights")),
@@ -119,10 +110,6 @@ print(f"Test 3 (multiple fuse volumes): {result}")
 assert result["data_files"] == ["data.csv"]
 assert result["weight_files"] == ["model.bin"]
 
-# ---------------------------------------------------------------------------
-# 4. FUSE data as a function argument
-# ---------------------------------------------------------------------------
-
 arg_dataset = _fresh_dir("arg_dataset")
 with open(os.path.join(arg_dataset, "train.csv"), "w") as f:
   f.write("feature,label\n1,100\n2,200\n3,300\n")
@@ -130,6 +117,7 @@ with open(os.path.join(arg_dataset, "train.csv"), "w") as f:
 
 @kinetic.run(accelerator="cpu")
 def read_fuse_arg(data_path):
+  """4. FUSE data as a function argument."""
   files = sorted(os.listdir(data_path))
   with open(f"{data_path}/train.csv") as f:
     content = f.read()
@@ -141,10 +129,6 @@ print(f"Test 4 (fuse data arg): {result}")
 assert result["files"] == ["train.csv"]
 assert "1,100" in result["content"]
 
-# ---------------------------------------------------------------------------
-# 5. FUSE data arg — single file
-# ---------------------------------------------------------------------------
-
 config_json = os.path.join(_fresh_dir("config"), "config.json")
 with open(config_json, "w") as f:
   json.dump({"lr": 0.01, "epochs": 10}, f)
@@ -152,6 +136,7 @@ with open(config_json, "w") as f:
 
 @kinetic.run(accelerator="cpu")
 def read_fuse_file(config_path):
+  """5. FUSE data arg — single file."""
   with open(config_path) as f:
     return json.load(f)
 
@@ -159,10 +144,6 @@ def read_fuse_file(config_path):
 result = read_fuse_file(Data(config_json, fuse=True))
 print(f"Test 5 (fuse single file): {result}")
 assert result["lr"] == 0.01
-
-# ---------------------------------------------------------------------------
-# 6. Mixed — FUSE volume + downloaded volume
-# ---------------------------------------------------------------------------
 
 fuse_dir = _fresh_dir("fuse_data")
 with open(os.path.join(fuse_dir, "fuse.txt"), "w") as f:
@@ -181,6 +162,7 @@ with open(os.path.join(dl_dir, "dl.txt"), "w") as f:
   },
 )
 def mixed_volumes():
+  """6. Mixed — FUSE volume + downloaded volume."""
   with open("/fuse_data/fuse.txt") as f:
     fuse_content = f.read()
   with open("/dl_data/dl.txt") as f:
@@ -192,10 +174,6 @@ result = mixed_volumes()
 print(f"Test 6 (fuse + downloaded volumes): {result}")
 assert "fuse" in result["fuse"]
 assert "downloaded" in result["dl"]
-
-# ---------------------------------------------------------------------------
-# 7. Mixed — FUSE volume + Data arg + plain arg
-# ---------------------------------------------------------------------------
 
 wt_dir = _fresh_dir("model_weights")
 with open(os.path.join(wt_dir, "model.bin"), "w") as f:
@@ -211,6 +189,7 @@ with open(cfg_json, "w") as f:
   volumes={"/weights": Data(wt_dir, fuse=True)},
 )
 def train(config_path, lr=0.001):
+  """7. Mixed — FUSE volume + Data arg + plain arg."""
   with open(config_path) as f:
     cfg = json.load(f)
   has_weights = os.path.isdir("/weights")
