@@ -133,7 +133,11 @@ def print_pod_logs(core_v1_client, job_name, namespace):
 
 def _pod_exit_summary(pod):
   """Extract exit code and termination reason from a pod's container statuses."""
-  for cs in pod.status.container_statuses or []:
+  all_statuses = list(pod.status.container_statuses or [])
+  all_statuses.extend(pod.status.init_container_statuses or [])
+  for cs in sorted(
+    all_statuses, key=lambda x: x.name != "kinetic-worker"
+  ):
     terminated = getattr(cs.state, "terminated", None)
     if terminated is None:
       terminated = getattr(getattr(cs, "last_state", None), "terminated", None)
@@ -154,8 +158,9 @@ def _pod_exit_summary(pod):
 def collect_pod_failure_details(core_v1_client, job_name, namespace, tail=30):
   """Build a failure summary from pod status and logs.
 
-  Returns a string with exit info and a log tail, or empty string
-  if nothing useful could be retrieved.
+  Fetches up to 100 tail lines per pod, logs them for debugging, and
+  returns an error string with exit info and the last ``tail`` lines.
+  Returns empty string if nothing useful could be retrieved.
   """
   sections = []
   try:
@@ -180,11 +185,16 @@ def collect_pod_failure_details(core_v1_client, job_name, namespace, tail=30):
 
     with suppress(ApiException):
       logs = core_v1_client.read_namespaced_pod_log(
-        pod_name, namespace, tail_lines=tail
+        pod_name, namespace, tail_lines=100
       )
+      if logs:
+        logging.info("Pod %s logs:\n%s", pod_name, logs)
       if logs and logs.strip():
-        sections.append(f"  --- {pod_name} logs (last {tail} lines) ---")
-        sections.append(logs.rstrip())
+        tail_lines = logs.rstrip().splitlines()[-tail:]
+        sections.append(
+          f"  --- {pod_name} logs (last {tail} lines) ---"
+        )
+        sections.append("\n".join(tail_lines))
 
   return "\n".join(sections)
 

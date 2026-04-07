@@ -288,9 +288,6 @@ class TestSubmitPathwaysJob(absltest.TestCase):
 class TestWaitForJob(absltest.TestCase):
   def setUp(self):
     super().setUp()
-    self.mock_print_pod_logs = self.enterContext(
-      mock.patch("kinetic.backend.k8s_utils.print_pod_logs")
-    )
     self.mock_check_pod_scheduling = self.enterContext(
       mock.patch("kinetic.backend.k8s_utils.check_pod_scheduling")
     )
@@ -340,7 +337,6 @@ class TestWaitForJob(absltest.TestCase):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod("Failed")
     with self.assertRaisesRegex(RuntimeError, "failed"):
       wait_for_job("j1")
-    self.mock_print_pod_logs.assert_called_once()
 
   def test_pending_calls_check_scheduling(self):
     pending = self._make_pod("Pending", container_statuses=None)
@@ -390,9 +386,8 @@ class TestWaitForJob(absltest.TestCase):
     cs = self._make_container_status(state_terminated=self._make_terminated(1))
     pod = self._make_pod("Running", container_statuses=[cs])
     self.mock_core.read_namespaced_pod.return_value = pod
-    with self.assertRaisesRegex(RuntimeError, "exit code 1"):
+    with self.assertRaisesRegex(RuntimeError, "failed"):
       wait_for_job("j1")
-    self.mock_print_pod_logs.assert_called_once()
 
   def test_last_state_terminated_exit_0(self):
     cs = self._make_container_status(
@@ -411,9 +406,8 @@ class TestWaitForJob(absltest.TestCase):
     )
     pod = self._make_pod("Running", container_statuses=[cs])
     self.mock_core.read_namespaced_pod.return_value = pod
-    with self.assertRaisesRegex(RuntimeError, "exit code 137"):
+    with self.assertRaisesRegex(RuntimeError, "failed"):
       wait_for_job("j1")
-    self.mock_print_pod_logs.assert_called_once()
 
   def test_leader_pod_name(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod(

@@ -129,8 +129,6 @@ def wait_for_job(job, namespace="default", timeout=3600, poll_interval=10):
         return "success"
 
       if job_status.status.failed and job_status.status.failed >= 1:
-        # Log full pod output, then build a concise error with the tail.
-        k8s_utils.print_pod_logs(core_v1, job_name, namespace)
         details = k8s_utils.collect_pod_failure_details(
           core_v1, job_name, namespace
         )

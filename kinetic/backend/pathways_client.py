@@ -136,6 +136,17 @@ def submit_pathways_job(
       ) from e
 
 
+def _raise_with_details(base_msg, core_v1, job_name, namespace):
+  """Collect pod failure details and raise a RuntimeError."""
+  details = k8s_utils.collect_pod_failure_details(
+    core_v1, job_name, namespace
+  )
+  msg = base_msg
+  if details:
+    msg += f"\n{details}"
+  raise RuntimeError(msg)
+
+
 def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
   """Wait for Pathways Job (LeaderWorkerSet) to complete."""
   core_v1 = k8s_utils.core_v1()
@@ -167,14 +178,10 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
           return "success"
 
         if pod.status.phase == "Failed":
-          k8s_utils.print_pod_logs(core_v1, job_name, namespace)
-          details = k8s_utils.collect_pod_failure_details(
-            core_v1, job_name, namespace
+          _raise_with_details(
+            f"Pathways job {job_name} failed",
+            core_v1, job_name, namespace,
           )
-          msg = f"Pathways job {job_name} failed"
-          if details:
-            msg += f"\n{details}"
-          raise RuntimeError(msg)
 
         elif pod.status.phase == "Pending":
           k8s_utils.check_pod_scheduling(
@@ -203,17 +210,10 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
             logging.info(f"[REMOTE] Job {job_name} completed successfully")
             return "success"
           else:
-            k8s_utils.print_pod_logs(core_v1, job_name, namespace)
-            details = k8s_utils.collect_pod_failure_details(
-              core_v1, job_name, namespace
+            _raise_with_details(
+              f"Pathways job {job_name} failed",
+              core_v1, job_name, namespace,
             )
-            msg = (
-              f"Pathways job {job_name} failed with exit code "
-              f"{container_status.state.terminated.exit_code}"
-            )
-            if details:
-              msg += f"\n{details}"
-            raise RuntimeError(msg)
 
         # Check last state (in case it restarted)
         if container_status.last_state.terminated:
@@ -223,17 +223,10 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
             )
             return "success"
           else:
-            k8s_utils.print_pod_logs(core_v1, job_name, namespace)
-            details = k8s_utils.collect_pod_failure_details(
-              core_v1, job_name, namespace
+            _raise_with_details(
+              f"Pathways job {job_name} failed (restarted)",
+              core_v1, job_name, namespace,
             )
-            msg = (
-              f"Pathways job {job_name} failed previously with "
-              f"exit code {container_status.last_state.terminated.exit_code}"
-            )
-            if details:
-              msg += f"\n{details}"
-            raise RuntimeError(msg)
 
       time.sleep(poll_interval)
 
