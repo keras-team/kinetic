@@ -109,6 +109,7 @@ class AcceleratorsLiveTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("GPUs", result.output)
     self.assertIn("TPUs", result.output)
+    self.assertIn("No provisioned accelerators found", result.output)
 
   def test_live_load_failure_still_lists(self):
     self.mock_load.side_effect = RuntimeError("boom")
@@ -117,6 +118,7 @@ class AcceleratorsLiveTest(absltest.TestCase):
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("GPUs", result.output)
+    self.assertIn("No provisioned accelerators found", result.output)
 
 
 if __name__ == "__main__":
