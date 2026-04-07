@@ -59,9 +59,7 @@ class AcceleratorsDefaultTest(absltest.TestCase):
     self.assertNotIn("provisioned", result.output)
 
   def test_does_not_call_load_state(self):
-    with mock.patch(
-      "kinetic.cli.infra.state.load_state"
-    ) as mock_load:
+    with mock.patch("kinetic.cli.infra.state.load_state") as mock_load:
       result = self.runner.invoke(accelerators, [])
 
     self.assertEqual(result.exit_code, 0, result.output)
