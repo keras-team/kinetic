@@ -19,7 +19,6 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    guides/env_vars
    guides/llm_finetuning
    guides/distributed_training
-   guides/configuration
    guides/checkpointing
 
 .. toctree::
@@ -29,6 +28,7 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    api
    cli
    accelerators
+   configuration
 
 .. toctree::
    :caption: Advanced Topics

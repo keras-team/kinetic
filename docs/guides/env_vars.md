@@ -1,4 +1,4 @@
-# Environment Variables
+# Forward Environment Variables
 
 Kinetic allows you to propagate local environment variables to the remote worker environment. This is useful for passing API keys, configuration, or credentials without hardcoding them in your script.
 
@@ -40,3 +40,11 @@ Environment variables set via `capture_env_vars` will override any existing vari
 Kinetic automatically sets some environment variables in the remote worker environment:
 
 - `KINETIC_OUTPUT_DIR`: The path to the directory where outputs should be saved. By default, this is a GCS path pointing to `gs://{bucket_name}/outputs/{job_id}`. This is useful for passing to checkpointing libraries like Orbax.
+
+> **Important**: By default, Kinetic imposes a 30-day TTL (Time to Live) on the
+> GCS buckets it creates. This means anything written to the default
+> `KINETIC_OUTPUT_DIR` will be automatically deleted after 30 days. If you need
+> to preserve outputs longer, you should copy them to a bucket without a
+> lifecycle rule or specify a custom `output_dir` pointing to a different
+> location.
+

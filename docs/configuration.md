@@ -2,7 +2,7 @@
 
 Kinetic uses environment variables to manage default settings across the CLI and the Python library.
 
-## Environment Variables
+## Local Environment Variables
 
 | Variable                  | Required | Default            | Description                                                  |
 | ------------------------- | -------- | ------------------ | ------------------------------------------------------------ |
@@ -12,8 +12,6 @@ Kinetic uses environment variables to manage default settings across the CLI and
 | `KINETIC_BASE_IMAGE_REPO` | No       | `kinetic`          | Docker repository for prebuilt base images                   |
 | `KINETIC_NAMESPACE`       | No       | `default`          | Kubernetes namespace                                         |
 | `KINETIC_LOG_LEVEL`       | No       | `INFO`             | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
-
-## Setting Variables
 
 You can set these variables in your shell profile (e.g., `~/.bashrc` or `~/.zshrc`) to persist them across sessions.
 

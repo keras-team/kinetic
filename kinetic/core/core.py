@@ -182,6 +182,9 @@ def run(
       `{"/data": Data("./dataset/")}`. Data is downloaded to these
       paths on the pod before function execution.
     spot: If True, use preemptible/spot VMs for the job.
+    output_dir: GCS directory where job outputs should be saved.
+      Propagated to the remote worker as the `KINETIC_OUTPUT_DIR`
+      environment variable. Defaults to `gs://{bucket_name}/outputs/{job_id}`.
   """
   return _make_decorator(
     accelerator,
