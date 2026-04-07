@@ -138,9 +138,7 @@ def submit_pathways_job(
 
 def _raise_with_details(base_msg, core_v1, job_name, namespace):
   """Collect pod failure details and raise a RuntimeError."""
-  details = k8s_utils.collect_pod_failure_details(
-    core_v1, job_name, namespace
-  )
+  details = k8s_utils.collect_pod_failure_details(core_v1, job_name, namespace)
   msg = base_msg
   if details:
     msg += f"\n{details}"
@@ -180,7 +178,9 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
         if pod.status.phase == "Failed":
           _raise_with_details(
             f"Pathways job {job_name} failed",
-            core_v1, job_name, namespace,
+            core_v1,
+            job_name,
+            namespace,
           )
 
         elif pod.status.phase == "Pending":
@@ -212,7 +212,9 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
           else:
             _raise_with_details(
               f"Pathways job {job_name} failed",
-              core_v1, job_name, namespace,
+              core_v1,
+              job_name,
+              namespace,
             )
 
         # Check last state (in case it restarted)
@@ -225,7 +227,9 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
           else:
             _raise_with_details(
               f"Pathways job {job_name} failed (restarted)",
-              core_v1, job_name, namespace,
+              core_v1,
+              job_name,
+              namespace,
             )
 
       time.sleep(poll_interval)

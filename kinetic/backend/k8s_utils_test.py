@@ -341,9 +341,7 @@ class TestPodExitSummary(absltest.TestCase):
     pod = MagicMock()
     sidecar = MagicMock()
     sidecar.name = "logging-sidecar"
-    sidecar.state.terminated = MagicMock(
-      exit_code=0, reason=None, message=None
-    )
+    sidecar.state.terminated = MagicMock(exit_code=0, reason=None, message=None)
     sidecar.last_state.terminated = None
     worker = MagicMock()
     worker.name = "kinetic-worker"
@@ -453,9 +451,7 @@ class TestCollectPodFailureDetails(absltest.TestCase):
       pod.status.phase = "Failed"
       cs = MagicMock()
       cs.name = "kinetic-worker"
-      cs.state.terminated = MagicMock(
-        exit_code=1, reason="Error", message=None
-      )
+      cs.state.terminated = MagicMock(exit_code=1, reason="Error", message=None)
       cs.last_state.terminated = None
       pod.status.container_statuses = [cs]
       pod.status.init_container_statuses = None

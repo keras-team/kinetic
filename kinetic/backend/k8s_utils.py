@@ -135,9 +135,7 @@ def _pod_exit_summary(pod):
   """Extract exit code and termination reason from a pod's container statuses."""
   all_statuses = list(pod.status.container_statuses or [])
   all_statuses.extend(pod.status.init_container_statuses or [])
-  for cs in sorted(
-    all_statuses, key=lambda x: x.name != "kinetic-worker"
-  ):
+  for cs in sorted(all_statuses, key=lambda x: x.name != "kinetic-worker"):
     terminated = getattr(cs.state, "terminated", None)
     if terminated is None:
       terminated = getattr(getattr(cs, "last_state", None), "terminated", None)
@@ -191,9 +189,7 @@ def collect_pod_failure_details(core_v1_client, job_name, namespace, tail=30):
         logging.info("Pod %s logs:\n%s", pod_name, logs)
       if logs and logs.strip():
         tail_lines = logs.rstrip().splitlines()[-tail:]
-        sections.append(
-          f"  --- {pod_name} logs (last {tail} lines) ---"
-        )
+        sections.append(f"  --- {pod_name} logs (last {tail} lines) ---")
         sections.append("\n".join(tail_lines))
 
   return "\n".join(sections)

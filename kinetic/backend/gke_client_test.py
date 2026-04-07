@@ -193,7 +193,9 @@ class TestWaitForJob(absltest.TestCase):
 
     mock_core = MagicMock()
     mock_core.list_namespaced_pod.return_value.items = [pod]
-    mock_core.read_namespaced_pod_log.return_value = "ImportError: no module named foo\n"
+    mock_core.read_namespaced_pod_log.return_value = (
+      "ImportError: no module named foo\n"
+    )
 
     with (
       mock.patch(
