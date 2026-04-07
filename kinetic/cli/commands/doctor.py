@@ -14,6 +14,7 @@ from rich.table import Table
 from kinetic.cli.constants import (
   DEFAULT_CLUSTER_NAME,
   DEFAULT_ZONE,
+  KINETIC_KSA_NAME,
   LWS_INSTALL_URL,
   REQUIRED_APIS,
   STATE_DIR,
@@ -24,6 +25,7 @@ from kinetic.constants import (
   get_default_cluster_name,
   get_default_project,
   get_default_zone,
+  zone_to_ar_location,
   zone_to_region,
 )
 
@@ -71,6 +73,7 @@ _SECTIONS = (
   "Configuration",
   "GCP Project",
   "GCP APIs",
+  "GCP Resources",
   "Infrastructure",
   "Kubernetes",
 )
@@ -429,7 +432,213 @@ def _check_apis(has_project_access, project):
 
 
 # ---------------------------------------------------------------------------
-# Group 6: Infrastructure
+# Group 6: GCP Resources (service accounts, AR, storage, networking)
+# ---------------------------------------------------------------------------
+
+
+def _check_service_account(project, sa_id, display_label):
+  """Check if a GCP service account exists."""
+  email = f"{sa_id}@{project}.iam.gserviceaccount.com"
+  try:
+    result = subprocess.run(
+      [
+        "gcloud",
+        "iam",
+        "service-accounts",
+        "describe",
+        email,
+        f"--project={project}",
+        "--format=value(email)",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode == 0:
+      return CheckResult(display_label, CheckStatus.PASS, email)
+    return CheckResult(
+      display_label,
+      CheckStatus.FAIL,
+      f"Not found: {email}",
+      "Run: kinetic up (creates all service accounts)",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult(display_label, CheckStatus.WARN, "Timed out")
+
+
+def _check_ar_repo(project, cluster_name, ar_location):
+  """Check Artifact Registry repository exists."""
+  repo_id = f"kn-{cluster_name}"
+  try:
+    result = subprocess.run(
+      [
+        "gcloud",
+        "artifacts",
+        "repositories",
+        "describe",
+        repo_id,
+        f"--location={ar_location}",
+        f"--project={project}",
+        "--format=value(name)",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode == 0:
+      return CheckResult(
+        "Artifact Registry",
+        CheckStatus.PASS,
+        f"{ar_location}-docker.pkg.dev/{project}/{repo_id}",
+      )
+    return CheckResult(
+      "Artifact Registry",
+      CheckStatus.FAIL,
+      f"Repository '{repo_id}' not found in {ar_location}",
+      "Run: kinetic up (creates the container registry)",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("Artifact Registry", CheckStatus.WARN, "Timed out")
+
+
+def _check_storage_bucket(project, bucket_name, label):
+  """Check a GCS bucket exists."""
+  try:
+    result = subprocess.run(
+      [
+        "gcloud",
+        "storage",
+        "buckets",
+        "describe",
+        f"gs://{bucket_name}",
+        f"--project={project}",
+        "--format=value(name)",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode == 0:
+      return CheckResult(label, CheckStatus.PASS, f"gs://{bucket_name}")
+    return CheckResult(
+      label,
+      CheckStatus.FAIL,
+      f"Bucket not found: {bucket_name}",
+      "Run: kinetic up (creates required storage buckets)",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult(label, CheckStatus.WARN, "Timed out")
+
+
+def _check_vpc_network(project, cluster_name):
+  """Check VPC network exists."""
+  network_name = f"kn-{cluster_name}"
+  try:
+    result = subprocess.run(
+      [
+        "gcloud",
+        "compute",
+        "networks",
+        "describe",
+        network_name,
+        f"--project={project}",
+        "--format=value(name)",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode == 0:
+      return CheckResult("VPC network", CheckStatus.PASS, network_name)
+    return CheckResult(
+      "VPC network",
+      CheckStatus.FAIL,
+      f"Network '{network_name}' not found",
+      "Run: kinetic up (creates VPC and Cloud NAT)",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("VPC network", CheckStatus.WARN, "Timed out")
+
+
+def _check_cloud_nat(project, cluster_name, zone):
+  """Check Cloud NAT exists (required for private node outbound traffic)."""
+  region = zone_to_region(zone)
+  router_name = f"kn-{cluster_name}-router"
+  nat_name = f"kn-{cluster_name}-nat"
+  try:
+    result = subprocess.run(
+      [
+        "gcloud",
+        "compute",
+        "routers",
+        "nats",
+        "describe",
+        nat_name,
+        f"--router={router_name}",
+        f"--region={region}",
+        f"--project={project}",
+        "--format=value(name)",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode == 0:
+      return CheckResult(
+        "Cloud NAT",
+        CheckStatus.PASS,
+        f"{nat_name} (router: {router_name})",
+      )
+    return CheckResult(
+      "Cloud NAT",
+      CheckStatus.FAIL,
+      f"NAT '{nat_name}' not found on router '{router_name}'",
+      "Run: kinetic up (creates Cloud Router and NAT)\n"
+      "Without NAT, private nodes cannot pull images or reach the internet",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("Cloud NAT", CheckStatus.WARN, "Timed out")
+
+
+def _check_gcp_resources(has_project_access, project, zone, cluster_name):
+  """Check GCP resources created by kinetic up."""
+  if not has_project_access:
+    skip = "Skipped (requires: GCP project access)"
+    return [
+      CheckResult(name, CheckStatus.SKIP, skip)
+      for name in [
+        "Node service account",
+        "Build service account",
+        "Artifact Registry",
+        "Jobs bucket",
+        "Builds bucket",
+        "VPC network",
+        "Cloud NAT",
+      ]
+    ]
+
+  ar_location = zone_to_ar_location(zone)
+  return [
+    _check_service_account(
+      project, f"kn-{cluster_name}-nodes", "Node service account"
+    ),
+    _check_service_account(
+      project, f"kn-{cluster_name}-builds", "Build service account"
+    ),
+    _check_ar_repo(project, cluster_name, ar_location),
+    _check_storage_bucket(
+      project, f"{project}-kn-{cluster_name}-jobs", "Jobs bucket"
+    ),
+    _check_storage_bucket(
+      project, f"{project}-kn-{cluster_name}-builds", "Builds bucket"
+    ),
+    _check_vpc_network(project, cluster_name),
+    _check_cloud_nat(project, cluster_name, zone),
+  ]
+
+
+# ---------------------------------------------------------------------------
+# Group 7: Infrastructure
 # ---------------------------------------------------------------------------
 
 
@@ -555,7 +764,7 @@ def _check_infra(has_project_access, project, zone, cluster_name):
 
 
 # ---------------------------------------------------------------------------
-# Group 7: Kubernetes
+# Group 8: Kubernetes
 # ---------------------------------------------------------------------------
 
 
@@ -636,7 +845,12 @@ def _check_k8s_connectivity():
 
 
 def _check_node_pools(project, zone, cluster_name):
-  """Check GKE node pool health."""
+  """Check GKE node pool health.
+
+  Returns:
+      Tuple of (CheckResult, has_gpu_pools) so callers can decide
+      whether GPU-specific checks (e.g. NVIDIA drivers) apply.
+  """
   try:
     result = subprocess.run(
       [
@@ -654,34 +868,49 @@ def _check_node_pools(project, zone, cluster_name):
       timeout=_SUBPROCESS_TIMEOUT,
     )
   except subprocess.TimeoutExpired:
-    return CheckResult("Node pools", CheckStatus.WARN, "Timed out")
+    return CheckResult("Node pools", CheckStatus.WARN, "Timed out"), False
 
   if result.returncode != 0:
-    return CheckResult(
-      "Node pools",
-      CheckStatus.WARN,
-      "Could not list node pools",
+    return (
+      CheckResult(
+        "Node pools",
+        CheckStatus.WARN,
+        "Could not list node pools",
+      ),
+      False,
     )
 
   try:
     pools = json.loads(result.stdout)
   except (json.JSONDecodeError, TypeError):
-    return CheckResult(
-      "Node pools", CheckStatus.WARN, "Could not parse node pool data"
+    return (
+      CheckResult(
+        "Node pools", CheckStatus.WARN, "Could not parse node pool data"
+      ),
+      False,
     )
 
   if not pools:
-    return CheckResult(
-      "Node pools",
-      CheckStatus.WARN,
-      "No node pools found",
-      "Run: kinetic pool add --accelerator <spec>",
+    return (
+      CheckResult(
+        "Node pools",
+        CheckStatus.WARN,
+        "No node pools found",
+        "Run: kinetic pool add --accelerator <spec>",
+      ),
+      False,
     )
 
   # Count accelerator pools (exclude default pool).
   accel_pools = [
     pool for pool in pools if pool.get("config", {}).get("accelerators")
   ]
+  # Detect GPU pools by checking for nvidia accelerator types.
+  has_gpu_pools = any(
+    "nvidia" in acc.get("acceleratorType", "").lower()
+    for pool in accel_pools
+    for acc in pool.get("config", {}).get("accelerators", [])
+  )
   unhealthy = []
   for pool in pools:
     status = pool.get("status", "UNKNOWN")
@@ -695,21 +924,27 @@ def _check_node_pools(project, zone, cluster_name):
     msg_parts.append("no accelerator pools")
 
   if unhealthy:
-    return CheckResult(
-      "Node pools",
-      CheckStatus.WARN,
-      f"{', '.join(msg_parts)}. Unhealthy: {', '.join(unhealthy)}",
-      "Delete and re-add unhealthy pools: kinetic pool remove/add",
+    return (
+      CheckResult(
+        "Node pools",
+        CheckStatus.WARN,
+        f"{', '.join(msg_parts)}. Unhealthy: {', '.join(unhealthy)}",
+        "Delete and re-add unhealthy pools: kinetic pool remove/add",
+      ),
+      has_gpu_pools,
     )
 
-  return CheckResult("Node pools", CheckStatus.PASS, ", ".join(msg_parts))
+  return (
+    CheckResult("Node pools", CheckStatus.PASS, ", ".join(msg_parts)),
+    has_gpu_pools,
+  )
 
 
 def _check_lws_crd():
   """Check if the LeaderWorkerSet CRD is installed."""
   try:
     result = subprocess.run(
-      ["kubectl", "get", "crd", "leaderworkersets.lws.x-k8s.io"],
+      ["kubectl", "get", "crd", "leaderworkersets.leaderworkerset.x-k8s.io"],
       capture_output=True,
       timeout=_SUBPROCESS_TIMEOUT,
     )
@@ -724,6 +959,337 @@ def _check_lws_crd():
     )
   except subprocess.TimeoutExpired:
     return CheckResult("LWS CRD", CheckStatus.WARN, "Timed out")
+
+
+def _check_kinetic_ksa():
+  """Check kinetic Kubernetes service account with WIF annotation."""
+  try:
+    result = subprocess.run(
+      [
+        "kubectl",
+        "get",
+        "serviceaccount",
+        KINETIC_KSA_NAME,
+        "-n",
+        "default",
+        "-o",
+        "json",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode != 0:
+      return CheckResult(
+        "Kinetic KSA",
+        CheckStatus.FAIL,
+        f"ServiceAccount '{KINETIC_KSA_NAME}' not found in default namespace",
+        "Run: kinetic up (creates the KSA with Workload Identity binding)",
+      )
+    try:
+      sa = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+      return CheckResult(
+        "Kinetic KSA", CheckStatus.WARN, "Could not parse KSA data"
+      )
+
+    annotations = sa.get("metadata", {}).get("annotations", {})
+    wif_annotation = annotations.get("iam.gke.io/gcp-service-account", "")
+    if wif_annotation:
+      return CheckResult(
+        "Kinetic KSA",
+        CheckStatus.PASS,
+        f"Workload Identity \u2192 {wif_annotation}",
+      )
+    return CheckResult(
+      "Kinetic KSA",
+      CheckStatus.WARN,
+      "KSA exists but missing Workload Identity annotation",
+      "Run: kinetic up (configures Workload Identity binding)\n"
+      "Without WIF, pods cannot access GCS or Artifact Registry",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("Kinetic KSA", CheckStatus.WARN, "Timed out")
+
+
+def _check_nvidia_drivers(has_gpu_pools):
+  """Check NVIDIA GPU driver DaemonSet is running."""
+  if not has_gpu_pools:
+    return CheckResult(
+      "NVIDIA GPU drivers",
+      CheckStatus.SKIP,
+      "Skipped (no GPU node pools)",
+    )
+  try:
+    result = subprocess.run(
+      ["kubectl", "get", "daemonset", "-n", "kube-system", "-o", "json"],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode != 0:
+      return CheckResult(
+        "NVIDIA GPU drivers", CheckStatus.WARN, "Could not list DaemonSets"
+      )
+
+    try:
+      data = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+      return CheckResult(
+        "NVIDIA GPU drivers",
+        CheckStatus.WARN,
+        "Could not parse DaemonSet data",
+      )
+
+    nvidia_ds = [
+      ds
+      for ds in data.get("items", [])
+      if "nvidia" in ds.get("metadata", {}).get("name", "").lower()
+    ]
+
+    if not nvidia_ds:
+      return CheckResult(
+        "NVIDIA GPU drivers",
+        CheckStatus.WARN,
+        "No NVIDIA DaemonSet found (required for GPU workloads)",
+        "Run: kinetic up (installs NVIDIA driver DaemonSet)\n"
+        "Or manually: kubectl apply -f <nvidia-driver-installer-url>",
+      )
+
+    ds = nvidia_ds[0]
+    name = ds.get("metadata", {}).get("name", "nvidia-driver")
+    ds_status = ds.get("status", {})
+    desired = ds_status.get("desiredNumberScheduled", 0)
+    ready = ds_status.get("numberReady", 0)
+    if desired > 0 and ready < desired:
+      return CheckResult(
+        "NVIDIA GPU drivers",
+        CheckStatus.WARN,
+        f"{name}: {ready}/{desired} nodes ready",
+        "Some GPU nodes may not have drivers installed yet.\n"
+        "Check: kubectl get pods -n kube-system | grep nvidia",
+      )
+    return CheckResult(
+      "NVIDIA GPU drivers",
+      CheckStatus.PASS,
+      f"{name}: {ready}/{desired} nodes ready",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("NVIDIA GPU drivers", CheckStatus.WARN, "Timed out")
+
+
+def _check_pending_pods():
+  """Check for pods stuck in Pending state (scheduling issues)."""
+  try:
+    result = subprocess.run(
+      [
+        "kubectl",
+        "get",
+        "pods",
+        "--all-namespaces",
+        "--field-selector=status.phase=Pending",
+        "-o",
+        "json",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode != 0:
+      return CheckResult(
+        "Pending pods", CheckStatus.WARN, "Could not list pods"
+      )
+
+    try:
+      data = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+      return CheckResult(
+        "Pending pods", CheckStatus.WARN, "Could not parse pod data"
+      )
+
+    pending = data.get("items", [])
+    if not pending:
+      return CheckResult("Pending pods", CheckStatus.PASS, "No pending pods")
+
+    # Categorize by scheduling reason.
+    reasons = {}
+    for pod in pending:
+      ns = pod.get("metadata", {}).get("namespace", "?")
+      name = pod.get("metadata", {}).get("name", "?")
+      reason = "Unknown"
+      for cond in pod.get("status", {}).get("conditions", []):
+        if cond.get("type") == "PodScheduled" and cond.get("status") == "False":
+          reason = cond.get("reason", "Unknown")
+          break
+      reasons.setdefault(reason, []).append(f"{ns}/{name}")
+
+    parts = []
+    hints = []
+    for reason, pods in reasons.items():
+      parts.append(f"{len(pods)} {reason}")
+      if reason == "Unschedulable":
+        hints.append(
+          "Unschedulable pods: cluster may lack resources or "
+          "matching node pools.\n"
+          "Check: kubectl describe pod <name> -n <namespace>\n"
+          "Add capacity: kinetic pool add --accelerator <spec>"
+        )
+
+    has_unschedulable = "Unschedulable" in reasons
+    status = CheckStatus.WARN if has_unschedulable else CheckStatus.PASS
+    msg = f"{len(pending)} pending: {', '.join(parts)}"
+    hint = "\n".join(hints) if hints else ""
+
+    return CheckResult("Pending pods", status, msg, hint)
+  except subprocess.TimeoutExpired:
+    return CheckResult("Pending pods", CheckStatus.WARN, "Timed out")
+
+
+def _check_node_conditions():
+  """Check node health conditions (disk/memory/PID pressure, NotReady)."""
+  try:
+    result = subprocess.run(
+      ["kubectl", "get", "nodes", "-o", "json"],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode != 0:
+      return CheckResult(
+        "Node health", CheckStatus.WARN, "Could not list nodes"
+      )
+
+    try:
+      data = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+      return CheckResult(
+        "Node health", CheckStatus.WARN, "Could not parse node data"
+      )
+
+    nodes = data.get("items", [])
+    if not nodes:
+      return CheckResult("Node health", CheckStatus.WARN, "No nodes found")
+
+    pressure_conditions = {"DiskPressure", "MemoryPressure", "PIDPressure"}
+    issues = []
+    not_ready = []
+    for node in nodes:
+      name = node.get("metadata", {}).get("name", "?")
+      for cond in node.get("status", {}).get("conditions", []):
+        ctype = cond.get("type", "")
+        cstatus = cond.get("status", "")
+        if ctype == "Ready" and cstatus != "True":
+          not_ready.append(name)
+        elif ctype in pressure_conditions and cstatus == "True":
+          issues.append(f"{name}: {ctype}")
+
+    if not_ready:
+      names = ", ".join(not_ready[:3])
+      suffix = f" (+{len(not_ready) - 3} more)" if len(not_ready) > 3 else ""
+      return CheckResult(
+        "Node health",
+        CheckStatus.FAIL,
+        f"{len(not_ready)} node(s) NotReady: {names}{suffix}",
+        "Check: kubectl describe node <name>\n"
+        "Node may be starting up, or there may be a kubelet issue",
+      )
+
+    if issues:
+      return CheckResult(
+        "Node health",
+        CheckStatus.WARN,
+        "; ".join(issues[:5]),
+        "Nodes under resource pressure may evict pods.\n"
+        "Check: kubectl describe node <name> | grep -A5 Conditions",
+      )
+
+    return CheckResult(
+      "Node health",
+      CheckStatus.PASS,
+      f"{len(nodes)} node(s), all healthy",
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("Node health", CheckStatus.WARN, "Timed out")
+
+
+def _check_warning_events():
+  """Check for recent warning events in the cluster."""
+  try:
+    result = subprocess.run(
+      [
+        "kubectl",
+        "get",
+        "events",
+        "--all-namespaces",
+        "--field-selector=type=Warning",
+        "--sort-by=.lastTimestamp",
+        "-o",
+        "json",
+      ],
+      capture_output=True,
+      text=True,
+      timeout=_SUBPROCESS_TIMEOUT,
+    )
+    if result.returncode != 0:
+      return CheckResult(
+        "Cluster events", CheckStatus.WARN, "Could not list events"
+      )
+
+    try:
+      data = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+      return CheckResult(
+        "Cluster events", CheckStatus.WARN, "Could not parse event data"
+      )
+
+    events = data.get("items", [])
+    if not events:
+      return CheckResult(
+        "Cluster events", CheckStatus.PASS, "No warning events"
+      )
+
+    # Summarize by reason.
+    reason_counts = {}
+    for evt in events:
+      reason = evt.get("reason", "Unknown")
+      reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    top = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    summary = ", ".join(f"{r} ({c})" for r, c in top)
+
+    concerning = {
+      "FailedScheduling",
+      "FailedMount",
+      "BackOff",
+      "OOMKilling",
+      "FailedAttachVolume",
+      "FailedCreatePodSandBox",
+      "Unhealthy",
+      "Evicted",
+      "NodeNotReady",
+      "FreeDiskSpaceFailed",
+    }
+    has_concerning = any(r in concerning for r in reason_counts)
+
+    status = CheckStatus.WARN if has_concerning else CheckStatus.PASS
+    hint = ""
+    if has_concerning:
+      hint = (
+        "Check details: kubectl get events --all-namespaces "
+        "--field-selector=type=Warning --sort-by=.lastTimestamp\n"
+        "FailedScheduling: insufficient resources or no matching nodes\n"
+        "OOMKilling: pods exceeding memory limits\n"
+        "BackOff: container crash-looping"
+      )
+
+    return CheckResult(
+      "Cluster events",
+      status,
+      f"{len(events)} warning(s): {summary}",
+      hint,
+    )
+  except subprocess.TimeoutExpired:
+    return CheckResult("Cluster events", CheckStatus.WARN, "Timed out")
 
 
 def _check_quota(project, zone):
@@ -832,6 +1398,7 @@ def _check_kubernetes(
   )
 
   # Node pools — can check via gcloud even without kubectl
+  has_gpu_pools = False
   if not has_gke_cluster:
     results.append(
       CheckResult(
@@ -841,7 +1408,8 @@ def _check_kubernetes(
       )
     )
   else:
-    results.append(_check_node_pools(project, zone, cluster_name))
+    pool_result, has_gpu_pools = _check_node_pools(project, zone, cluster_name)
+    results.append(pool_result)
 
   # LWS CRD
   if not has_kubectl or not connectivity_ok:
@@ -854,6 +1422,66 @@ def _check_kubernetes(
     )
   else:
     results.append(_check_lws_crd())
+
+  # Kinetic KSA with Workload Identity
+  if not has_kubectl or not connectivity_ok:
+    results.append(
+      CheckResult(
+        "Kinetic KSA",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster connectivity)",
+      )
+    )
+  else:
+    results.append(_check_kinetic_ksa())
+
+  # NVIDIA GPU drivers (only relevant when GPU pools exist)
+  if not has_kubectl or not connectivity_ok:
+    results.append(
+      CheckResult(
+        "NVIDIA GPU drivers",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster connectivity)",
+      )
+    )
+  else:
+    results.append(_check_nvidia_drivers(has_gpu_pools))
+
+  # Node health conditions
+  if not has_kubectl or not connectivity_ok:
+    results.append(
+      CheckResult(
+        "Node health",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster connectivity)",
+      )
+    )
+  else:
+    results.append(_check_node_conditions())
+
+  # Pending / unschedulable pods
+  if not has_kubectl or not connectivity_ok:
+    results.append(
+      CheckResult(
+        "Pending pods",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster connectivity)",
+      )
+    )
+  else:
+    results.append(_check_pending_pods())
+
+  # Cluster warning events
+  if not has_kubectl or not connectivity_ok:
+    results.append(
+      CheckResult(
+        "Cluster events",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster connectivity)",
+      )
+    )
+  else:
+    results.append(_check_warning_events())
 
   # GCP quota
   if not has_gke_cluster or not project:
@@ -1021,25 +1649,33 @@ def doctor(project, zone, cluster_name):
     groups.append((_SECTIONS[4], api_results))
     _emit_progress(panel, _SECTIONS[4], api_results)
 
-    # Group 6: Infrastructure.
+    # Group 6: GCP Resources.
+    panel.on_output("Checking GCP resources...")
+    resource_results = _check_gcp_resources(
+      has_project_access, project, zone, cluster_name
+    )
+    groups.append((_SECTIONS[5], resource_results))
+    _emit_progress(panel, _SECTIONS[5], resource_results)
+
+    # Group 7: Infrastructure.
     panel.on_output("Checking infrastructure...")
     infra_results = _check_infra(
       has_project_access, project, zone, cluster_name
     )
-    groups.append((_SECTIONS[5], infra_results))
-    _emit_progress(panel, _SECTIONS[5], infra_results)
+    groups.append((_SECTIONS[6], infra_results))
+    _emit_progress(panel, _SECTIONS[6], infra_results)
     has_gke_cluster = any(
       r.name == "GKE cluster" and r.status == CheckStatus.PASS
       for r in infra_results
     )
 
-    # Group 7: Kubernetes.
+    # Group 8: Kubernetes.
     panel.on_output("Checking Kubernetes...")
     k8s_results = _check_kubernetes(
       has_kubectl, has_gke_cluster, project, zone, cluster_name
     )
-    groups.append((_SECTIONS[6], k8s_results))
-    _emit_progress(panel, _SECTIONS[6], k8s_results)
+    groups.append((_SECTIONS[7], k8s_results))
+    _emit_progress(panel, _SECTIONS[7], k8s_results)
 
     # Mark panel as error if any check failed (turns border yellow).
     all_results = [r for _, checks in groups for r in checks]

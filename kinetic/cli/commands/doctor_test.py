@@ -177,6 +177,86 @@ def _make_run_side_effect(
         args=cmd, returncode=rc, stdout=b"", stderr=b""
       )
 
+    # kubectl get serviceaccount (KSA check).
+    if "get" in cmd and "serviceaccount" in cmd:
+      ksa_data = json.dumps(
+        {
+          "metadata": {
+            "name": "kinetic",
+            "annotations": {
+              "iam.gke.io/gcp-service-account": "kn-test-cluster-nodes@test-project.iam.gserviceaccount.com"
+            },
+          }
+        }
+      )
+      if text:
+        return subprocess.CompletedProcess(
+          args=cmd, returncode=0, stdout=ksa_data, stderr=""
+        )
+      return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout=ksa_data.encode(), stderr=b""
+      )
+
+    # kubectl get daemonset (NVIDIA drivers check).
+    if "get" in cmd and "daemonset" in cmd:
+      ds_data = json.dumps({"items": []})
+      if text:
+        return subprocess.CompletedProcess(
+          args=cmd, returncode=0, stdout=ds_data, stderr=""
+        )
+      return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout=ds_data.encode(), stderr=b""
+      )
+
+    # kubectl get pods (pending pods check).
+    if "get" in cmd and "pods" in cmd:
+      pods_data = json.dumps({"items": []})
+      if text:
+        return subprocess.CompletedProcess(
+          args=cmd, returncode=0, stdout=pods_data, stderr=""
+        )
+      return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout=pods_data.encode(), stderr=b""
+      )
+
+    # kubectl get nodes (node health check).
+    if "get" in cmd and "nodes" in cmd:
+      nodes_data = json.dumps(
+        {
+          "items": [
+            {
+              "metadata": {"name": "node-1"},
+              "status": {
+                "conditions": [
+                  {"type": "Ready", "status": "True"},
+                  {"type": "DiskPressure", "status": "False"},
+                  {"type": "MemoryPressure", "status": "False"},
+                  {"type": "PIDPressure", "status": "False"},
+                ]
+              },
+            }
+          ]
+        }
+      )
+      if text:
+        return subprocess.CompletedProcess(
+          args=cmd, returncode=0, stdout=nodes_data, stderr=""
+        )
+      return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout=nodes_data.encode(), stderr=b""
+      )
+
+    # kubectl get events (warning events check).
+    if "get" in cmd and "events" in cmd:
+      events_data = json.dumps({"items": []})
+      if text:
+        return subprocess.CompletedProcess(
+          args=cmd, returncode=0, stdout=events_data, stderr=""
+        )
+      return subprocess.CompletedProcess(
+        args=cmd, returncode=0, stdout=events_data.encode(), stderr=b""
+      )
+
     # Quota.
     if "regions" in cmd and "describe" in cmd:
       out = json.dumps(quota_data)
