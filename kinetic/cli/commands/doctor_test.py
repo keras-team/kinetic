@@ -6,6 +6,7 @@ import subprocess
 from types import SimpleNamespace
 from unittest import mock
 
+import google.auth.exceptions
 from absl.testing import absltest
 from click.testing import CliRunner
 from google.api_core import exceptions as google_exceptions
@@ -44,6 +45,15 @@ def _all_tools_which(binary):
   """shutil.which that finds all required binaries."""
   known = {"gcloud", "kubectl", "gke-gcloud-auth-plugin"}
   return f"/usr/bin/{binary}" if binary in known else None
+
+
+def _mock_adc_pass():
+  """Return a context manager that mocks google.auth.default to succeed."""
+  mock_creds = mock.MagicMock()
+  return mock.patch(
+    f"{_MODULE}.google.auth.default",
+    return_value=(mock_creds, "test-project"),
+  )
 
 
 def _make_service_mock(config_name):
@@ -232,34 +242,26 @@ def _sdk_patches(
 
 
 # ---------------------------------------------------------------------------
-# subprocess mock (only for gcloud auth + kubectl commands now)
+# subprocess mock (only for gcloud account + kubectl commands now)
 # ---------------------------------------------------------------------------
 
 
 def _make_run_side_effect(
   *,
-  adc_ok=True,
   account="user@example.com",
   k8s_ok=True,
   lws_ok=True,
 ):
   """Build a subprocess.run side-effect for remaining subprocess calls.
 
-  Only handles gcloud auth/account and kubectl commands — all GCP resource
-  checks now use SDK clients mocked separately via _sdk_patches().
+  Only handles gcloud account and kubectl commands — ADC uses
+  google.auth.default (mocked separately) and all GCP resource checks
+  use SDK clients mocked via _sdk_patches().
   """
 
   def side_effect(args, **kwargs):
     cmd = args if isinstance(args, list) else list(args)
     text = kwargs.get("text", False)
-
-    # ADC check.
-    if "application-default" in cmd and "print-access-token" in cmd:
-      rc = 0 if adc_ok else 1
-      stdout = b"token" if adc_ok else b""
-      return subprocess.CompletedProcess(
-        args=cmd, returncode=rc, stdout=stdout, stderr=b""
-      )
 
     # Account check.
     if "get-value" in cmd and "account" in cmd:
@@ -412,6 +414,7 @@ def _enter_patches(
   stack.enter_context(
     mock.patch(f"{_MODULE}.subprocess.run", side_effect=run_se)
   )
+  stack.enter_context(_mock_adc_pass())
   stack.enter_context(
     mock.patch(f"{_MODULE}.os.path.isdir", return_value=pulumi_dir_exists)
   )
@@ -454,16 +457,22 @@ class DoctorGcloudMissingTest(absltest.TestCase):
     self.runner = CliRunner()
 
   def test_gcloud_missing(self):
-    with mock.patch(
-      f"{_MODULE}.shutil.which",
-      side_effect=_mock_which({"kubectl", "gke-gcloud-auth-plugin"}),
+    with (
+      mock.patch(
+        f"{_MODULE}.shutil.which",
+        side_effect=_mock_which({"kubectl", "gke-gcloud-auth-plugin"}),
+      ),
+      mock.patch(
+        f"{_MODULE}.google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
+      ),
     ):
       result = self.runner.invoke(doctor, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("FAIL", result.output)
     self.assertIn("gcloud CLI", result.output)
-    # Auth should be skipped.
+    # ADC check runs (FAIL), gcloud account check is SKIP.
     self.assertIn("SKIP", result.output)
 
 
@@ -485,7 +494,7 @@ class DoctorKubectlMissingTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("FAIL", result.output)
     # Auth checks should still run (gcloud is present).
-    self.assertIn("gcloud auth (ADC)", result.output)
+    self.assertIn("Application Default Credentials", result.output)
 
 
 class DoctorAdcNotConfiguredTest(absltest.TestCase):
@@ -500,7 +509,11 @@ class DoctorAdcNotConfiguredTest(absltest.TestCase):
       mock.patch(f"{_MODULE}.shutil.which", side_effect=_all_tools_which),
       mock.patch(
         f"{_MODULE}.subprocess.run",
-        side_effect=_make_run_side_effect(adc_ok=False),
+        side_effect=_make_run_side_effect(),
+      ),
+      mock.patch(
+        f"{_MODULE}.google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
       ),
     ):
       result = self.runner.invoke(doctor, _CLI_ARGS)
@@ -524,6 +537,7 @@ class DoctorProjectNotSetTest(absltest.TestCase):
       mock.patch(
         f"{_MODULE}.subprocess.run", side_effect=_make_run_side_effect()
       ),
+      _mock_adc_pass(),
       mock.patch(f"{_MODULE}.get_default_project", return_value=None),
     ):
       # Invoke without --project flag.
@@ -712,6 +726,29 @@ class DoctorNodePoolUnhealthyTest(absltest.TestCase):
     self.assertIn("ERROR", result.output)
 
 
+class DoctorKubeconfigMismatchTest(absltest.TestCase):
+  """kubeconfig mismatch — WARN."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+
+  def test_wrong_context(self):
+    with contextlib.ExitStack() as stack:
+      mock_kube = _enter_patches(stack)
+      mock_kube.return_value = CheckResult(
+        "kubeconfig context",
+        CheckStatus.WARN,
+        "Active: 'gke_other' (expected: 'gke_test-project_us-central2-b_test-cluster')",
+        "Run: gcloud container clusters get-credentials ...",
+      )
+      result = self.runner.invoke(doctor, _CLI_ARGS)
+
+    # WARN, not FAIL.
+    self.assertEqual(result.exit_code, 0, result.output)
+    self.assertIn("WARN", result.output)
+
+
 class DoctorLwsMissingTest(absltest.TestCase):
   """LWS CRD missing — WARN (not FAIL)."""
 
@@ -742,7 +779,13 @@ class DoctorExitCodeTest(absltest.TestCase):
 
   def test_exit_1_on_fail(self):
     """Any FAIL → exit 1."""
-    with mock.patch(f"{_MODULE}.shutil.which", side_effect=_mock_which(set())):
+    with (
+      mock.patch(f"{_MODULE}.shutil.which", side_effect=_mock_which(set())),
+      mock.patch(
+        f"{_MODULE}.google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
+      ),
+    ):
       result = self.runner.invoke(doctor, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
@@ -754,6 +797,7 @@ class DoctorExitCodeTest(absltest.TestCase):
       mock.patch(
         f"{_MODULE}.subprocess.run", side_effect=_make_run_side_effect()
       ),
+      _mock_adc_pass(),
       mock.patch(f"{_MODULE}.get_default_project", return_value=None),
     ):
       result = self.runner.invoke(

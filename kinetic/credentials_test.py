@@ -3,6 +3,7 @@
 import subprocess
 from unittest import mock
 
+import google.auth.exceptions
 from absl.testing import absltest
 from kubernetes.config import ConfigException
 
@@ -47,38 +48,94 @@ class TestEnsureGkeAuthPlugin(absltest.TestCase):
 
 
 class TestEnsureAdc(absltest.TestCase):
-  def test_token_success(self):
-    with mock.patch(f"{_MODULE}.subprocess.run") as mock_run:
-      mock_run.return_value.returncode = 0
+  def test_adc_found_and_refreshable(self):
+    """google.auth.default() succeeds and refresh works — no subprocess."""
+    mock_creds = mock.MagicMock()
+    with (
+      mock.patch(
+        f"{_MODULE}.google.auth.default", return_value=(mock_creds, "p")
+      ),
+      mock.patch(f"{_MODULE}.subprocess.run") as mock_run,
+    ):
       credentials.ensure_adc()
-      self.assertEqual(mock_run.call_count, 1)
+      mock_creds.refresh.assert_called_once()
+      mock_run.assert_not_called()
 
-  def test_token_failure_triggers_login(self):
-    with mock.patch(f"{_MODULE}.subprocess.run") as mock_run:
-      token_result = mock.MagicMock()
-      token_result.returncode = 1
-      # First call returns failure, second call (login) succeeds.
-      mock_run.side_effect = [token_result, mock.DEFAULT]
+  def test_adc_not_found_gcloud_available(self):
+    """No ADC, gcloud present — falls back to interactive login."""
+    with (
+      mock.patch(
+        f"{_MODULE}.google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
+      ),
+      mock.patch("shutil.which", return_value="/usr/bin/gcloud"),
+      mock.patch(f"{_MODULE}.subprocess.run") as mock_run,
+    ):
+      credentials.ensure_adc()
+      mock_run.assert_called_once()
+      self.assertIn("login", mock_run.call_args[0][0])
 
+  def test_adc_not_found_no_gcloud(self):
+    """No ADC, no gcloud — raises with GOOGLE_APPLICATION_CREDENTIALS hint."""
+    with (
+      mock.patch(
+        f"{_MODULE}.google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
+      ),
+      mock.patch("shutil.which", return_value=None),
+      self.assertRaisesRegex(RuntimeError, "GOOGLE_APPLICATION_CREDENTIALS"),
+    ):
       credentials.ensure_adc()
 
-      self.assertEqual(mock_run.call_count, 2)
-      login_call = mock_run.call_args_list[1]
-      self.assertIn("login", login_call[0][0])
+  def test_adc_found_refresh_fails_gcloud_login(self):
+    """ADC found but refresh fails, gcloud present — falls back to login."""
+    mock_creds = mock.MagicMock()
+    mock_creds.refresh.side_effect = google.auth.exceptions.RefreshError(
+      "expired"
+    )
+    with (
+      mock.patch(
+        f"{_MODULE}.google.auth.default", return_value=(mock_creds, "p")
+      ),
+      mock.patch("shutil.which", return_value="/usr/bin/gcloud"),
+      mock.patch(f"{_MODULE}.subprocess.run") as mock_run,
+    ):
+      credentials.ensure_adc()
+      mock_run.assert_called_once()
+      self.assertIn("login", mock_run.call_args[0][0])
+
+  def test_adc_found_refresh_fails_no_gcloud(self):
+    """ADC found but refresh fails, no gcloud — raises."""
+    mock_creds = mock.MagicMock()
+    mock_creds.refresh.side_effect = google.auth.exceptions.RefreshError(
+      "expired"
+    )
+    with (
+      mock.patch(
+        f"{_MODULE}.google.auth.default", return_value=(mock_creds, "p")
+      ),
+      mock.patch("shutil.which", return_value=None),
+      self.assertRaisesRegex(RuntimeError, "GOOGLE_APPLICATION_CREDENTIALS"),
+    ):
+      credentials.ensure_adc()
 
   def test_login_failure_raises(self):
-    with mock.patch(f"{_MODULE}.subprocess.run") as mock_run:
-      token_result = mock.MagicMock()
-      token_result.returncode = 1
-      mock_run.side_effect = [
-        token_result,
-        subprocess.CalledProcessError(1, "gcloud"),
-      ]
-
-      with self.assertRaisesRegex(
+    """No ADC, gcloud present but login fails — raises."""
+    with (
+      mock.patch(
+        f"{_MODULE}.google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
+      ),
+      mock.patch("shutil.which", return_value="/usr/bin/gcloud"),
+      mock.patch(
+        f"{_MODULE}.subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, "gcloud"),
+      ),
+      self.assertRaisesRegex(
         RuntimeError, "Failed to configure Application Default"
-      ):
-        credentials.ensure_adc()
+      ),
+    ):
+      credentials.ensure_adc()
 
 
 class TestEnsureKubeconfig(absltest.TestCase):

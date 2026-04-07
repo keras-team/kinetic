@@ -14,6 +14,9 @@ import subprocess
 import threading
 import time
 
+import google.auth
+import google.auth.exceptions
+import google.auth.transport.requests
 from absl import logging
 from kubernetes import config
 
@@ -119,14 +122,37 @@ def ensure_gke_auth_plugin() -> None:
 
 
 def ensure_adc() -> None:
-  """Verify GCP Application Default Credentials are configured."""
-  result = subprocess.run(
-    ["gcloud", "auth", "application-default", "print-access-token"],
-    capture_output=True,
-  )
-  if result.returncode == 0:
+  """Verify GCP Application Default Credentials are configured.
+
+  Uses ``google-auth`` to resolve ADC in-process (no subprocess).
+  Supports all ADC sources: ``GOOGLE_APPLICATION_CREDENTIALS`` env var,
+  gcloud ADC file, Compute Engine metadata, Workload Identity Federation.
+
+  Falls back to interactive ``gcloud auth application-default login``
+  if no credentials are found and gcloud is available.
+  """
+  try:
+    credentials, _ = google.auth.default()
+  except google.auth.exceptions.DefaultCredentialsError:
+    _adc_interactive_login()
     return
 
+  try:
+    credentials.refresh(google.auth.transport.requests.Request())
+  except google.auth.exceptions.RefreshError:
+    _adc_interactive_login()
+
+
+def _adc_interactive_login() -> None:
+  """Attempt ``gcloud auth application-default login``; raise if unavailable."""
+  if not shutil.which("gcloud"):
+    raise RuntimeError(
+      "No Application Default Credentials found and gcloud CLI is "
+      "not available for interactive login.\n"
+      "Set the GOOGLE_APPLICATION_CREDENTIALS environment variable "
+      "to a service account key file, or install gcloud and run:\n"
+      "  gcloud auth application-default login"
+    )
   logging.info("Application Default Credentials not found. Running login...")
   try:
     subprocess.run(

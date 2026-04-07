@@ -8,6 +8,11 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 
+import google.auth
+import google.auth.exceptions
+import google.oauth2.credentials
+import google.oauth2.service_account
+
 import click
 from google.api_core import exceptions as google_exceptions
 from google.cloud import (
@@ -133,17 +138,12 @@ def _check_local_tools():
 
 
 def _check_adc():
-  """Check Application Default Credentials (read-only)."""
+  """Check Application Default Credentials (read-only, no gcloud needed)."""
   try:
-    result = subprocess.run(
-      ["gcloud", "auth", "application-default", "print-access-token"],
-      capture_output=True,
-      timeout=_SUBPROCESS_TIMEOUT,
-    )
-    if result.returncode == 0:
-      return CheckResult("gcloud auth (ADC)", CheckStatus.PASS, "Configured")
+    creds, project = google.auth.default()
+  except google.auth.exceptions.DefaultCredentialsError:
     return CheckResult(
-      "gcloud auth (ADC)",
+      "Application Default Credentials",
       CheckStatus.FAIL,
       "Not configured",
       "Run: gcloud auth application-default login\n"
@@ -151,10 +151,23 @@ def _check_adc():
       "gcloud auth application-default login\n"
       "Service account: export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json",
     )
-  except subprocess.TimeoutExpired:
-    return CheckResult(
-      "gcloud auth (ADC)", CheckStatus.WARN, "Timed out checking ADC"
-    )
+
+  if isinstance(creds, google.oauth2.service_account.Credentials):
+    cred_label = "Service account"
+  elif isinstance(creds, google.oauth2.credentials.Credentials):
+    cred_label = "User credentials (gcloud ADC)"
+  else:
+    cred_label = type(creds).__name__
+
+  detail = cred_label
+  if project:
+    detail += f", project: {project}"
+
+  return CheckResult(
+    "Application Default Credentials",
+    CheckStatus.PASS,
+    detail,
+  )
 
 
 def _check_gcloud_account():
@@ -183,21 +196,25 @@ def _check_gcloud_account():
 
 
 def _check_auth(has_gcloud):
-  """Run authentication checks. Skips if gcloud is missing."""
+  """Run authentication checks.
+
+  ADC check always runs (uses google-auth, no gcloud needed).
+  gcloud account check is skipped if gcloud is missing.
+  """
+  results = [_check_adc()]
+
   if not has_gcloud:
-    return [
-      CheckResult(
-        "gcloud auth (ADC)",
-        CheckStatus.SKIP,
-        "Skipped (requires: gcloud CLI)",
-      ),
+    results.append(
       CheckResult(
         "gcloud account",
         CheckStatus.SKIP,
         "Skipped (requires: gcloud CLI)",
-      ),
-    ]
-  return [_check_adc(), _check_gcloud_account()]
+      )
+    )
+  else:
+    results.append(_check_gcloud_account())
+
+  return results
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +354,7 @@ def _check_gcp_project(has_gcloud, has_adc, project):
   if not has_gcloud:
     skip_reason = "Skipped (requires: gcloud CLI)"
   elif not has_adc:
-    skip_reason = "Skipped (requires: gcloud auth)"
+    skip_reason = "Skipped (requires: Application Default Credentials)"
   elif not project:
     skip_reason = "Skipped (requires: Project ID)"
 
