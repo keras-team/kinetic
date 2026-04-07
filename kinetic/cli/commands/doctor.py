@@ -1327,28 +1327,46 @@ def _check_quota(project, zone):
 
   quotas = data.get("quotas", [])
   gpu_keywords = ("GPU", "NVIDIA", "TPU")
-  warnings = []
+  quota_list = []
   for q in quotas:
     metric = q.get("metric", "")
     if not any(kw in metric for kw in gpu_keywords):
       continue
     limit = q.get("limit", 0)
     usage = q.get("usage", 0)
-    remaining = limit - usage
-    if limit > 0 and remaining <= 0:
-      warnings.append(f"{metric}: {usage}/{limit} (exhausted)")
+    if limit > 0:
+      quota_list.append((metric, usage, limit))
+
+  # Sort: non-zero usage first, then by name
+  quota_list.sort(key=lambda x: (x[1] == 0, x[0]))
+
+  warnings = []
+  info_lines = []
+  max_len = max(len(metric) for metric, _, _ in quota_list) if quota_list else 0
+  for metric, usage, limit in quota_list:
+    info_lines.append(
+      f"  {metric.ljust(max_len)}: {int(usage):>3}/{int(limit):>3}"
+    )
+    if limit - usage <= 0:
+      warnings.append(f"{metric} exhausted")
+
+  details = (
+    "\n".join(info_lines) if info_lines else "  No accelerator quotas found"
+  )
 
   if warnings:
     return CheckResult(
       "GCP quota",
       CheckStatus.WARN,
-      "; ".join(warnings),
+      f"Checked accelerator quotas in {region} (some exhausted)\n{details}",
       "View and request increases at: "
       f"https://console.cloud.google.com/iam-admin/quotas?project={project}",
     )
 
   return CheckResult(
-    "GCP quota", CheckStatus.PASS, f"Checked accelerator quotas in {region}"
+    "GCP quota",
+    CheckStatus.PASS,
+    f"Checked accelerator quotas in {region}\n{details}",
   )
 
 
