@@ -8,7 +8,7 @@ from unittest import mock
 from absl.testing import absltest
 
 from kinetic.data import Data, _make_data_ref, is_data_ref
-from kinetic.data.data import _PARALLEL_HASH_THRESHOLD
+from kinetic.data.data import _PARALLEL_HASH_THRESHOLD, parse_gcs_uri
 
 
 def _make_temp_path(test_case):
@@ -71,6 +71,26 @@ class TestDataConstructor(absltest.TestCase):
   def test_repr(self):
     d = Data("gs://bucket/path/")
     self.assertEqual(repr(d), "Data('gs://bucket/path/')")
+
+  def test_repr_with_fuse(self):
+    d = Data("gs://bucket/path/", fuse=True)
+    self.assertEqual(repr(d), "Data('gs://bucket/path/', fuse=True)")
+
+  def test_fuse_default_false(self):
+    d = Data("gs://bucket/path/")
+    self.assertFalse(d.fuse)
+
+  def test_fuse_true(self):
+    d = Data("gs://bucket/path/", fuse=True)
+    self.assertTrue(d.fuse)
+
+  def test_fuse_local_path(self):
+    tmp = _make_temp_path(self)
+    f = tmp / "data.csv"
+    f.write_text("a,b\n1,2\n")
+    d = Data(str(f), fuse=True)
+    self.assertTrue(d.fuse)
+    self.assertFalse(d.is_gcs)
 
 
 class TestContentHash(absltest.TestCase):
@@ -342,6 +362,15 @@ class TestMakeDataRef(absltest.TestCase):
     self.assertEqual(ref["mount_path"], "/data")
     self.assertFalse(ref["is_dir"])
 
+  def test_fuse_default_false(self):
+    ref = _make_data_ref("gs://b/p", True)
+    self.assertFalse(ref["fuse"])
+
+  def test_fuse_true(self):
+    ref = _make_data_ref("gs://b/p", True, mount_path="/data", fuse=True)
+    self.assertTrue(ref["fuse"])
+    self.assertEqual(ref["mount_path"], "/data")
+
 
 class TestIsDataRef(absltest.TestCase):
   def test_valid_ref(self):
@@ -355,6 +384,33 @@ class TestIsDataRef(absltest.TestCase):
     self.assertFalse(is_data_ref("string"))
     self.assertFalse(is_data_ref(42))
     self.assertFalse(is_data_ref(None))
+
+
+class TestParseGcsUri(absltest.TestCase):
+  def test_bucket_with_prefix(self):
+    bucket, prefix = parse_gcs_uri("gs://my-bucket/some/prefix/")
+    self.assertEqual(bucket, "my-bucket")
+    self.assertEqual(prefix, "some/prefix")
+
+  def test_bucket_only(self):
+    bucket, prefix = parse_gcs_uri("gs://my-bucket")
+    self.assertEqual(bucket, "my-bucket")
+    self.assertEqual(prefix, "")
+
+  def test_bucket_with_trailing_slash(self):
+    bucket, prefix = parse_gcs_uri("gs://my-bucket/")
+    self.assertEqual(bucket, "my-bucket")
+    self.assertEqual(prefix, "")
+
+  def test_single_file(self):
+    bucket, prefix = parse_gcs_uri("gs://my-bucket/file.txt")
+    self.assertEqual(bucket, "my-bucket")
+    self.assertEqual(prefix, "file.txt")
+
+  def test_deep_prefix(self):
+    bucket, prefix = parse_gcs_uri("gs://b/a/b/c/d/")
+    self.assertEqual(bucket, "b")
+    self.assertEqual(prefix, "a/b/c/d")
 
 
 if __name__ == "__main__":

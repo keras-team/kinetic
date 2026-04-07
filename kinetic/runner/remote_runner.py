@@ -182,15 +182,48 @@ def _install_requirements(storage_client, requirements_gcs):
   logging.info("User requirements installed successfully")
 
 
-def resolve_volumes(volume_refs, storage_client):
-  """Download volume data to their specified mount paths."""
+def resolve_volumes(
+  volume_refs: list[dict], storage_client: storage.Client
+) -> None:
+  """Download volume data to their specified mount paths.
+
+  Volumes with `fuse=True` are already mounted via the GCS FUSE CSI
+  driver and are skipped.
+  """
   for ref in volume_refs:
     mount_path = ref["mount_path"]
+    if ref.get("fuse"):
+      logging.info(
+        "Skipping download for FUSE-mounted volume: %s -> %s",
+        ref["gcs_uri"],
+        mount_path,
+      )
+      continue
     logging.info("Resolving volume: %s -> %s", ref["gcs_uri"], mount_path)
     _download_data(ref, mount_path, storage_client)
 
 
-def resolve_data_refs(args, kwargs, storage_client):
+def _resolve_fuse_single_file(mount_path: str) -> str | None:
+  """Find the single data file inside a FUSE mount directory.
+
+  GCS FUSE mounts directories, not individual files.  For single-file
+  data refs the mount is scoped to the hash directory containing the
+  file, so a flat listing is sufficient.
+
+  Returns the file path, or ``None`` if no data file is found.
+  """
+  try:
+    entries = os.listdir(mount_path)
+  except OSError:
+    return None
+  if entries:
+    return os.path.join(mount_path, entries[0])
+  return None
+
+
+def resolve_data_refs(
+  args: tuple, kwargs: dict, storage_client: storage.Client
+) -> tuple[tuple, dict]:
   """Recursively resolve data ref dicts in args/kwargs to local paths."""
   counter = 0
   resolved_uris = {}
@@ -199,8 +232,13 @@ def resolve_data_refs(args, kwargs, storage_client):
     nonlocal counter
     # Data ref that needs downloading (no mount_path means not volume-mounted)
     if isinstance(obj, dict) and obj.get("__data_ref__"):
-      # Volume-mounted data refs are handled by Kubernetes, skip download
       if obj.get("mount_path") is not None:
+        # For FUSE-mounted single files, resolve to the actual file path
+        # rather than returning the mount directory.
+        if obj.get("fuse") and not obj.get("is_dir"):
+          resolved = _resolve_fuse_single_file(obj["mount_path"])
+          if resolved:
+            return resolved
         return obj["mount_path"]
       gcs_uri = obj["gcs_uri"]
       if gcs_uri in resolved_uris:
@@ -210,7 +248,7 @@ def resolve_data_refs(args, kwargs, storage_client):
       _download_data(obj, local_dir, storage_client)
       # Return file path for single files, directory path otherwise
       if not obj["is_dir"]:
-        files = [f for f in os.listdir(local_dir) if f != ".cache_marker"]
+        files = os.listdir(local_dir)
         if len(files) == 1:
           path = os.path.join(local_dir, files[0])
           resolved_uris[gcs_uri] = path
@@ -229,7 +267,9 @@ def resolve_data_refs(args, kwargs, storage_client):
   return resolved_args, resolved_kwargs
 
 
-def _download_data(ref, target_dir, storage_client):
+def _download_data(
+  ref: dict, target_dir: str, storage_client: storage.Client
+) -> None:
   """Download data from a GCS URI to a local directory."""
   os.makedirs(target_dir, exist_ok=True)
   gcs_uri = ref["gcs_uri"]
@@ -243,7 +283,7 @@ def _download_data(ref, target_dir, storage_client):
   total_downloaded = 0
   batch = []
   for blob in blobs:
-    if blob.name.endswith("/") or blob.name.endswith(".cache_marker"):
+    if blob.name.endswith("/"):
       continue
     batch.append(blob.name[len(prefix) + 1 :])
     if len(batch) >= _DOWNLOAD_BATCH_SIZE:

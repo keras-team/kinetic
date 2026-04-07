@@ -6,6 +6,10 @@ from unittest.mock import MagicMock
 from absl.testing import absltest
 from kubernetes.client.rest import ApiException
 
+from kinetic.backend.k8s_utils import (
+  GCSFUSE_CSI_DRIVER,
+  GCSFUSE_VOLUMES_ANNOTATION,
+)
 from kinetic.backend.pathways_client import (
   LWS_GROUP,
   LWS_PLURAL,
@@ -233,6 +237,94 @@ class TestCreateLwsSpec(absltest.TestCase):
     ][0]
     env = {e["name"]: e["value"] for e in container["env"]}
     self.assertEqual(env["MEGASCALE_NUM_SLICES"], "8")
+
+  def test_no_fuse_no_volumes_or_annotations(self):
+    spec = self._make_spec()
+    pod = spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"]
+    self.assertNotIn("annotations", pod["metadata"])
+    self.assertNotIn("volumes", pod["spec"])
+    container = pod["spec"]["containers"][0]
+    self.assertNotIn("volumeMounts", container)
+
+  def test_fuse_single_volume(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://my-bucket/datasets/imagenet/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    spec = self._make_spec(fuse_volume_specs=fuse_specs)
+    pod = spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"]
+
+    # Annotation
+    self.assertEqual(
+      pod["metadata"]["annotations"][GCSFUSE_VOLUMES_ANNOTATION], "true"
+    )
+
+    # CSI volume
+    volumes = pod["spec"]["volumes"]
+    self.assertLen(volumes, 1)
+    vol = volumes[0]
+    self.assertEqual(vol["name"], "gcs-fuse-0")
+    self.assertEqual(vol["csi"]["driver"], GCSFUSE_CSI_DRIVER)
+    self.assertEqual(vol["csi"]["volumeAttributes"]["bucketName"], "my-bucket")
+    self.assertIn(
+      "only-dir=datasets/imagenet",
+      vol["csi"]["volumeAttributes"]["mountOptions"],
+    )
+
+    # Volume mount
+    container = pod["spec"]["containers"][0]
+    self.assertLen(container["volumeMounts"], 1)
+    mount = container["volumeMounts"][0]
+    self.assertEqual(mount["name"], "gcs-fuse-0")
+    self.assertEqual(mount["mountPath"], "/data")
+    self.assertTrue(mount["readOnly"])
+
+  def test_fuse_multiple_volumes(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://a/data/",
+        "mount_path": "/d1",
+        "is_dir": True,
+        "read_only": True,
+      },
+      {
+        "gcs_uri": "gs://b/models/",
+        "mount_path": "/d2",
+        "is_dir": True,
+        "read_only": True,
+      },
+    ]
+    spec = self._make_spec(fuse_volume_specs=fuse_specs)
+    pod = spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"]
+    volumes = pod["spec"]["volumes"]
+    self.assertLen(volumes, 2)
+    self.assertEqual(volumes[0]["name"], "gcs-fuse-0")
+    self.assertEqual(volumes[1]["name"], "gcs-fuse-1")
+
+    mounts = pod["spec"]["containers"][0]["volumeMounts"]
+    self.assertLen(mounts, 2)
+    self.assertEqual(mounts[0]["mountPath"], "/d1")
+    self.assertEqual(mounts[1]["mountPath"], "/d2")
+
+  def test_fuse_bucket_root_no_only_dir(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://my-bucket/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    spec = self._make_spec(fuse_volume_specs=fuse_specs)
+    pod = spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"]
+    vol = pod["spec"]["volumes"][0]
+    self.assertEqual(
+      vol["csi"]["volumeAttributes"]["mountOptions"], "implicit-dirs"
+    )
 
 
 class TestSubmitPathwaysJob(absltest.TestCase):

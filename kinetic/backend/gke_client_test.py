@@ -17,6 +17,10 @@ from kinetic.backend.gke_client import (
 from kinetic.backend.gke_client import (
   list_jobs as list_gke_jobs,
 )
+from kinetic.backend.k8s_utils import (
+  GCSFUSE_CSI_DRIVER,
+  GCSFUSE_VOLUMES_ANNOTATION,
+)
 from kinetic.job_status import JobStatus
 
 
@@ -105,6 +109,141 @@ class TestCreateJobSpec(absltest.TestCase):
       namespace="ns",
     )
     self.assertIsNone(job.spec.template.spec.node_selector)
+
+  def test_no_fuse_no_volumes_or_annotations(self):
+    job = _create_job_spec(
+      job_name="no-fuse",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j",
+      bucket_name="b",
+      namespace="ns",
+    )
+    self.assertIsNone(job.spec.template.metadata.annotations)
+    self.assertIsNone(job.spec.template.spec.volumes)
+    container = job.spec.template.spec.containers[0]
+    self.assertIsNone(container.volume_mounts)
+
+  def test_fuse_single_volume(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://my-bucket/datasets/imagenet/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    job = _create_job_spec(
+      job_name="fuse-job",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j",
+      bucket_name="b",
+      namespace="ns",
+      fuse_volume_specs=fuse_specs,
+    )
+    # Annotation
+    annotations = job.spec.template.metadata.annotations
+    self.assertEqual(annotations[GCSFUSE_VOLUMES_ANNOTATION], "true")
+
+    # CSI volume
+    volumes = job.spec.template.spec.volumes
+    self.assertLen(volumes, 1)
+    vol = volumes[0]
+    self.assertEqual(vol.name, "gcs-fuse-0")
+    self.assertEqual(vol.csi.driver, GCSFUSE_CSI_DRIVER)
+    self.assertEqual(vol.csi.volume_attributes["bucketName"], "my-bucket")
+    self.assertIn(
+      "only-dir=datasets/imagenet", vol.csi.volume_attributes["mountOptions"]
+    )
+    self.assertIn("implicit-dirs", vol.csi.volume_attributes["mountOptions"])
+
+    # Volume mount
+    container = job.spec.template.spec.containers[0]
+    self.assertLen(container.volume_mounts, 1)
+    mount = container.volume_mounts[0]
+    self.assertEqual(mount.name, "gcs-fuse-0")
+    self.assertEqual(mount.mount_path, "/data")
+    self.assertTrue(mount.read_only)
+
+  def test_fuse_multiple_volumes(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://bucket-a/data/",
+        "mount_path": "/data1",
+        "is_dir": True,
+        "read_only": True,
+      },
+      {
+        "gcs_uri": "gs://bucket-b/models/",
+        "mount_path": "/data2",
+        "is_dir": True,
+        "read_only": True,
+      },
+    ]
+    job = _create_job_spec(
+      job_name="fuse-multi",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j",
+      bucket_name="b",
+      namespace="ns",
+      fuse_volume_specs=fuse_specs,
+    )
+    volumes = job.spec.template.spec.volumes
+    self.assertLen(volumes, 2)
+    self.assertEqual(volumes[0].name, "gcs-fuse-0")
+    self.assertEqual(volumes[1].name, "gcs-fuse-1")
+
+    container = job.spec.template.spec.containers[0]
+    self.assertLen(container.volume_mounts, 2)
+    self.assertEqual(container.volume_mounts[0].mount_path, "/data1")
+    self.assertEqual(container.volume_mounts[1].mount_path, "/data2")
+
+  def test_fuse_bucket_root_no_only_dir(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://my-bucket/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    job = _create_job_spec(
+      job_name="fuse-root",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j",
+      bucket_name="b",
+      namespace="ns",
+      fuse_volume_specs=fuse_specs,
+    )
+    vol = job.spec.template.spec.volumes[0]
+    self.assertEqual(vol.csi.volume_attributes["mountOptions"], "implicit-dirs")
+    self.assertNotIn("only-dir", vol.csi.volume_attributes["mountOptions"])
+
+  def test_fuse_single_file_mounts_parent_dir(self):
+    fuse_specs = [
+      {
+        "gcs_uri": "gs://my-bucket/data/weights.h5",
+        "mount_path": "/weights",
+        "is_dir": False,
+        "read_only": True,
+      }
+    ]
+    job = _create_job_spec(
+      job_name="fuse-file",
+      container_uri="img",
+      accel_config=self._make_gpu_config(),
+      job_id="j",
+      bucket_name="b",
+      namespace="ns",
+      fuse_volume_specs=fuse_specs,
+    )
+    vol = job.spec.template.spec.volumes[0]
+    # Should mount the parent directory "data", not the file path.
+    self.assertIn("only-dir=data", vol.csi.volume_attributes["mountOptions"])
+    self.assertNotIn("weights.h5", vol.csi.volume_attributes["mountOptions"])
 
 
 class TestWaitForJob(absltest.TestCase):

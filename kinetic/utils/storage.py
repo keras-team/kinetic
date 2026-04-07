@@ -218,8 +218,11 @@ def upload_data(
   client = _get_client(project)
   bucket = client.bucket(bucket_name)
 
-  # O(1) cache hit check via sentinel blob
-  marker_blob = bucket.blob(f"{cache_prefix}/.cache_marker")
+  # O(1) cache hit check via sentinel blob.  Markers live under a separate
+  # top-level prefix ("data-markers/") so they never appear inside
+  # FUSE-mounted directories (which scope to "data-cache/{hash}/").
+  marker_prefix = f"{namespace_prefix}/data-markers/{content_hash}"
+  marker_blob = bucket.blob(marker_prefix)
   if marker_blob.exists():
     gcs_uri = f"gs://{bucket_name}/{cache_prefix}"
     logging.info(

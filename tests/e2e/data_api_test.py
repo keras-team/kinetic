@@ -382,5 +382,241 @@ class TestNestedData(absltest.TestCase):
     self.assertEqual(result["primary"], ["x.csv"])
 
 
+@skip_unless_e2e()
+class TestFuseVolumes(absltest.TestCase):
+  """Data declared with ``fuse=True`` — mounted via GCS FUSE CSI driver.
+
+  These tests require the GCS FUSE CSI driver addon to be enabled on the
+  GKE cluster (``kinetic up`` enables it by default).
+  """
+
+  def test_fuse_volume_local_data(self):
+    """Local data is uploaded to GCS, then FUSE-mounted (not downloaded)."""
+    tmp = _make_test_dir(self)
+    data_dir = tmp / "dataset"
+    data_dir.mkdir()
+    (data_dir / "train.csv").write_text(f"id,value\n1,{_RUN_NONCE}\n")
+
+    @kinetic.run(
+      accelerator="cpu",
+      volumes={"/data": Data(str(data_dir), fuse=True)},
+    )
+    def read_fuse_volume():
+      files = sorted(os.listdir("/data"))
+      with open("/data/train.csv") as f:
+        content = f.read()
+      return {"files": files, "content": content}
+
+    result = read_fuse_volume()
+
+    self.assertEqual(result["files"], ["train.csv"])
+    self.assertIn(_RUN_NONCE, result["content"])
+
+  def test_fuse_volume_nested_directory(self):
+    """FUSE volume preserves nested directory structure."""
+    tmp = _make_test_dir(self)
+    data_dir = tmp / "dataset"
+    sub = data_dir / "subdir"
+    sub.mkdir(parents=True)
+    (data_dir / "root.txt").write_text(f"root,{_RUN_NONCE}")
+    (sub / "nested.txt").write_text(f"nested,{_RUN_NONCE}")
+
+    @kinetic.run(
+      accelerator="cpu",
+      volumes={"/data": Data(str(data_dir), fuse=True)},
+    )
+    def read_nested():
+      root_files = sorted(os.listdir("/data"))
+      with open("/data/subdir/nested.txt") as f:
+        nested = f.read()
+      return {"root_files": root_files, "nested": nested}
+
+    result = read_nested()
+
+    self.assertIn("root.txt", result["root_files"])
+    self.assertIn("subdir", result["root_files"])
+    self.assertIn("nested", result["nested"])
+
+  def test_fuse_multiple_volumes(self):
+    """Multiple FUSE volumes are each mounted at their declared paths."""
+    tmp = _make_test_dir(self)
+    d1 = tmp / "data"
+    d1.mkdir()
+    (d1 / "data.csv").write_text(f"data,{_RUN_NONCE}")
+    d2 = tmp / "weights"
+    d2.mkdir()
+    (d2 / "model.bin").write_text(f"weights,{_RUN_NONCE}")
+
+    @kinetic.run(
+      accelerator="cpu",
+      volumes={
+        "/data": Data(str(d1), fuse=True),
+        "/weights": Data(str(d2), fuse=True),
+      },
+    )
+    def check_volumes():
+      return {
+        "data_files": sorted(os.listdir("/data")),
+        "weight_files": sorted(os.listdir("/weights")),
+      }
+
+    result = check_volumes()
+
+    self.assertEqual(result["data_files"], ["data.csv"])
+    self.assertEqual(result["weight_files"], ["model.bin"])
+
+
+@skip_unless_e2e()
+class TestFuseDataArgs(absltest.TestCase):
+  """Data objects with ``fuse=True`` passed as function arguments."""
+
+  def test_fuse_data_arg_directory(self):
+    """A FUSE data arg resolves to a readable path (auto-mounted)."""
+    tmp = _make_test_dir(self)
+    data_dir = tmp / "dataset"
+    data_dir.mkdir()
+    (data_dir / "train.csv").write_text(f"id,value\n1,{_RUN_NONCE}\n")
+
+    @kinetic.run(accelerator="cpu")
+    def read_dir(data_path):
+      files = sorted(os.listdir(data_path))
+      with open(f"{data_path}/train.csv") as f:
+        content = f.read()
+      return {"files": files, "content": content}
+
+    result = read_dir(Data(str(data_dir), fuse=True))
+
+    self.assertEqual(result["files"], ["train.csv"])
+    self.assertIn(_RUN_NONCE, result["content"])
+
+  def test_fuse_data_arg_single_file(self):
+    """A FUSE data arg for a single file resolves to a readable path."""
+    tmp = _make_test_dir(self)
+    config = tmp / "config.json"
+    config.write_text(f'{{"nonce": "{_RUN_NONCE}"}}')
+
+    @kinetic.run(accelerator="cpu")
+    def read_file(config_path):
+      with open(config_path) as f:
+        return json.load(f)
+
+    result = read_file(Data(str(config), fuse=True))
+
+    self.assertEqual(result["nonce"], _RUN_NONCE)
+
+  def test_multiple_fuse_data_args(self):
+    """Multiple FUSE data args are each mounted independently."""
+    tmp = _make_test_dir(self)
+    d1 = tmp / "train"
+    d1.mkdir()
+    (d1 / "a.csv").write_text(f"train,{_RUN_NONCE}")
+    d2 = tmp / "val"
+    d2.mkdir()
+    (d2 / "b.csv").write_text(f"val,{_RUN_NONCE}")
+
+    @kinetic.run(accelerator="cpu")
+    def read_both(train_dir, val_dir):
+      return {
+        "train": sorted(os.listdir(train_dir)),
+        "val": sorted(os.listdir(val_dir)),
+      }
+
+    result = read_both(Data(str(d1), fuse=True), Data(str(d2), fuse=True))
+
+    self.assertEqual(result["train"], ["a.csv"])
+    self.assertEqual(result["val"], ["b.csv"])
+
+
+@skip_unless_e2e()
+class TestFuseMixed(absltest.TestCase):
+  """Mixing FUSE and non-FUSE data in a single call."""
+
+  def test_fuse_volume_plus_downloaded_volume(self):
+    """One FUSE volume and one downloaded volume in the same function."""
+    tmp = _make_test_dir(self)
+    fuse_dir = tmp / "fuse_data"
+    fuse_dir.mkdir()
+    (fuse_dir / "fuse.txt").write_text(f"fuse,{_RUN_NONCE}")
+    dl_dir = tmp / "dl_data"
+    dl_dir.mkdir()
+    (dl_dir / "dl.txt").write_text(f"dl,{_RUN_NONCE}")
+
+    @kinetic.run(
+      accelerator="cpu",
+      volumes={
+        "/fuse_data": Data(str(fuse_dir), fuse=True),
+        "/dl_data": Data(str(dl_dir)),
+      },
+    )
+    def check_both():
+      with open("/fuse_data/fuse.txt") as f:
+        fuse_content = f.read()
+      with open("/dl_data/dl.txt") as f:
+        dl_content = f.read()
+      return {"fuse": fuse_content, "dl": dl_content}
+
+    result = check_both()
+
+    self.assertIn("fuse", result["fuse"])
+    self.assertIn("dl", result["dl"])
+
+  def test_fuse_volume_plus_data_arg_plus_plain_arg(self):
+    """FUSE volume, regular Data arg, and plain arg all work together."""
+    tmp = _make_test_dir(self)
+    weights_dir = tmp / "weights"
+    weights_dir.mkdir()
+    (weights_dir / "model.bin").write_text(f"w,{_RUN_NONCE}")
+    config = tmp / "config.json"
+    config.write_text(f'{{"lr": 0.01, "nonce": "{_RUN_NONCE}"}}')
+
+    @kinetic.run(
+      accelerator="cpu",
+      volumes={"/weights": Data(str(weights_dir), fuse=True)},
+    )
+    def train(config_path, lr=0.001):
+      with open(config_path) as f:
+        cfg = json.load(f)
+      has_weights = os.path.isdir("/weights")
+      weight_files = sorted(os.listdir("/weights"))
+      return {
+        "config": cfg,
+        "lr": lr,
+        "has_weights": has_weights,
+        "weight_files": weight_files,
+      }
+
+    result = train(Data(str(config)), lr=0.05)
+
+    self.assertEqual(result["config"]["lr"], 0.01)
+    self.assertEqual(result["lr"], 0.05)
+    self.assertTrue(result["has_weights"])
+    self.assertEqual(result["weight_files"], ["model.bin"])
+
+  def test_fuse_data_arg_plus_downloaded_data_arg(self):
+    """One FUSE data arg and one downloaded data arg in the same call."""
+    tmp = _make_test_dir(self)
+    fuse_dir = tmp / "fuse_set"
+    fuse_dir.mkdir()
+    (fuse_dir / "f.csv").write_text(f"fuse,{_RUN_NONCE}")
+    dl_dir = tmp / "dl_set"
+    dl_dir.mkdir()
+    (dl_dir / "d.csv").write_text(f"dl,{_RUN_NONCE}")
+
+    @kinetic.run(accelerator="cpu")
+    def read_both(fuse_path, dl_path):
+      return {
+        "fuse": sorted(os.listdir(fuse_path)),
+        "dl": sorted(os.listdir(dl_path)),
+      }
+
+    result = read_both(
+      Data(str(fuse_dir), fuse=True),
+      Data(str(dl_dir)),
+    )
+
+    self.assertEqual(result["fuse"], ["f.csv"])
+    self.assertEqual(result["dl"], ["d.csv"])
+
+
 if __name__ == "__main__":
   absltest.main()

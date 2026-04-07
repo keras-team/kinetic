@@ -67,6 +67,7 @@ def submit_pathways_job(
   namespace="default",
   spot=False,
   requirements_uri=None,
+  fuse_volume_specs=None,
 ):
   """Submit a LeaderWorkerSet to GKE cluster.
 
@@ -108,6 +109,7 @@ def submit_pathways_job(
     namespace=namespace,
     version=lws_version,
     requirements_uri=requirements_uri,
+    fuse_volume_specs=fuse_volume_specs,
   )
 
   custom_api = _custom_api()
@@ -409,6 +411,7 @@ def _create_lws_spec(
   namespace,
   version=LWS_VERSION,
   requirements_uri=None,
+  fuse_volume_specs=None,
 ):
   """Create a LeaderWorkerSet manifest."""
 
@@ -478,6 +481,19 @@ def _create_lws_spec(
 
   if accel_config.get("node_selector"):
     pod_template["spec"]["nodeSelector"] = accel_config["node_selector"]
+
+  # GCS FUSE CSI volumes (lazy-mounted from GCS via the CSI driver).
+  fuse_annotations, fuse_vols, fuse_mounts = k8s_utils.build_gcs_fuse_volumes(
+    fuse_volume_specs
+  )
+  if fuse_annotations:
+    pod_template["metadata"].setdefault("annotations", {}).update(
+      fuse_annotations
+    )
+    pod_template["spec"].setdefault("volumes", []).extend(fuse_vols)
+    pod_template["spec"]["containers"][0].setdefault("volumeMounts", []).extend(
+      fuse_mounts
+    )
 
   return {
     "apiVersion": f"{LWS_GROUP}/{version}",

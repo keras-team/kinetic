@@ -90,7 +90,7 @@ class TestDownloadData(absltest.TestCase):
       )
     )
 
-  def test_downloads_files_skips_marker(self):
+  def test_downloads_files_skips_directory_entries(self):
     tmp = _make_temp_path(self)
     target = tmp / "output"
 
@@ -101,16 +101,12 @@ class TestDownloadData(absltest.TestCase):
     blob_data = MagicMock()
     blob_data.name = "prefix/hash/train.csv"
 
-    blob_marker = MagicMock()
-    blob_marker.name = "prefix/hash/.cache_marker"
-
     blob_dir = MagicMock()
     blob_dir.name = "prefix/hash/"
 
     mock_bucket.list_blobs.return_value = [
       blob_dir,
       blob_data,
-      blob_marker,
     ]
 
     ref = {
@@ -342,6 +338,53 @@ class TestResolveDataRefs(absltest.TestCase):
     self.assertIsInstance(kwargs["data"], str)
     self.assertEqual(kwargs["lr"], 0.01)
 
+  def test_fuse_single_file_resolves_to_file_path(self):
+    """FUSE-mounted single file ref resolves to the actual file, not dir."""
+    tmp = _make_temp_path(self)
+    mount_dir = tmp / "fuse-mount"
+    mount_dir.mkdir()
+    (mount_dir / "config.json").write_text("{}")
+
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://b/path/to/config.json",
+      "is_dir": False,
+      "mount_path": str(mount_dir),
+      "fuse": True,
+    }
+
+    args, _ = resolve_data_refs((ref,), {}, MagicMock())
+
+    self.assertTrue(args[0].endswith("config.json"))
+    self.assertFalse(os.path.isdir(args[0]))
+
+  def test_fuse_directory_returns_mount_path(self):
+    """FUSE-mounted directory ref returns the mount path unchanged."""
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://b/data/train/",
+      "is_dir": True,
+      "mount_path": "/tmp/fuse-data/0",
+      "fuse": True,
+    }
+
+    args, _ = resolve_data_refs((ref,), {}, MagicMock())
+
+    self.assertEqual(args[0], "/tmp/fuse-data/0")
+
+  def test_non_fuse_mount_returns_mount_path(self):
+    """Non-FUSE mounted ref returns the mount path unchanged."""
+    ref = {
+      "__data_ref__": True,
+      "gcs_uri": "gs://b/cache/hash",
+      "is_dir": False,
+      "mount_path": "/data/config",
+    }
+
+    args, _ = resolve_data_refs((ref,), {}, MagicMock())
+
+    self.assertEqual(args[0], "/data/config")
+
 
 class TestResolveVolumes(absltest.TestCase):
   def test_downloads_to_mount_path(self):
@@ -395,6 +438,76 @@ class TestResolveVolumes(absltest.TestCase):
 
     self.assertTrue(os.path.isdir(path1))
     self.assertTrue(os.path.isdir(path2))
+
+  def test_fuse_volume_skips_download(self):
+    mock_client = MagicMock()
+    refs = [
+      {
+        "__data_ref__": True,
+        "gcs_uri": "gs://b/data/",
+        "is_dir": True,
+        "mount_path": "/data",
+        "fuse": True,
+      }
+    ]
+
+    with mock.patch("kinetic.runner.remote_runner._download_data") as mock_dl:
+      resolve_volumes(refs, mock_client)
+
+    mock_dl.assert_not_called()
+
+  def test_mixed_fuse_and_download_volumes(self):
+    tmp = _make_temp_path(self)
+    download_path = str(tmp / "downloaded")
+
+    mock_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+    mock_bucket.list_blobs.return_value = []
+
+    refs = [
+      {
+        "__data_ref__": True,
+        "gcs_uri": "gs://b/fuse-data/",
+        "is_dir": True,
+        "mount_path": "/fuse-mount",
+        "fuse": True,
+      },
+      {
+        "__data_ref__": True,
+        "gcs_uri": "gs://b/download-data/",
+        "is_dir": True,
+        "mount_path": download_path,
+      },
+    ]
+
+    resolve_volumes(refs, mock_client)
+
+    # Download path should have been created by _download_data
+    self.assertTrue(os.path.isdir(download_path))
+
+  def test_fuse_volume_without_fuse_key_downloads(self):
+    """Old-format refs without 'fuse' key still download (backward compat)."""
+    tmp = _make_temp_path(self)
+    mount_path = str(tmp / "data")
+
+    mock_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+    mock_bucket.list_blobs.return_value = []
+
+    refs = [
+      {
+        "__data_ref__": True,
+        "gcs_uri": "gs://b/data/",
+        "is_dir": True,
+        "mount_path": mount_path,
+      }
+    ]
+
+    resolve_volumes(refs, mock_client)
+
+    self.assertTrue(os.path.isdir(mount_path))
 
 
 class TestMain(absltest.TestCase):

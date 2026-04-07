@@ -233,6 +233,106 @@ class TestFindRequirements(absltest.TestCase):
     )
 
 
+class TestPrepareArtifactsFuse(absltest.TestCase):
+  """Tests for FUSE volume handling in _prepare_artifacts."""
+
+  def _make_func(self):
+    def my_train():
+      return 42
+
+    return my_train
+
+  def _make_ctx(self, volumes=None, args=(), kwargs=None):
+    return JobContext(
+      func=self._make_func(),
+      args=args,
+      kwargs=kwargs or {},
+      env_vars={},
+      accelerator="cpu",
+      container_image=None,
+      zone="us-central1-a",
+      project="proj",
+      cluster_name="kinetic-cluster",
+      volumes=volumes,
+    )
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
+  def test_fuse_volume_creates_fuse_spec(self, _zip, mock_upload):
+    mock_upload.return_value = "gs://bucket/hash/"
+    tmp = _make_temp_path(self)
+    data_dir = tmp / "dataset"
+    data_dir.mkdir()
+    (data_dir / "train.csv").write_text("data")
+
+    ctx = self._make_ctx(volumes={"/data": Data(str(data_dir), fuse=True)})
+    _prepare_artifacts(ctx, str(tmp))
+
+    self.assertIsNotNone(ctx.fuse_volume_specs)
+    self.assertLen(ctx.fuse_volume_specs, 1)
+    spec = ctx.fuse_volume_specs[0]
+    self.assertEqual(spec["gcs_uri"], "gs://bucket/hash/")
+    self.assertEqual(spec["mount_path"], "/data")
+    self.assertTrue(spec["is_dir"])
+    self.assertTrue(spec["read_only"])
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
+  def test_non_fuse_volume_no_fuse_specs(self, _zip, mock_upload):
+    mock_upload.return_value = "gs://bucket/hash/"
+    tmp = _make_temp_path(self)
+    data_dir = tmp / "dataset"
+    data_dir.mkdir()
+    (data_dir / "train.csv").write_text("data")
+
+    ctx = self._make_ctx(volumes={"/data": Data(str(data_dir))})
+    _prepare_artifacts(ctx, str(tmp))
+
+    self.assertIsNone(ctx.fuse_volume_specs)
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
+  def test_fuse_data_arg_creates_auto_mount(self, _zip, mock_upload):
+    mock_upload.return_value = "gs://bucket/hash/"
+    tmp = _make_temp_path(self)
+
+    fuse_data = Data("gs://bucket/dataset/", fuse=True)
+    ctx = self._make_ctx(args=(fuse_data,))
+    _prepare_artifacts(ctx, str(tmp))
+
+    self.assertIsNotNone(ctx.fuse_volume_specs)
+    self.assertLen(ctx.fuse_volume_specs, 1)
+    spec = ctx.fuse_volume_specs[0]
+    self.assertEqual(spec["mount_path"], "/tmp/fuse-data/0")
+    self.assertTrue(spec["is_dir"])
+    self.assertTrue(spec["read_only"])
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
+  def test_mixed_fuse_and_non_fuse_volumes(self, _zip, mock_upload):
+    mock_upload.return_value = "gs://bucket/hash/"
+    tmp = _make_temp_path(self)
+    data_dir = tmp / "dataset"
+    data_dir.mkdir()
+    (data_dir / "train.csv").write_text("data")
+    config_dir = tmp / "config"
+    config_dir.mkdir()
+    (config_dir / "cfg.json").write_text("{}")
+
+    ctx = self._make_ctx(
+      volumes={
+        "/data": Data(str(data_dir), fuse=True),
+        "/config": Data(str(config_dir)),
+      }
+    )
+    _prepare_artifacts(ctx, str(tmp))
+
+    # Only the fuse volume should be in fuse_volume_specs
+    self.assertIsNotNone(ctx.fuse_volume_specs)
+    self.assertLen(ctx.fuse_volume_specs, 1)
+    self.assertEqual(ctx.fuse_volume_specs[0]["mount_path"], "/data")
+
+
 class TestPrepareArtifacts(absltest.TestCase):
   def _make_working_dir(self):
     """Create a temp working directory with some source files."""

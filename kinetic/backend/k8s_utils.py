@@ -1,6 +1,7 @@
 """Shared Kubernetes utilities used by both GKE and Pathways backends."""
 
 import functools
+import posixpath
 from contextlib import suppress
 
 from absl import logging
@@ -10,6 +11,7 @@ from kubernetes.client.rest import ApiException
 
 from kinetic.core import accelerators
 from kinetic.core.accelerators import TpuConfig
+from kinetic.data import parse_gcs_uri
 
 # GKE node selector / resource label keys.
 _LABEL_TPU_ACCELERATOR = "cloud.google.com/gke-tpu-accelerator"
@@ -20,6 +22,110 @@ _LABEL_SPOT = "cloud.google.com/gke-spot"
 _RESOURCE_TPU = "google.com/tpu"
 _RESOURCE_GPU = "nvidia.com/gpu"
 _RESOURCE_LABEL_TPU_TYPE = "goog-gke-accelerator-type"
+
+# GCS FUSE CSI driver constants.
+GCSFUSE_CSI_DRIVER = "gcsfuse.csi.storage.gke.io"
+GCSFUSE_VOLUMES_ANNOTATION = "gke-gcsfuse/volumes"
+GCSFUSE_DEFAULT_MOUNT_OPTIONS = "implicit-dirs"
+
+
+def build_gcs_fuse_volumes(
+  fuse_volume_specs: list[dict] | None,
+) -> tuple[dict[str, str] | None, list[dict], list[dict]]:
+  """Build GCS FUSE CSI volumes and mounts from fuse volume specs.
+
+  Each spec becomes an inline ephemeral CSI volume backed by a GCS
+  bucket (or bucket subdirectory via the `only-dir` mount option).
+  The GKE GCS FUSE sidecar is auto-injected when the pod carries the
+  `gke-gcsfuse/volumes: "true"` annotation.
+
+  Args:
+      fuse_volume_specs: List of dicts with keys `gcs_uri`,
+          `mount_path`, `is_dir`, and `read_only`.
+
+  Returns:
+      Tuple of `(annotations, volumes, volume_mounts)` where each
+      element is a K8s manifest dict.  Returns `(None, [], [])`
+      when *fuse_volume_specs* is `None` or empty.
+  """
+  if not fuse_volume_specs:
+    return None, [], []
+
+  volumes = []
+  mounts = []
+  for i, spec in enumerate(fuse_volume_specs):
+    vol_name = f"gcs-fuse-{i}"
+    bucket, prefix = parse_gcs_uri(spec["gcs_uri"])
+
+    # Scope the mount to a subdirectory when a prefix is present.
+    # For files, mount the parent directory so the file is visible.
+    mount_options = GCSFUSE_DEFAULT_MOUNT_OPTIONS
+    effective_prefix = prefix
+    if prefix and not spec.get("is_dir", True):
+      effective_prefix = posixpath.dirname(prefix)
+
+    if effective_prefix:
+      escaped_prefix = effective_prefix.replace(",", "\\,")
+      mount_options += f",only-dir={escaped_prefix}"
+
+    volumes.append(
+      {
+        "name": vol_name,
+        "csi": {
+          "driver": GCSFUSE_CSI_DRIVER,
+          "volumeAttributes": {
+            "bucketName": bucket,
+            "mountOptions": mount_options,
+          },
+        },
+      }
+    )
+    mounts.append(
+      {
+        "name": vol_name,
+        "mountPath": spec["mount_path"],
+        "readOnly": spec.get("read_only", True),
+      }
+    )
+
+  annotations = {GCSFUSE_VOLUMES_ANNOTATION: "true"}
+  return annotations, volumes, mounts
+
+
+def build_gcs_fuse_v1_volumes(
+  fuse_volume_specs: list[dict] | None,
+) -> tuple[
+  dict[str, str] | None, list[client.V1Volume], list[client.V1VolumeMount]
+]:
+  """Like :func:`build_gcs_fuse_volumes` but returns kubernetes-client V1 objects.
+
+  This is a convenience wrapper for backends that build pod specs using
+  the ``kubernetes`` Python client (e.g. GKE Jobs).
+  """
+  annotations, vol_dicts, mount_dicts = build_gcs_fuse_volumes(
+    fuse_volume_specs
+  )
+  if annotations is None:
+    return None, [], []
+  volumes = [
+    client.V1Volume(
+      name=v["name"],
+      csi=client.V1CSIVolumeSource(
+        driver=v["csi"]["driver"],
+        volume_attributes=v["csi"]["volumeAttributes"],
+      ),
+    )
+    for v in vol_dicts
+  ]
+  mounts = [
+    client.V1VolumeMount(
+      name=m["name"],
+      mount_path=m["mountPath"],
+      read_only=m["readOnly"],
+    )
+    for m in mount_dicts
+  ]
+  return annotations, volumes, mounts
 
 
 def parse_accelerator(accelerator, spot=False):

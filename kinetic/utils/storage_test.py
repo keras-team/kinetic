@@ -219,7 +219,7 @@ class TestUploadData(_GcsTestBase):
     def track_blob(name):
       b = MagicMock()
       blobs[name] = b
-      if name.endswith(".cache_marker"):
+      if "data-markers/" in name:
         b.exists.return_value = False
       return b
 
@@ -233,8 +233,8 @@ class TestUploadData(_GcsTestBase):
     file_blob_name = f"{expected_prefix}/data.csv"
     self.assertIn(file_blob_name, blobs)
     blobs[file_blob_name].upload_from_filename.assert_called_once()
-    # Marker written last
-    marker_name = f"{expected_prefix}/.cache_marker"
+    # Marker written last under separate prefix
+    marker_name = f"default/data-markers/{content_hash}"
     self.assertIn(marker_name, blobs)
     blobs[marker_name].upload_from_string.assert_called_once_with(
       "", retry=mock.ANY

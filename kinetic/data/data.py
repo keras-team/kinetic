@@ -72,10 +72,11 @@ class Data:
       Data("gs://my-bucket/datasets/weights.h5")
   """
 
-  def __init__(self, path: str):
+  def __init__(self, path: str, fuse: bool = False):
     if not path:
       raise ValueError("Data path must not be empty")
     self._raw_path = path
+    self._fuse = fuse
     if self.is_gcs:
       self._resolved_path = path
       _warn_if_missing_trailing_slash(path)
@@ -90,6 +91,10 @@ class Data:
   @property
   def path(self) -> str:
     return self._resolved_path
+
+  @property
+  def fuse(self) -> bool:
+    return self._fuse
 
   @property
   def is_gcs(self) -> bool:
@@ -186,6 +191,8 @@ class Data:
     return h.hexdigest()
 
   def __repr__(self):
+    if self._fuse:
+      return f"Data({self._raw_path!r}, fuse=True)"
     return f"Data({self._raw_path!r})"
 
 
@@ -207,7 +214,10 @@ def _warn_if_missing_trailing_slash(path: str) -> None:
 
 
 def _make_data_ref(
-  gcs_uri: str, is_dir: bool, mount_path: str | None = None
+  gcs_uri: str,
+  is_dir: bool,
+  mount_path: str | None = None,
+  fuse: bool = False,
 ) -> dict[str, object]:
   """Create a serializable data reference dict.
 
@@ -219,9 +229,29 @@ def _make_data_ref(
     "gcs_uri": gcs_uri,
     "is_dir": is_dir,
     "mount_path": mount_path,
+    "fuse": fuse,
   }
 
 
 def is_data_ref(obj: object) -> bool:
   """Check if an object is a serialized data reference."""
   return isinstance(obj, dict) and obj.get("__data_ref__") is True
+
+
+def parse_gcs_uri(gcs_uri: str) -> tuple[str, str]:
+  """Parse a GCS URI into (bucket_name, prefix).
+
+  Args:
+      gcs_uri: A URI like `gs://my-bucket/some/prefix/`.
+
+  Returns:
+      Tuple of `(bucket_name, prefix)` where prefix has no
+      leading or trailing slashes. For `gs://my-bucket/some/prefix/`,
+      returns `("my-bucket", "some/prefix")`. For `gs://my-bucket`,
+      returns `("my-bucket", "")`.
+  """
+  stripped = gcs_uri[len("gs://") :] if gcs_uri.startswith("gs://") else gcs_uri
+  parts = stripped.split("/", 1)
+  bucket = parts[0]
+  prefix = parts[1].strip("/") if len(parts) > 1 else ""
+  return bucket, prefix

@@ -338,6 +338,11 @@ def _create_gke_cluster(
       channel="UNSPECIFIED",
     ),
     deletion_protection=False,
+    addons_config=gcp.container.ClusterAddonsConfigArgs(
+      gcs_fuse_csi_driver_config=gcp.container.ClusterAddonsConfigGcsFuseCsiDriverConfigArgs(
+        enabled=True,
+      ),
+    ),
     cluster_autoscaling=gcp.container.ClusterClusterAutoscalingArgs(
       enabled=True,
       autoscaling_profile="OPTIMIZE_UTILIZATION",

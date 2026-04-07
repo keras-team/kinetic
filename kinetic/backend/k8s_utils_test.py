@@ -5,11 +5,15 @@ from unittest.mock import MagicMock
 
 from absl.testing import absltest, parameterized
 from google.cloud import container_v1
+from kubernetes import client as k8s_client
 from kubernetes.config import ConfigException
 
 from kinetic.backend.k8s_utils import (
+  GCSFUSE_CSI_DRIVER,
   _check_image_pull_errors,
   _check_node_pool_exists_cached,
+  build_gcs_fuse_v1_volumes,
+  build_gcs_fuse_volumes,
   check_pod_scheduling,
   load_kube_config,
   parse_accelerator,
@@ -397,6 +401,118 @@ class TestCheckImagePullErrors(absltest.TestCase):
 
     with self.assertRaisesRegex(RuntimeError, "Container image pull failed"):
       check_pod_scheduling(mock_core, "job-1", "default", set())
+
+
+class TestBuildGcsFuseVolumes(absltest.TestCase):
+  """Tests for build_gcs_fuse_volumes."""
+
+  def test_empty_specs_returns_empty(self):
+    annotations, vols, mounts = build_gcs_fuse_volumes(None)
+    self.assertIsNone(annotations)
+    self.assertEmpty(vols)
+    self.assertEmpty(mounts)
+
+  def test_directory_spec_uses_only_dir(self):
+    specs = [
+      {
+        "gcs_uri": "gs://bucket/ns/data-cache/abc123",
+        "mount_path": "/data/train",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    _, vols, mounts = build_gcs_fuse_volumes(specs)
+    mount_opts = vols[0]["csi"]["volumeAttributes"]["mountOptions"]
+    self.assertIn("only-dir=ns/data-cache/abc123", mount_opts)
+    self.assertEqual(mounts[0]["mountPath"], "/data/train")
+
+  def test_single_file_scopes_to_parent_dir(self):
+    """File-level URI scopes only-dir to the parent (hash) directory."""
+    specs = [
+      {
+        "gcs_uri": "gs://bucket/ns/data-cache/abc123/config.json",
+        "mount_path": "/tmp/fuse-data/0",
+        "is_dir": False,
+        "read_only": True,
+      }
+    ]
+    _, vols, mounts = build_gcs_fuse_volumes(specs)
+    mount_opts = vols[0]["csi"]["volumeAttributes"]["mountOptions"]
+    # Should scope to the hash dir, NOT the entire data-cache/ tree
+    self.assertIn("only-dir=ns/data-cache/abc123", mount_opts)
+    self.assertNotIn("only-dir=ns/data-cache,", mount_opts)
+
+  def test_gcs_native_single_file(self):
+    """GCS-native file URI scopes only-dir to the containing directory."""
+    specs = [
+      {
+        "gcs_uri": "gs://bucket/datasets/configs/model.json",
+        "mount_path": "/tmp/fuse-data/0",
+        "is_dir": False,
+        "read_only": True,
+      }
+    ]
+    _, vols, mounts = build_gcs_fuse_volumes(specs)
+    mount_opts = vols[0]["csi"]["volumeAttributes"]["mountOptions"]
+    self.assertIn("only-dir=datasets/configs", mount_opts)
+
+  def test_annotations_set(self):
+    specs = [
+      {
+        "gcs_uri": "gs://bucket/data/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    annotations, _, _ = build_gcs_fuse_volumes(specs)
+    self.assertEqual(annotations, {"gke-gcsfuse/volumes": "true"})
+
+
+class TestBuildGcsFuseV1Volumes(absltest.TestCase):
+  """Tests for build_gcs_fuse_v1_volumes (V1 object wrapper)."""
+
+  def test_empty_specs_returns_empty(self):
+    annotations, vols, mounts = build_gcs_fuse_v1_volumes(None)
+    self.assertIsNone(annotations)
+    self.assertEmpty(vols)
+    self.assertEmpty(mounts)
+
+  def test_returns_v1_types(self):
+    specs = [
+      {
+        "gcs_uri": "gs://bucket/data/train/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    annotations, vols, mounts = build_gcs_fuse_v1_volumes(specs)
+    self.assertIsNotNone(annotations)
+    self.assertLen(vols, 1)
+    self.assertLen(mounts, 1)
+    self.assertIsInstance(vols[0], k8s_client.V1Volume)
+    self.assertIsInstance(mounts[0], k8s_client.V1VolumeMount)
+
+  def test_v1_volume_attributes(self):
+    specs = [
+      {
+        "gcs_uri": "gs://my-bucket/datasets/imagenet/",
+        "mount_path": "/data",
+        "is_dir": True,
+        "read_only": True,
+      }
+    ]
+    _, vols, mounts = build_gcs_fuse_v1_volumes(specs)
+    vol = vols[0]
+    self.assertEqual(vol.name, "gcs-fuse-0")
+    self.assertEqual(vol.csi.driver, GCSFUSE_CSI_DRIVER)
+    self.assertEqual(vol.csi.volume_attributes["bucketName"], "my-bucket")
+
+    mount = mounts[0]
+    self.assertEqual(mount.name, "gcs-fuse-0")
+    self.assertEqual(mount.mount_path, "/data")
+    self.assertTrue(mount.read_only)
 
 
 if __name__ == "__main__":

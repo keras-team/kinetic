@@ -25,6 +25,7 @@ def submit_k8s_job(
   namespace="default",
   spot=False,
   requirements_uri=None,
+  fuse_volume_specs=None,
 ):
   """Submit a Kubernetes Job to GKE cluster.
 
@@ -55,6 +56,7 @@ def submit_k8s_job(
     bucket_name=bucket_name,
     namespace=namespace,
     requirements_uri=requirements_uri,
+    fuse_volume_specs=fuse_volume_specs,
   )
 
   # Submit job
@@ -303,6 +305,7 @@ def _create_job_spec(
   bucket_name,
   namespace,
   requirements_uri=None,
+  fuse_volume_specs=None,
 ):
   """Create Kubernetes Job specification.
 
@@ -353,6 +356,15 @@ def _create_job_spec(
     ),
   )
 
+  # GCS FUSE CSI volumes (lazy-mounted from GCS via the CSI driver).
+  fuse_annotations, fuse_volumes, fuse_mounts = (
+    k8s_utils.build_gcs_fuse_v1_volumes(fuse_volume_specs)
+  )
+  if fuse_annotations:
+    if container.volume_mounts is None:
+      container.volume_mounts = []
+    container.volume_mounts.extend(fuse_mounts)
+
   # Build tolerations
   tolerations = [
     client.V1Toleration(
@@ -373,10 +385,13 @@ def _create_job_spec(
   # Only set node_selector if non-empty (for GPU nodes)
   if accel_config.get("node_selector"):
     pod_spec_kwargs["node_selector"] = accel_config["node_selector"]
+  if fuse_volumes:
+    pod_spec_kwargs.setdefault("volumes", []).extend(fuse_volumes)
 
   pod_template = client.V1PodTemplateSpec(
     metadata=client.V1ObjectMeta(
-      labels={"app": "kinetic", "job-id": job_id, "job-name": job_name}
+      labels={"app": "kinetic", "job-id": job_id, "job-name": job_name},
+      annotations=fuse_annotations,
     ),
     spec=client.V1PodSpec(**pod_spec_kwargs),
   )
