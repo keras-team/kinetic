@@ -63,6 +63,14 @@ def show():
     "KINETIC_NAMESPACE" if namespace else "default (default)",
   )
 
+  # Output directory
+  output_dir = os.environ.get("KINETIC_OUTPUT_DIR")
+  table.add_row(
+    "Output Dir",
+    output_dir or "(not set)",
+    "KINETIC_OUTPUT_DIR" if output_dir else "",
+  )
+
   # State directory
   state_dir = os.environ.get("KINETIC_STATE_DIR")
   table.add_row(

@@ -388,20 +388,66 @@ If both files exist in the same directory, `requirements.txt` takes precedence.
 
 > **Note:** JAX packages (`jax`, `jaxlib`, `libtpu`, `libtpu-nightly`) are automatically filtered from your dependencies to prevent overriding the accelerator-specific JAX installation. To keep a JAX line, append `# kn:keep` to it.
 
-### Prebuilt Container Images
+### Container Image Modes
 
-Skip container build time by using prebuilt images:
+Kinetic supports three container image modes controlled by the `container_image` parameter.
+
+#### Bundled Mode (Default)
+
+The default mode builds a custom container image via Cloud Build with all dependencies baked in. Images are cached by dependency hash — unchanged dependencies reuse the cached image.
+
+```python
+# These are equivalent — both use bundled mode:
+@kinetic.run(accelerator="v5e-1")
+def train():
+    ...
+
+@kinetic.run(accelerator="v5e-1", container_image="bundled")
+def train():
+    ...
+```
+
+> **First run timing:** The initial build takes ~2-5 minutes. Subsequent runs with unchanged dependencies start within a few seconds.
+
+To use your own prebuilt images instead of the official ones, build and push them with `kinetic build-base`, then point Kinetic at your repository:
+
+```bash
+kinetic build-base --repo us-docker.pkg.dev/my-project/kinetic-base
+export KINETIC_BASE_IMAGE_REPO=us-docker.pkg.dev/my-project/kinetic-base
+```
+
+Or pass `base_image_repo` directly to the decorator:
+
+```python
+@kinetic.run(accelerator="l4", base_image_repo="us-docker.pkg.dev/my-project/kinetic-base")
+def train():
+    ...
+```
+
+#### Prebuilt Mode
+
+Prebuilt mode uses a pre-published base image with the accelerator runtime already installed. Your project dependencies are installed at pod startup via `uv pip install` — no Cloud Build step required.
+
+```python
+@kinetic.run(accelerator="v5e-1", container_image="prebuilt")
+def train():
+    ...
+```
+
+#### Custom Image Mode
+
+Provide a full container image URI to use your own image. Kinetic skips all build and dependency steps. The image must include `cloudpickle`, `google-cloud-storage`, and a compatible Python environment, and be accessible from the GKE nodes.
 
 ```python
 @kinetic.run(
     accelerator="v5e-1",
-    container_image="us-docker.pkg.dev/my-project/kinetic/prebuilt:v1.0"
+    container_image="us-docker.pkg.dev/my-project/kinetic/my-image:v1.0"
 )
 def train():
     ...
 ```
 
-Build your own prebuilt image using the project's Dockerfile template as a starting point.
+For more details on each mode, see the [container images documentation](docs/advanced/containers.md).
 
 ### Forwarding Environment Variables
 
@@ -478,13 +524,14 @@ For more examples, see the [`examples/`](examples/) directory.
 
 #### Environment Variables
 
-| Variable            | Required | Default           | Description                                                  |
-| ------------------- | -------- | ----------------- | ------------------------------------------------------------ |
-| `KINETIC_PROJECT`   | Yes      | —                 | Google Cloud project ID                                      |
-| `KINETIC_ZONE`      | No       | `us-central1-a`   | Default compute zone                                         |
-| `KINETIC_CLUSTER`   | No       | `kinetic-cluster` | GKE cluster name                                             |
-| `KINETIC_NAMESPACE` | No       | `default`         | Kubernetes namespace                                         |
-| `KINETIC_LOG_LEVEL` | No       | `INFO`            | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
+| Variable                  | Required | Default           | Description                                                  |
+| ------------------------- | -------- | ----------------- | ------------------------------------------------------------ |
+| `KINETIC_PROJECT`         | Yes      | —                 | Google Cloud project ID                                      |
+| `KINETIC_ZONE`            | No       | `us-central1-a`   | Default compute zone                                         |
+| `KINETIC_CLUSTER`         | No       | `kinetic-cluster` | GKE cluster name                                             |
+| `KINETIC_BASE_IMAGE_REPO` | No       | `kinetic`         | Docker repository for prebuilt base images                   |
+| `KINETIC_NAMESPACE`       | No       | `default`         | Kubernetes namespace                                         |
+| `KINETIC_LOG_LEVEL`       | No       | `INFO`            | Log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`) |
 
 Kinetic uses `absl-py` for logging. Set `KINETIC_LOG_LEVEL=DEBUG` for verbose output when debugging issues.
 
@@ -493,7 +540,8 @@ Kinetic uses `absl-py` for logging. Set `KINETIC_LOG_LEVEL=DEBUG` for verbose ou
 ```python
 @kinetic.run(
     accelerator="v5e-1",       # TPU/GPU type (default: "v5e-1")
-    container_image=None,      # Custom container URI
+    container_image=None,      # None/"bundled", "prebuilt", or a custom image URI
+    base_image_repo=None,      # Prebuilt image repo (default: KINETIC_BASE_IMAGE_REPO)
     zone=None,                 # Override default zone
     project=None,              # Override default project
     capture_env_vars=None,     # Env var names/patterns to forward (supports * wildcard)
@@ -639,6 +687,23 @@ kinetic jobs cleanup <job-id>
 kinetic jobs cleanup <job-id> --no-k8s   # only delete GCS artifacts
 kinetic jobs cleanup <job-id> --no-gcs   # only delete k8s resources
 ```
+
+#### `kinetic build-base`
+
+Build and push prebuilt base images to Docker Hub or Artifact Registry:
+
+```bash
+# Interactive mode
+kinetic build-base
+
+# Non-interactive
+kinetic build-base --repo us-docker.pkg.dev/my-project/kinetic-base --yes
+
+# Build specific categories only
+kinetic build-base --repo myuser/kinetic --category gpu --category tpu
+```
+
+After a successful build, set `KINETIC_BASE_IMAGE_REPO` to your repository so Kinetic uses your images. See the [container images documentation](docs/advanced/containers.md) for full details.
 
 #### `kinetic doctor`
 

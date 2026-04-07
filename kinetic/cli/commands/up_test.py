@@ -44,10 +44,6 @@ _BASE_PATCHES = {
   "configure_kubectl": mock.patch(
     "kinetic.cli.commands.up.configure_kubectl",
   ),
-  "install_lws": mock.patch("kinetic.cli.commands.up.install_lws"),
-  "install_gpu_drivers": mock.patch(
-    "kinetic.cli.commands.up.install_gpu_drivers",
-  ),
 }
 
 
@@ -74,11 +70,7 @@ class UpCommandResilienceTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("Setup Complete", result.output)
     self.assertNotIn("Warnings", result.output)
-    self.mocks["install_lws"].assert_called_once()
     self.mocks["configure_kubectl"].assert_called_once()
-    self.mocks[
-      "install_gpu_drivers"
-    ].assert_not_called()  # CPU accelerator, no GPU drivers.
 
   def test_pulumi_failure_still_runs_post_deploy(self):
     """apply_update returns False — post-deploy steps still execute."""
@@ -88,66 +80,33 @@ class UpCommandResilienceTest(absltest.TestCase):
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.mocks["configure_kubectl"].assert_called_once()
-    self.mocks["install_lws"].assert_called_once()
     self.assertIn("Setup Completed With Warnings", result.output)
     self.assertIn("Pulumi provisioning encountered errors", result.output)
 
-  def test_multiple_post_deploy_failures(self):
-    """Multiple post-deploy failures are all reported."""
+  def test_kubectl_config_failure_reported(self):
+    """kubectl configuration failure is caught and reported."""
     self.mocks["configure_kubectl"].side_effect = subprocess.CalledProcessError(
       1, "gcloud"
-    )
-    self.mocks["install_lws"].side_effect = subprocess.CalledProcessError(
-      1, "kubectl"
     )
 
     result = self.runner.invoke(up, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("kubectl configuration", result.output)
-    self.assertIn("LWS CRD installation", result.output)
 
   def test_pulumi_and_post_deploy_failures_combined(self):
     """Both Pulumi and post-deploy failures are reported together."""
     self.mocks["apply_update"].return_value = False
-    self.mocks["install_lws"].side_effect = subprocess.CalledProcessError(
-      1, "kubectl"
+    self.mocks["configure_kubectl"].side_effect = subprocess.CalledProcessError(
+      1, "gcloud"
     )
 
     result = self.runner.invoke(up, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("Pulumi provisioning encountered errors", result.output)
-    self.assertIn("LWS CRD installation", result.output)
+    self.assertIn("kubectl configuration", result.output)
     self.assertIn("re-run", result.output)
-
-
-class UpCommandGpuDriverTest(absltest.TestCase):
-  def setUp(self):
-    super().setUp()
-    self.runner = CliRunner()
-    self.mocks = _start_patches(self)
-
-  def test_gpu_driver_failure_reported(self):
-    """GPU driver installation failure is caught and reported."""
-    self.mocks[
-      "install_gpu_drivers"
-    ].side_effect = subprocess.CalledProcessError(1, "kubectl")
-    args = [
-      "--project",
-      "test-project",
-      "--zone",
-      "us-central1-a",
-      "--accelerator",
-      "t4",
-      "--yes",
-    ]
-
-    result = self.runner.invoke(up, args)
-
-    self.assertEqual(result.exit_code, 0, result.output)
-    self.mocks["install_gpu_drivers"].assert_called_once()
-    self.assertIn("GPU driver installation", result.output)
 
 
 class UpCommandPoolPreservationTest(absltest.TestCase):

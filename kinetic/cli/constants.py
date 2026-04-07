@@ -8,6 +8,9 @@ from kinetic.constants import (
 )
 
 RESOURCE_NAME_PREFIX = "kinetic"
+# Kubernetes service account used by kinetic workload pods.
+# Bound to the node GCP SA via Workload Identity Federation.
+KINETIC_KSA_NAME = "kinetic"
 STATE_DIR = os.environ.get(
   "KINETIC_STATE_DIR",
   os.path.expanduser("~/.kinetic/pulumi"),
@@ -19,6 +22,8 @@ REQUIRED_APIS = [
   "artifactregistry.googleapis.com",
   "storage.googleapis.com",
   "container.googleapis.com",
+  "secretmanager.googleapis.com",
+  "iam.googleapis.com",
 ]
 
 NVIDIA_DRIVER_DAEMONSET_URL = (

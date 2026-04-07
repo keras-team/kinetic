@@ -29,7 +29,7 @@ def jobs():
 
 @jobs.command("list")
 @jobs_options
-def list_command(project, zone, cluster_name, namespace):
+def list_command(project, zone, cluster_name, namespace, output_dir):
   """List live async jobs."""
   _ensure_project(project)
 

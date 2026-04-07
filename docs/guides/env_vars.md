@@ -34,3 +34,9 @@ Kinetic serializes the values of the requested environment variables and sends t
 ## Precedence
 
 Environment variables set via `capture_env_vars` will override any existing variables with the same name in the remote container's base environment.
+
+## Canonical Environment Variables
+
+Kinetic automatically sets some environment variables in the remote worker environment:
+
+- `KINETIC_OUTPUT_DIR`: The path to the directory where outputs should be saved. By default, this is a GCS path pointing to `gs://{bucket_name}/outputs/{job_id}`. This is useful for passing to checkpointing libraries like Orbax.

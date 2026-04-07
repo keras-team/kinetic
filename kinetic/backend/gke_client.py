@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 
 from kinetic.backend import k8s_utils
 from kinetic.backend.log_streaming import LogStreamer
+from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.credentials import invalidate_credential_cache
 from kinetic.job_status import JobStatus
 
@@ -23,6 +24,7 @@ def submit_k8s_job(
   bucket_name,
   namespace="default",
   spot=False,
+  requirements_uri=None,
 ):
   """Submit a Kubernetes Job to GKE cluster.
 
@@ -34,6 +36,8 @@ def submit_k8s_job(
       job_id: Unique job identifier
       bucket_name: GCS bucket name for artifacts
       namespace: Kubernetes namespace (default: "default")
+      requirements_uri: Optional GCS URI to requirements.txt for runtime
+          install (prebuilt image mode).
 
   Returns:
       kubernetes.client.V1Job object
@@ -50,6 +54,7 @@ def submit_k8s_job(
     job_id=job_id,
     bucket_name=bucket_name,
     namespace=namespace,
+    requirements_uri=requirements_uri,
   )
 
   # Submit job
@@ -291,7 +296,13 @@ def _batch_v1():
 
 
 def _create_job_spec(
-  job_name, container_uri, accel_config, job_id, bucket_name, namespace
+  job_name,
+  container_uri,
+  accel_config,
+  job_id,
+  bucket_name,
+  namespace,
+  requirements_uri=None,
 ):
   """Create Kubernetes Job specification.
 
@@ -302,6 +313,8 @@ def _create_job_spec(
       job_id: Unique job identifier
       bucket_name: GCS bucket for artifacts
       namespace: Kubernetes namespace
+      requirements_uri: Optional GCS URI to requirements.txt for runtime
+          install (prebuilt image mode).
 
   Returns:
       V1Job object ready for creation
@@ -316,16 +329,21 @@ def _create_job_spec(
     client.V1EnvVar(name="GCS_BUCKET", value=bucket_name),
   ]
 
+  # Container arguments: context, payload, result, [requirements]
+  container_args = [
+    f"gs://{bucket_name}/{job_id}/context.zip",
+    f"gs://{bucket_name}/{job_id}/payload.pkl",
+    f"gs://{bucket_name}/{job_id}/result.pkl",
+  ]
+  if requirements_uri:
+    container_args.append(requirements_uri)
+
   # Container specification
   container = client.V1Container(
     name="kinetic-worker",
     image=container_uri,
     command=["python3", "-u", "/app/remote_runner.py"],
-    args=[
-      f"gs://{bucket_name}/{job_id}/context.zip",
-      f"gs://{bucket_name}/{job_id}/payload.pkl",
-      f"gs://{bucket_name}/{job_id}/result.pkl",
-    ],
+    args=container_args,
     env=env_vars,
     resources=client.V1ResourceRequirements(
       limits={k: str(v) for k, v in accel_config["resource_limits"].items()},
@@ -350,6 +368,7 @@ def _create_job_spec(
     "containers": [container],
     "tolerations": tolerations if tolerations else None,
     "restart_policy": "Never",
+    "service_account_name": KINETIC_KSA_NAME,
   }
   # Only set node_selector if non-empty (for GPU nodes)
   if accel_config.get("node_selector"):

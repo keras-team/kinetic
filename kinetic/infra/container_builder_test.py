@@ -391,5 +391,86 @@ class TestGetOrBuildContainer(absltest.TestCase):
     self.assertRegex(tag, r"^gpu-[0-9a-f]{12}$")
 
 
+class TestGetPrebuiltImage(parameterized.TestCase):
+  @parameterized.named_parameters(
+    dict(testcase_name="gpu", accelerator="l4", expected_category="gpu"),
+    dict(testcase_name="tpu", accelerator="v3-4", expected_category="tpu"),
+    dict(testcase_name="cpu", accelerator="cpu", expected_category="cpu"),
+  )
+  def test_returns_correct_uri(self, accelerator, expected_category):
+    from kinetic.infra.container_builder import get_prebuilt_image
+    from kinetic.version import __version__
+
+    uri = get_prebuilt_image(accelerator)
+    self.assertEqual(uri, f"kinetic/base-{expected_category}:{__version__}")
+
+  def test_param_overrides_env_and_default(self):
+    from kinetic.infra.container_builder import get_prebuilt_image
+    from kinetic.version import __version__
+
+    with mock.patch.dict("os.environ", {"KINETIC_BASE_IMAGE_REPO": "env-repo"}):
+      uri = get_prebuilt_image("l4", base_image_repo="param-repo")
+    self.assertEqual(uri, f"param-repo/base-gpu:{__version__}")
+
+  def test_env_overrides_default(self):
+    from kinetic.infra.container_builder import get_prebuilt_image
+    from kinetic.version import __version__
+
+    with mock.patch.dict("os.environ", {"KINETIC_BASE_IMAGE_REPO": "env-repo"}):
+      uri = get_prebuilt_image("l4")
+    self.assertEqual(uri, f"env-repo/base-gpu:{__version__}")
+
+
+class TestPrepareRequirementsContent(absltest.TestCase):
+  def _write_file(self, name, content):
+    td = tempfile.TemporaryDirectory()
+    self.addCleanup(td.cleanup)
+    path = os.path.join(td.name, name)
+    with open(path, "w") as f:
+      f.write(content)
+    return path
+
+  def test_returns_none_for_missing_path(self):
+    from kinetic.infra.container_builder import prepare_requirements_content
+
+    self.assertIsNone(prepare_requirements_content(None))
+    self.assertIsNone(prepare_requirements_content("/nonexistent"))
+
+  def test_reads_requirements_txt(self):
+    from kinetic.infra.container_builder import prepare_requirements_content
+
+    path = self._write_file("requirements.txt", "numpy==1.26\nscipy\n")
+    result = prepare_requirements_content(path)
+    self.assertIn("numpy==1.26", result)
+    self.assertIn("scipy", result)
+
+  def test_reads_pyproject_toml(self):
+    from kinetic.infra.container_builder import prepare_requirements_content
+
+    path = self._write_file(
+      "pyproject.toml", '[project]\ndependencies = ["numpy", "pandas"]\n'
+    )
+    result = prepare_requirements_content(path)
+    self.assertIn("numpy", result)
+    self.assertIn("pandas", result)
+
+  def test_filters_jax_packages(self):
+    from kinetic.infra.container_builder import prepare_requirements_content
+
+    path = self._write_file(
+      "requirements.txt", "numpy\njax[tpu]>=0.4.6\nscipy\n"
+    )
+    result = prepare_requirements_content(path)
+    self.assertIn("numpy", result)
+    self.assertIn("scipy", result)
+    self.assertNotIn("jax", result)
+
+  def test_returns_none_for_empty_after_filter(self):
+    from kinetic.infra.container_builder import prepare_requirements_content
+
+    path = self._write_file("requirements.txt", "jax\njaxlib\n")
+    self.assertIsNone(prepare_requirements_content(path))
+
+
 if __name__ == "__main__":
   absltest.main()

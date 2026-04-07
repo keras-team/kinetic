@@ -8,6 +8,7 @@ from google.cloud import container_v1
 from kubernetes.config import ConfigException
 
 from kinetic.backend.k8s_utils import (
+  _check_image_pull_errors,
   _check_node_pool_exists_cached,
   check_pod_scheduling,
   load_kube_config,
@@ -280,6 +281,7 @@ class TestCheckPodScheduling(parameterized.TestCase):
   def _make_pending_pod(self, message, node_selector=None):
     pod = MagicMock()
     pod.status.phase = "Pending"
+    pod.status.container_statuses = None
     pod.spec.node_selector = node_selector
     condition = MagicMock()
     condition.type = "PodScheduled"
@@ -356,11 +358,45 @@ class TestCheckPodScheduling(parameterized.TestCase):
     pod = MagicMock()
     pod.status.phase = "Pending"
     pod.status.conditions = None
+    pod.status.container_statuses = None
     mock_core.list_namespaced_pod.return_value.items = [pod]
 
     check_pod_scheduling(
       mock_core, "job-1", "default", set()
     )  # should not raise
+
+
+class TestCheckImagePullErrors(absltest.TestCase):
+  def test_no_crash_when_container_statuses_is_none(self):
+    pod = MagicMock()
+    pod.status.container_statuses = None
+    _check_image_pull_errors(pod)  # should not raise
+
+  def test_no_crash_when_waiting_is_none(self):
+    pod = MagicMock()
+    cs = MagicMock()
+    cs.state.waiting = None
+    pod.status.container_statuses = [cs]
+    _check_image_pull_errors(pod)  # should not raise
+
+  def test_image_pull_backoff_detected_in_scheduling_check(self):
+    """ImagePullBackOff on a Pending pod propagates through check_pod_scheduling."""
+    mock_core = MagicMock()
+    pod = MagicMock()
+    pod.metadata.name = "pod-1"
+    pod.status.phase = "Pending"
+    pod.status.conditions = None
+
+    cs = MagicMock()
+    cs.image = "kinetic/base-gpu:0.0.1"
+    cs.state.waiting.reason = "ImagePullBackOff"
+    cs.state.waiting.message = "back-off pulling image"
+    pod.status.container_statuses = [cs]
+
+    mock_core.list_namespaced_pod.return_value.items = [pod]
+
+    with self.assertRaisesRegex(RuntimeError, "Container image pull failed"):
+      check_pod_scheduling(mock_core, "job-1", "default", set())
 
 
 if __name__ == "__main__":
