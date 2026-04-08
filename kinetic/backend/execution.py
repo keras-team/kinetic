@@ -318,7 +318,7 @@ def _resolve_working_dir(func: Callable) -> str:
   return os.getcwd()
 
 
-_FUSE_DATA_MOUNT_PREFIX = "/tmp/fuse-data"
+_FUSE_DATA_MOUNT_PREFIX = "/_kinetic/fuse-data"
 
 
 def _fuse_gcs_uri(gcs_uri: str, data_obj) -> str:
@@ -339,15 +339,30 @@ def _process_volumes(
 ) -> tuple[list[dict], list[dict]]:
   """Upload volume Data objects and build refs + FUSE specs.
 
+  Args:
+      ctx: Job context containing volume definitions, bucket name, and project.
+      caller_path: Absolute path of the caller's working directory, used to
+          resolve relative Data object paths for exclusion.
+      exclude_paths: Mutable set of local paths to exclude from the working
+          directory archive. Paths of non-GCS Data objects are added here so
+          they are not redundantly packaged.
+
   Returns:
-      Tuple of (volume_refs, fuse_specs).
+      Tuple of (volume_refs, fuse_specs) where *volume_refs* are serializable
+      data-ref dicts to embed in the payload, and *fuse_specs* are GCS FUSE
+      mount descriptors for volumes that requested lazy loading.
   """
-  volume_refs = []
-  fuse_specs = []
+  volume_refs: list[dict] = []
+  fuse_specs: list[dict] = []
   if not ctx.volumes:
     return volume_refs, fuse_specs
 
   for mount_path, data_obj in ctx.volumes.items():
+    if mount_path.startswith(_FUSE_DATA_MOUNT_PREFIX + "/"):
+      raise ValueError(
+        f"Volume mount path {mount_path!r} is reserved for "
+        f"auto-generated FUSE mounts. Use a different path."
+      )
     gcs_uri = storage.upload_data(ctx.bucket_name, data_obj, ctx.project)
     volume_refs.append(
       make_data_ref(
@@ -374,8 +389,20 @@ def _process_data_args(
 ) -> tuple[dict[int, dict], list[dict]]:
   """Upload Data objects found in function args and build ref map + FUSE specs.
 
+  Args:
+      ctx: Job context containing the function args/kwargs, bucket name, and
+          project.
+      caller_path: Absolute path of the caller's working directory, used to
+          resolve relative Data object paths for exclusion.
+      exclude_paths: Mutable set of local paths to exclude from the working
+          directory archive. Paths of non-GCS Data objects are added here so
+          they are not redundantly packaged.
+
   Returns:
-      Tuple of (ref_map, fuse_specs).  ref_map is keyed by `id(data_obj)`.
+      Tuple of (ref_map, fuse_specs) where *ref_map* is a dict keyed by
+      ``id(data_obj)`` mapping to serializable data-ref dicts, and
+      *fuse_specs* are GCS FUSE mount descriptors for args that requested
+      lazy loading.
   """
   ref_map = {}
   fuse_specs = []

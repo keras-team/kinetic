@@ -12,9 +12,11 @@ import cloudpickle
 from absl.testing import absltest
 
 from kinetic.backend.execution import (
+  _FUSE_DATA_MOUNT_PREFIX,
   JobContext,
   _find_requirements,
   _prepare_artifacts,
+  _process_volumes,
   _requirements_uri,
   _upload_artifacts,
   submit_remote,
@@ -303,7 +305,7 @@ class TestPrepareArtifactsFuse(absltest.TestCase):
     self.assertIsNotNone(ctx.fuse_volume_specs)
     self.assertLen(ctx.fuse_volume_specs, 1)
     spec = ctx.fuse_volume_specs[0]
-    self.assertEqual(spec["mount_path"], "/tmp/fuse-data/0")
+    self.assertEqual(spec["mount_path"], "/_kinetic/fuse-data/0")
     self.assertTrue(spec["is_dir"])
     self.assertTrue(spec["read_only"])
 
@@ -691,6 +693,59 @@ class TestSubmitRemote(absltest.TestCase):
     mock_cleanup.assert_called_once_with(
       ctx.bucket_name, ctx.job_id, project=ctx.project
     )
+
+
+class TestProcessVolumesReservedPath(absltest.TestCase):
+  """Tests that _process_volumes rejects mount paths under the reserved prefix."""
+
+  def _make_ctx(self, volumes):
+    ctx = MagicMock()
+    ctx.volumes = volumes
+    ctx.bucket_name = "test-bucket"
+    ctx.project = "test-project"
+    return ctx
+
+  def _make_data_stub(self, *, is_gcs=True, is_dir=False, fuse=False):
+    obj = MagicMock()
+    obj.is_gcs = is_gcs
+    obj.is_dir = is_dir
+    obj.fuse = fuse
+    obj.path = "gs://b/p"
+    return obj
+
+  def test_rejects_direct_child_of_reserved_prefix(self):
+    mount_path = f"{_FUSE_DATA_MOUNT_PREFIX}/0"
+    ctx = self._make_ctx({mount_path: self._make_data_stub()})
+
+    with self.assertRaises(ValueError) as cm:
+      _process_volumes(ctx, "/tmp/caller", set())
+    self.assertIn(mount_path, str(cm.exception))
+
+  def test_rejects_nested_path_under_reserved_prefix(self):
+    mount_path = f"{_FUSE_DATA_MOUNT_PREFIX}/42/sub"
+    ctx = self._make_ctx({mount_path: self._make_data_stub()})
+
+    with self.assertRaises(ValueError) as cm:
+      _process_volumes(ctx, "/tmp/caller", set())
+    self.assertIn(mount_path, str(cm.exception))
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  def test_allows_non_reserved_path(self, mock_upload):
+    mock_upload.return_value = "gs://test-bucket/data/hash"
+    ctx = self._make_ctx({"/mnt/my-data": self._make_data_stub()})
+
+    volume_refs, _ = _process_volumes(ctx, "/tmp/caller", set())
+    self.assertLen(volume_refs, 1)
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  def test_allows_similar_but_distinct_prefix(self, mock_upload):
+    mock_upload.return_value = "gs://test-bucket/data/hash"
+    ctx = self._make_ctx(
+      {f"{_FUSE_DATA_MOUNT_PREFIX}-extra": self._make_data_stub()}
+    )
+
+    volume_refs, _ = _process_volumes(ctx, "/tmp/caller", set())
+    self.assertLen(volume_refs, 1)
 
 
 if __name__ == "__main__":

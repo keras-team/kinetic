@@ -226,7 +226,7 @@ def resolve_data_refs(
 ) -> tuple[tuple, dict]:
   """Recursively resolve data ref dicts in args/kwargs to local paths."""
   counter = 0
-  resolved_uris = {}
+  resolved_uris: dict[str, str] = {}
 
   def _resolve(obj):
     nonlocal counter
