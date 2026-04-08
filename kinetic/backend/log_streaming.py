@@ -52,10 +52,15 @@ def _stream_pod_logs(core_v1, pod_name, namespace):
         buffer += chunk.decode("utf-8", errors="replace")
         while "\n" in buffer:
           line, buffer = buffer.split("\n", 1)
+          if "\r" in line:
+            line = line.rsplit("\r", 1)[-1]
           panel.on_output(line)
       # Flush remaining partial line
       if buffer.strip():
-        panel.on_output(buffer)
+        line = buffer
+        if "\r" in line:
+          line = line.rsplit("\r", 1)[-1]
+        panel.on_output(line)
   except ApiException:
     pass  # Pod deleted or not found
   except urllib3.exceptions.ProtocolError:

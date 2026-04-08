@@ -44,14 +44,14 @@ def train_keras_jax_model():
   print("Model compiled.")
 
   # Dummy data
-  num_samples = 128
+  num_samples = 1024
   x_train = np.random.rand(num_samples, *input_shape).astype(np.float32)
   y_train = np.random.randint(0, num_classes, size=(num_samples,)).astype(
     np.int32
   )
 
   print("Starting model.fit...")
-  history = model.fit(x_train, y_train, epochs=1, batch_size=32, verbose=2)
+  history = model.fit(x_train, y_train, epochs=5, batch_size=32)
   print("Model.fit finished.")
 
   return history.history["loss"][-1]

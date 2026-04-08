@@ -55,6 +55,24 @@ class TestStreamPodLogs(absltest.TestCase):
     lines = [call[0][0] for call in mock_panel.on_output.call_args_list]
     self.assertEqual(lines, ["hello", "world"])
 
+  def test_handles_carriage_returns(self):
+    mock_core = MagicMock()
+    # "1/10\r2/10\r3/10\n"
+    mock_core.read_namespaced_pod_log.return_value = self._make_mock_resp(
+      [b"1/10\r2/10\r", b"3/10\n"]
+    )
+
+    with mock.patch(
+      "kinetic.backend.log_streaming.LiveOutputPanel"
+    ) as mock_panel_cls:
+      mock_panel = MagicMock()
+      mock_panel_cls.return_value.__enter__ = MagicMock(return_value=mock_panel)
+      mock_panel_cls.return_value.__exit__ = MagicMock(return_value=False)
+      _stream_pod_logs(mock_core, "pod-1", "default")
+
+    lines = [call[0][0] for call in mock_panel.on_output.call_args_list]
+    self.assertEqual(lines, ["3/10"])
+
   def test_releases_conn_on_api_exception(self):
     mock_core = MagicMock()
     mock_resp = MagicMock()
