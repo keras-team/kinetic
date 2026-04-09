@@ -7,7 +7,7 @@ for cross-session reattachment and `list_jobs()` for discovery.
 
 import contextlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,23 +36,6 @@ _BACKEND_CLIENTS = {
 
 _RESULT_POLL_INTERVAL_SECONDS = 5
 _RESULT_DOWNLOAD_BACKOFF_SECONDS = (0, 1, 2, 4, 8, 16)
-_HANDLE_FIELDS = (
-  "job_id",
-  "backend",
-  "project",
-  "cluster_name",
-  "zone",
-  "namespace",
-  "bucket_name",
-  "k8s_name",
-  "image_uri",
-  "accelerator",
-  "func_name",
-  "display_name",
-  "created_at",
-)
-
-
 _TERMINAL_STATUSES = frozenset(
   {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.NOT_FOUND}
 )
@@ -101,6 +84,11 @@ class JobHandle:
   display_name: str
   created_at: str
 
+  # Optional group membership (set for collection children, None otherwise).
+  group_id: str | None = None
+  group_kind: str | None = None
+  group_index: int | None = None
+
   # ------------------------------------------------------------------
   # Serialisation helpers
   # ------------------------------------------------------------------
@@ -131,7 +119,7 @@ class JobHandle:
     )
 
   @classmethod
-  def from_dict(cls, d: dict[str, str]) -> "JobHandle":
+  def from_dict(cls, d: dict[str, Any]) -> "JobHandle":
     """Reconstruct a `JobHandle` from a plain dict.
 
     Unknown keys are silently ignored so that handles persisted by a
@@ -142,7 +130,9 @@ class JobHandle:
   def to_dict(self) -> dict[str, str]:
     """Serialize the handle to a JSON-safe payload."""
     return {
-      field_name: getattr(self, field_name) for field_name in _HANDLE_FIELDS
+      f.name: getattr(self, f.name)
+      for f in fields(self)
+      if getattr(self, f.name) is not None
     }
 
   # ------------------------------------------------------------------
