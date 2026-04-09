@@ -28,6 +28,67 @@ def _get_client(project: str | None) -> storage.Client:
     return _cached_clients[project]
 
 
+def _get_bucket(
+  bucket_name: str, project: str | None = None
+) -> tuple[storage.Client, storage.Bucket]:
+  """Return a (client, bucket) pair, resolving the project default."""
+  project = project or get_default_project()
+  client = _get_client(project)
+  return client, client.bucket(bucket_name)
+
+
+def _upload_json(
+  bucket_name: str,
+  blob_path: str,
+  payload: dict,
+  project: str | None = None,
+) -> None:
+  """Upload a dict as JSON to *blob_path* inside *bucket_name*."""
+  _, bucket = _get_bucket(bucket_name, project)
+  blob = bucket.blob(blob_path)
+  blob.upload_from_string(
+    json.dumps(payload, sort_keys=True),
+    content_type="application/json",
+    retry=DEFAULT_RETRY,
+  )
+  logging.info("Uploaded JSON to gs://%s/%s", bucket_name, blob_path)
+
+
+def _download_json(
+  bucket_name: str,
+  blob_path: str,
+  project: str | None = None,
+) -> dict:
+  """Download and deserialize JSON from *blob_path*."""
+  _, bucket = _get_bucket(bucket_name, project)
+  blob = bucket.blob(blob_path)
+  text = blob.download_as_text()
+  logging.info("Downloaded JSON from gs://%s/%s", bucket_name, blob_path)
+  return json.loads(text)
+
+
+def _delete_prefix(
+  bucket_name: str,
+  prefix: str,
+  project: str | None = None,
+) -> int:
+  """Delete all blobs under *prefix*. Returns the count deleted."""
+  _, bucket = _get_bucket(bucket_name, project)
+  blobs = list(bucket.list_blobs(prefix=prefix))
+  if not blobs:
+    return 0
+  try:
+    bucket.delete_blobs(blobs, retry=DEFAULT_RETRY)
+  except cloud_exceptions.NotFound:
+    logging.warning(
+      "Some blobs missing during cleanup of gs://%s/%s",
+      bucket_name,
+      prefix,
+      exc_info=True,
+    )
+  return len(blobs)
+
+
 def upload_artifacts(
   bucket_name: str,
   job_id: str,
@@ -47,10 +108,7 @@ def upload_artifacts(
       requirements_content: Filtered requirements text for runtime install
           (prebuilt image mode only). Uploaded as `requirements.txt`.
   """
-  project = project or get_default_project()
-
-  client = _get_client(project)
-  bucket = client.bucket(bucket_name)
+  client, bucket = _get_bucket(bucket_name, project)
 
   # Upload payload
   blob = bucket.blob(f"{job_id}/payload.pkl")
@@ -77,12 +135,11 @@ def upload_artifacts(
     )
 
   # Get project ID for console link
-  project = client.project
   logging.info(
     "View artifacts: https://console.cloud.google.com/storage/browser/%s/%s?project=%s",
     bucket_name,
     job_id,
-    project,
+    client.project,
   )
 
 
@@ -99,9 +156,7 @@ def download_result(
   Returns:
       Local path to downloaded result file
   """
-  project = project or get_default_project()
-  client = _get_client(project)
-  bucket = client.bucket(bucket_name)
+  _, bucket = _get_bucket(bucket_name, project)
 
   blob = bucket.blob(f"{job_id}/result.pkl")
   local_path = os.path.join(tempfile.gettempdir(), f"result-{job_id}.pkl")
@@ -120,33 +175,14 @@ def upload_handle(
   project: str | None = None,
 ) -> None:
   """Upload a job handle to Cloud Storage as JSON."""
-  project = project or get_default_project()
-  client = _get_client(project)
-  bucket = client.bucket(bucket_name)
-
-  blob = bucket.blob(f"{job_id}/handle.json")
-  blob.upload_from_string(
-    json.dumps(handle_payload, sort_keys=True),
-    content_type="application/json",
-    retry=DEFAULT_RETRY,
-  )
-  logging.info("Uploaded handle to gs://%s/%s/handle.json", bucket_name, job_id)
+  _upload_json(bucket_name, f"{job_id}/handle.json", handle_payload, project)
 
 
 def download_handle(
   bucket_name: str, job_id: str, project: str | None = None
 ) -> dict[str, str]:
   """Download and deserialize a job handle from Cloud Storage."""
-  project = project or get_default_project()
-  client = _get_client(project)
-  bucket = client.bucket(bucket_name)
-
-  blob = bucket.blob(f"{job_id}/handle.json")
-  handle_text = blob.download_as_text()
-  logging.info(
-    "Downloaded handle from gs://%s/%s/handle.json", bucket_name, job_id
-  )
-  return json.loads(handle_text)
+  return _download_json(bucket_name, f"{job_id}/handle.json", project)
 
 
 def cleanup_artifacts(
@@ -159,31 +195,62 @@ def cleanup_artifacts(
       job_id: Unique job identifier
       project: GCP project ID (optional, uses env vars if not provided)
   """
-  project = project or get_default_project()
-  client = _get_client(project)
-  bucket = client.bucket(bucket_name)
-
-  # Delete all blobs with job_id prefix
-  blobs = list(bucket.list_blobs(prefix=f"{job_id}/"))
-
-  if not blobs:
-    return
-
-  try:
-    bucket.delete_blobs(blobs, retry=DEFAULT_RETRY)
-  except cloud_exceptions.NotFound:
-    logging.warning(
-      "Some artifacts could not be deleted from gs://%s/%s/, continuing anyway",
-      bucket_name,
-      job_id,
-      exc_info=True,
+  count = _delete_prefix(bucket_name, f"{job_id}/", project)
+  if count:
+    logging.info(
+      "Cleaned up %d artifacts from gs://%s/%s/", count, bucket_name, job_id
     )
-  logging.info(
-    "Cleaned up %d artifacts from gs://%s/%s/",
-    len(blobs),
+
+
+def _manifest_prefix(group_id: str) -> str:
+  return f"_groups/{group_id}"
+
+
+def upload_manifest(
+  bucket_name: str,
+  group_id: str,
+  manifest: dict,
+  project: str | None = None,
+) -> None:
+  """Upload a group manifest to Cloud Storage."""
+  _upload_json(
     bucket_name,
-    job_id,
+    f"{_manifest_prefix(group_id)}/manifest.json",
+    manifest,
+    project,
   )
+
+
+def download_manifest(
+  bucket_name: str,
+  group_id: str,
+  project: str | None = None,
+) -> dict:
+  """Download and deserialize a group manifest from Cloud Storage."""
+  blob_path = f"{_manifest_prefix(group_id)}/manifest.json"
+  try:
+    return _download_json(bucket_name, blob_path, project)
+  except cloud_exceptions.NotFound as e:
+    raise FileNotFoundError(
+      f"Manifest not found for group '{group_id}' at "
+      f"gs://{bucket_name}/{blob_path}"
+    ) from e
+
+
+def cleanup_manifest(
+  bucket_name: str,
+  group_id: str,
+  project: str | None = None,
+) -> None:
+  """Delete a group manifest and its GCS prefix."""
+  count = _delete_prefix(bucket_name, f"{_manifest_prefix(group_id)}/", project)
+  if count:
+    logging.info(
+      "Cleaned up manifest for group %s from gs://%s/_groups/%s/",
+      group_id,
+      bucket_name,
+      group_id,
+    )
 
 
 def upload_data(
@@ -214,9 +281,7 @@ def upload_data(
   namespace_prefix = namespace_prefix.strip("/")
   cache_prefix = f"{namespace_prefix}/data-cache/{content_hash}"
 
-  project = project or get_default_project()
-  client = _get_client(project)
-  bucket = client.bucket(bucket_name)
+  _, bucket = _get_bucket(bucket_name, project)
 
   # O(1) cache hit check via sentinel blob.  Markers live under a separate
   # top-level prefix ("data-markers/") so they never appear inside
