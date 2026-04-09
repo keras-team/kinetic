@@ -30,6 +30,7 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    guides/cost_optimization
    advanced/clusters
    guides/distributed_training
+   advanced/collections
    guides/llm_finetuning
    guides/gemma4_finetuning
    guides/pytorch_training
