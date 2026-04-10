@@ -14,6 +14,7 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    :hidden:
 
    guides/keras_training
+   guides/jax_training
    guides/data
    guides/dependencies
    guides/env_vars
