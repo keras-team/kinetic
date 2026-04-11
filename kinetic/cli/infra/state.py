@@ -131,6 +131,52 @@ def apply_update(config):
   return False
 
 
+def _format_changes(changes):
+  """Format a Pulumi change summary dict into a readable string."""
+  parts = []
+  for action in ("create", "update", "delete", "replace"):
+    count = changes.get(action, 0)
+    if count:
+      parts.append(f"{count} to {action}")
+  same = changes.get("same", 0)
+  if same:
+    parts.append(f"{same} unchanged")
+  return ", ".join(parts) if parts else "no changes"
+
+
+def apply_preview(config):
+  """Run a Pulumi preview with the given complete config.
+
+  Args:
+      config: A fully populated InfraConfig.
+
+  Returns:
+      True if the preview succeeded, False otherwise.
+  """
+  program = create_program(config)
+  stack = get_stack(program, config)
+
+  ok = True
+  with LiveOutputPanel("Previewing infrastructure changes") as panel:
+    try:
+      result = stack.preview(on_output=panel.on_output)
+    except auto.errors.CommandError as e:
+      panel.mark_error()
+      ok = False
+      preview_error = e
+
+  console.print()
+  if ok:
+    summary = _format_changes(result.change_summary)
+    success(f"Preview complete: {summary}.")
+    console.print(
+      "\nNo changes were applied. Run without [bold]--preview[/bold] to apply."
+    )
+    return True
+  warning(f"Preview failed: {preview_error}")
+  return False
+
+
 def apply_destroy(config):
   """Destroy all Pulumi-managed resources for the given config.
 
