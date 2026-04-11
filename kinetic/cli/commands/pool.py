@@ -3,7 +3,7 @@
 import click
 
 from kinetic.cli.config import InfraConfig, NodePoolConfig
-from kinetic.cli.infra.state import apply_update, load_state
+from kinetic.cli.infra.state import apply_preview, apply_update, load_state
 from kinetic.cli.options import common_options
 from kinetic.cli.output import (
   banner,
@@ -36,7 +36,14 @@ def pool():
 )
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--spot", is_flag=True, help="Use Spot VMs for node pool")
-def pool_add(project, zone, cluster_name, accelerator, min_nodes, yes, spot):
+@click.option(
+  "--preview",
+  is_flag=True,
+  help="Preview infrastructure changes without applying them",
+)
+def pool_add(
+  project, zone, cluster_name, accelerator, min_nodes, yes, spot, preview
+):
   """Add an accelerator node pool to the cluster."""
   banner("kinetic Pool Add")
 
@@ -70,6 +77,11 @@ def pool_add(project, zone, cluster_name, accelerator, min_nodes, yes, spot):
     cluster_name=state.cluster_name,
     node_pools=all_pools,
   )
+
+  if preview:
+    apply_preview(config)
+    return
+
   update_succeeded = apply_update(config)
 
   console.print()
@@ -89,7 +101,12 @@ def pool_add(project, zone, cluster_name, accelerator, min_nodes, yes, spot):
 @common_options
 @click.argument("pool_name")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def pool_remove(project, zone, cluster_name, pool_name, yes):
+@click.option(
+  "--preview",
+  is_flag=True,
+  help="Preview infrastructure changes without applying them",
+)
+def pool_remove(project, zone, cluster_name, pool_name, yes, preview):
   """Remove an accelerator node pool from the cluster."""
   banner("kinetic Pool Remove")
 
@@ -115,6 +132,11 @@ def pool_remove(project, zone, cluster_name, pool_name, yes):
     cluster_name=state.cluster_name,
     node_pools=remaining,
   )
+
+  if preview:
+    apply_preview(config)
+    return
+
   update_succeeded = apply_update(config)
 
   console.print()

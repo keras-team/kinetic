@@ -7,7 +7,7 @@ import click
 from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from kinetic.cli.infra.post_deploy import configure_kubectl
-from kinetic.cli.infra.state import apply_update, load_state
+from kinetic.cli.infra.state import apply_preview, apply_update, load_state
 from kinetic.cli.options import common_options
 from kinetic.cli.output import (
   banner,
@@ -36,7 +36,12 @@ from kinetic.core.accelerators import generate_pool_name
   help="Minimum node count for accelerator node pools (default: 0, scale-to-zero)",
 )
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def up(project, zone, accelerator, cluster_name, min_nodes, yes):
+@click.option(
+  "--preview",
+  is_flag=True,
+  help="Preview infrastructure changes without applying them",
+)
+def up(project, zone, accelerator, cluster_name, min_nodes, yes, preview):
   """Provision GCP infrastructure for kinetic."""
   banner("kinetic Setup")
 
@@ -96,10 +101,14 @@ def up(project, zone, accelerator, cluster_name, min_nodes, yes):
 
   console.print()
 
+  if preview:
+    apply_preview(config)
+    return
+
   pulumi_ok = apply_update(config)
 
   # Configure local kubectl context so the user can interact with the
-  # cluster immediately.  Non-fatal — the user can always run
+  # cluster immediately.  Non-fatal -- the user can always run
   # `gcloud container clusters get-credentials` manually.
   try:
     configure_kubectl(cluster_name, zone, project)

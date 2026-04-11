@@ -95,6 +95,24 @@ class LoadStateTest(absltest.TestCase):
     mock_check.assert_not_called()
 
 
+class FormatChangesTest(absltest.TestCase):
+  def test_mixed_changes(self):
+    result = state._format_changes({"create": 3, "update": 1, "same": 5})
+    self.assertEqual(result, "3 to create, 1 to update, 5 unchanged")
+
+  def test_no_changes(self):
+    result = state._format_changes({"same": 4})
+    self.assertEqual(result, "4 unchanged")
+
+  def test_empty(self):
+    result = state._format_changes({})
+    self.assertEqual(result, "no changes")
+
+  def test_deletes(self):
+    result = state._format_changes({"delete": 2, "same": 1})
+    self.assertEqual(result, "2 to delete, 1 unchanged")
+
+
 class ApplyUpdateTest(absltest.TestCase):
   def setUp(self):
     super().setUp()
@@ -127,6 +145,43 @@ class ApplyUpdateTest(absltest.TestCase):
     config = mock.MagicMock()
 
     state.apply_update(config)
+
+    self.mock_create.assert_called_once_with(config)
+
+
+class ApplyPreviewTest(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    self.mock_create = self.enterContext(
+      mock.patch.object(state, "create_program")
+    )
+    self.mock_get_stack = self.enterContext(
+      mock.patch.object(state, "get_stack")
+    )
+    self.mock_stack = mock.MagicMock()
+    self.mock_stack.preview.return_value.change_summary = {"create": 1}
+    self.mock_get_stack.return_value = self.mock_stack
+
+  def test_success_returns_true(self):
+    config = mock.MagicMock()
+
+    result = state.apply_preview(config)
+
+    self.assertTrue(result)
+    self.mock_stack.preview.assert_called_once()
+
+  def test_failure_returns_false(self):
+    self.mock_stack.preview.side_effect = pulumi_errors.CommandError("failed")
+    config = mock.MagicMock()
+
+    result = state.apply_preview(config)
+
+    self.assertFalse(result)
+
+  def test_passes_config_to_create_program(self):
+    config = mock.MagicMock()
+
+    state.apply_preview(config)
 
     self.mock_create.assert_called_once_with(config)
 
