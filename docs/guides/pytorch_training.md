@@ -94,15 +94,7 @@ def train_multi_gpu():
 
 ## GPU Selection
 
-Pick the GPU that fits your workload:
-
-| Accelerator    | VRAM  | Good for                          |
-| -------------- | ----- | --------------------------------- |
-| `gpu-t4`       | 16 GB | Inference, small models           |
-| `gpu-l4`       | 24 GB | Medium training, fine-tuning      |
-| `gpu-a100`     | 40 GB | Large model training              |
-| `gpu-a100-80gb`| 80 GB | Very large models, big batches    |
-| `gpu-h100`     | 80 GB | Fastest training, large models    |
+See [Accelerator Support](accelerators.md) for the full list of GPUs, multi-GPU counts, and TPU configurations.
 
 Use `spot=True` to reduce costs for fault-tolerant workloads:
 

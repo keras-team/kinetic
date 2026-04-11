@@ -14,13 +14,14 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    :hidden:
 
    guides/keras_training
+   guides/jax_training
    guides/pytorch_training
    guides/data
    guides/dependencies
    guides/env_vars
    guides/llm_finetuning
    guides/distributed_training
-   guides/configuration
+   guides/checkpointing
 
 .. toctree::
    :caption: Reference
@@ -29,6 +30,7 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    api
    cli
    accelerators
+   configuration
 
 .. toctree::
    :caption: Advanced Topics
