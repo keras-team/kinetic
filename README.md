@@ -47,6 +47,7 @@ You need a GKE cluster with accelerator node pools to run jobs. The `kinetic` CL
 
 - **Simple decorator API** — Add `@kinetic.run()` to any function to execute it remotely
 - **Detached execution** — Use `@kinetic.submit()` to launch work, reattach later, and collect results when convenient
+- **Batch fan-out** — Use `kinetic.map()` to sweep over inputs with concurrency control, retries, and result collection
 - **Automatic infrastructure** — No manual VM provisioning or teardown required
 - **Result serialization** — Functions return actual values, not just logs
 - **Fast iteration** — Container images are cached by dependency hash; unchanged dependencies skip the build entirely (subsequent runs start in less than a minute)
@@ -276,6 +277,46 @@ job.cleanup(k8s=True, gcs=True)
 #### CLI
 
 Async jobs can also be managed from the terminal — see [`kinetic jobs`](#kinetic-jobs) in the CLI reference below.
+
+### Async Collections
+
+When you need to run the same function over many inputs — hyperparameter sweeps, dataset shards, evaluation runs — `kinetic.map()` fans out across accelerators and gives you a single handle to collect all results.
+
+```python
+@kinetic.submit(accelerator="v5e-1")
+def train(lr, batch_size):
+    # ... training code ...
+    return final_loss
+
+configs = [
+    {"lr": 0.001, "batch_size": 32},
+    {"lr": 0.01,  "batch_size": 64},
+    {"lr": 0.1,   "batch_size": 128},
+]
+
+batch = kinetic.map(train, configs, max_concurrent=8)
+losses = batch.results()  # [loss_0, loss_1, loss_2] in input order
+```
+
+Key features:
+
+- **Concurrency control** — `max_concurrent` (default 64) limits how many jobs run at once
+- **Automatic retries** — `retries=2` gives each job up to 3 attempts on failure
+- **Fail-fast** — `fail_fast=True` stops the batch on first failure; add `cancel_running_on_fail=True` to also cancel siblings
+- **Streaming results** — `as_completed()` yields jobs as they finish, even while others are still submitting
+- **Cross-session reattachment** — Save `batch.group_id`, then `kinetic.attach_batch(group_id)` from any machine
+
+```python
+# Process results as they complete
+for job in batch.as_completed():
+    print(f"{job.job_id}: {job.result()}")
+
+# Reattach from another session
+batch = kinetic.attach_batch("grp-a1b2c3d4")
+results = batch.results()
+```
+
+For the full API — input modes, error handling, cleanup strategies, and more — see the [Async Collections guide](docs/advanced/collections.md).
 
 ### Working with Data
 

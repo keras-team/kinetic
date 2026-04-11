@@ -36,6 +36,7 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    :hidden:
 
    advanced/async_jobs
+   advanced/collections
    advanced/clusters
    advanced/containers
 
