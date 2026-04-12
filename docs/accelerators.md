@@ -30,3 +30,13 @@ For multi-GPU configurations on GKE, append the count: `a100x4`, `l4x2`, etc.
 ## CPU
 
 Use `accelerator="cpu"` to run on a CPU-only node (no accelerator attached).
+
+## Capacity Reservations
+
+Newer accelerators (TPU v6e, H100) can have limited on-demand availability. If `kinetic pool add` fails to provision nodes, use a GCP capacity reservation to guarantee hardware:
+
+```bash
+kinetic pool add --accelerator tpu-v6e-8 --reservation my-v6e-reservation --project your-project-id
+```
+
+See the [Capacity Reservations](advanced/reservations.md) guide for details.

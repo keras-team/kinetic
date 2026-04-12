@@ -14,6 +14,7 @@ class NodePoolConfig:
   name: str  # GKE node pool name, e.g. "gpu-l4-a3f2"
   accelerator: Union[GpuConfig, TpuConfig]
   min_nodes: int = 0
+  reservation: str | None = None
 
 
 @dataclass

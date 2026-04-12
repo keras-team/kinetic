@@ -36,7 +36,15 @@ def pool():
 )
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--spot", is_flag=True, help="Use Spot VMs for node pool")
-def pool_add(project, zone, cluster_name, accelerator, min_nodes, yes, spot):
+@click.option(
+  "--reservation",
+  default=None,
+  envvar="KINETIC_RESERVATION",
+  help="GCP capacity reservation name to consume when provisioning nodes [env: KINETIC_RESERVATION]",
+)
+def pool_add(
+  project, zone, cluster_name, accelerator, min_nodes, yes, spot, reservation
+):
   """Add an accelerator node pool to the cluster."""
   banner("kinetic Pool Add")
 
@@ -52,8 +60,16 @@ def pool_add(project, zone, cluster_name, accelerator, min_nodes, yes, spot):
       param_hint="--accelerator",
     )
 
+  if reservation and spot:
+    raise click.BadParameter(
+      "Reservations cannot be used with Spot VMs.",
+      param_hint="--reservation",
+    )
+
   new_pool_name = generate_pool_name(accel_config)
-  new_pool = NodePoolConfig(new_pool_name, accel_config, min_nodes=min_nodes)
+  new_pool = NodePoolConfig(
+    new_pool_name, accel_config, min_nodes=min_nodes, reservation=reservation
+  )
 
   state = load_state(project, zone, cluster_name)
   all_pools = state.node_pools + [new_pool]

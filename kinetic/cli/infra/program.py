@@ -457,6 +457,7 @@ def _create_accelerator_pools(
         np.name,
         service_account,
         min_nodes=np.min_nodes,
+        reservation=np.reservation,
       )
     elif isinstance(accel, TpuConfig):
       pool = _create_tpu_node_pool(
@@ -467,6 +468,7 @@ def _create_accelerator_pools(
         np.name,
         service_account,
         min_nodes=np.min_nodes,
+        reservation=np.reservation,
       )
     else:
       continue
@@ -624,8 +626,18 @@ def _create_gpu_node_pool(
   pool_name: str,
   service_account: pulumi.Output[str],
   min_nodes: int = 0,
+  reservation: str | None = None,
 ) -> gcp.container.NodePool:
   """Create a GPU-accelerated GKE node pool."""
+  reservation_affinity = (
+    gcp.container.NodePoolNodeConfigReservationAffinityArgs(
+      consume_reservation_type="SPECIFIC_RESERVATION",
+      key="compute.googleapis.com/reservation-name",
+      values=[reservation],
+    )
+    if reservation
+    else None
+  )
   return gcp.container.NodePool(
     pool_name,
     name=pool_name,
@@ -657,6 +669,7 @@ def _create_gpu_node_pool(
       labels={RESOURCE_NAME_PREFIX: "true"},
       max_run_duration=f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
       spot=gpu.spot,
+      reservation_affinity=reservation_affinity,
     ),
   )
 
@@ -669,6 +682,7 @@ def _create_tpu_node_pool(
   pool_name: str,
   service_account: pulumi.Output[str],
   min_nodes: int = 0,
+  reservation: str | None = None,
 ) -> gcp.container.NodePool:
   """Create a TPU GKE node pool."""
   # Single-host TPU slices (1 node) must not specify placement_policy;
@@ -686,6 +700,15 @@ def _create_tpu_node_pool(
       tpu_topology=tpu.topology,
     )
     if is_multi_host
+    else None
+  )
+  reservation_affinity = (
+    gcp.container.NodePoolNodeConfigReservationAffinityArgs(
+      consume_reservation_type="SPECIFIC_RESERVATION",
+      key="compute.googleapis.com/reservation-name",
+      values=[reservation],
+    )
+    if reservation
     else None
   )
   return gcp.container.NodePool(
@@ -715,6 +738,7 @@ def _create_tpu_node_pool(
       if tpu.spot
       else f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
       spot=tpu.spot,
+      reservation_affinity=reservation_affinity,
     ),
     placement_policy=placement,
   )
