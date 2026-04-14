@@ -1,4 +1,4 @@
-# Kinetic Cost Optimization Guide
+# Cost Optimization Guide
 
 Kinetic is designed to provide seamless cloud execution on Google Cloud Platform (GCP) while leveraging modern container orchestration (Google Kubernetes Engine, GKE) to keep operating costs extremely efficient. By default, Kinetic utilizes ephemeral functions and autoscaling node pools to ensure you only pay for compute while your workload is actively running.
 
@@ -17,7 +17,7 @@ By default, Kinetic provisions accelerator node pools with **scale-to-zero** cap
 - **Scaling Down:** After the pod terminates, if no new jobs are submitted within the GKE idle window (typically around 10 minutes by default in GCP), the Cluster Autoscaler automatically shuts down the underlying VM instances, returning your accelerator compute consumption to zero.
 
 > [!IMPORTANT]
-> Because the cluster control plane runs continuously, you will still incur the baseline cost of running a GKE cluster (~$0.10/hour per cluster, unless covered by your monthly free tier). 
+> Because the cluster control plane runs continuously, you will incur a baseline management fee of ~$0.10/hour per cluster. However, Google Cloud provides a [monthly free tier credit](https://cloud.google.com/kubernetes-engine/pricing) ($74.40/month) per billing account, which fully covers the management costs of exactly **one** active cluster. 
 
 ---
 
@@ -45,9 +45,32 @@ kinetic pool add --accelerator l4 --min-nodes 1
 
 ---
 
-## 3. Slashing Compute Costs with Spot Instances (`--spot`)
+## 3. Optimizing Container Build Costs (`container_image`)
 
-Spot instances run on unused Google Cloud capacity at significantly discounted rates (often between **60% and 91% lower** than standard on-demand pricing).
+When you submit a job, Kinetic builds or retrieves a container image to execute your workload.
+
+By default, Kinetic uses **custom bundled images** (`container_image="bundled"`). This means it packages your local workspace and runs Cloud Build to freeze dependencies into an image. 
+
+To save build time and Cloud Build execution charges, you can explicitly request prebuilt base configurations via `container_image="prebuilt"` in `@kinetic.run()`:
+
+```python
+@kinetic.run(
+  accelerator="l4",
+  container_image="prebuilt"
+)
+def train():
+    ...
+```
+
+### Why `"prebuilt"` reduces GCP expenses:
+- **Zero Cloud Build Fees:** Reuses existing Artifact Registry images immediately.
+- **Fast Execution Start:** Minor script changes are uploaded compactly as a context zip payload (`context.zip`) directly to GCS without re-compiling environment layers.
+
+---
+
+## 4. Slashing Compute Costs with Spot Instances (`--spot`)
+
+Spot instances run on unused Google Cloud capacity at significantly discounted rates (**up to 91% lower** than standard on-demand pricing according to the official [GCP Spot VM documentation](https://cloud.google.com/compute/docs/instances/spot)).
 
 You can provision a fully automated Spot pool using the `--spot` flag:
 
@@ -58,12 +81,12 @@ kinetic pool add --accelerator a100 --spot
 
 ### Best Practices for Spot Nodes:
 1. **Fault-Tolerant Workloads Only:** Spot instances can be preempted by GCP with only 30 seconds of notice when capacity constraints occur. Do not use Spot pools for stateful production serving or time-critical jobs that cannot afford restarts.
-2. **Use Checkpointing:** Use Kinetic's integration with **Orbax** to continuously flush state to Cloud Storage (`gs://`). If a Spot preemption kills your training run midway, you can resume from the last saved checkpoint instead of restarting from scratch.
+2. **Use Checkpointing:** Use Kinetic's integration with **Orbax** (see the [Checkpointing Guide](checkpointing.md)) to continuously flush state to Cloud Storage (`gs://`). If a Spot preemption kills your training run midway, you can resume from the last saved checkpoint instead of restarting from scratch.
 3. **Multi-Host TPUs:** While you can provision Spot pools for multi-node TPUs (such as `v3`, `v4`, `v5p`, or `v6e`), if any single host in the TPU slice is preempted, the entire slice job will fail. Spot pricing is therefore highly effective for single-host jobs (like `v5litepod-4`, `v5litepod-8`, or `l4` workloads) where you minimize the probability of aggregate preemption.
 
 ---
 
-## 4. Managing Capacity Reservations
+## 5. Managing Capacity Reservations
 
 If your Google Cloud project leverages centralized enterprise pricing via **On-Demand Capacity Reservations**, you can instruct Kinetic to consume that specific reserved capacity pool instead of competing for standard compute stock:
 
@@ -72,13 +95,15 @@ kinetic pool add --accelerator h100 --reservation my-h100-reservation
 ```
 
 > [!NOTE]
-> You cannot mix `--spot` pricing with `--reservation`. To utilize a reservation, your node pools must use standard on-demand billing tiers.
+> You cannot mix `--spot` pricing with `--reservation`. To utilize a reservation, your node pools must use standard on-demand billing tiers. For more details, consult the online [Reservations Reference Guide](https://kinetic.readthedocs.io/en/latest/advanced/reservations.html).
 
 ---
 
-## 5. Summary Checklist for Cost Optimization
+## 6. Summary Checklist for Cost Optimization
 
+- [ ] **Utilize Prebuilt Images:** Apply `container_image="prebuilt"` to bypass unneeded cloud dependency compilation. 
 - [ ] **Rely on defaults:** Let Kinetic's default `--min-nodes 0` configuration automatically scale your infrastructure down when you step away from your desk.
 - [ ] **Utilize Spot capacity:** Use `--spot` for long-running pretraining jobs, ensuring you regularly save model weights to Cloud Storage.
 - [ ] **Prune inactive pools:** Actively review your existing infrastructure by running `kinetic pool list` and drop idle pools using `kinetic pool remove <pool_name>`.
 - [ ] **Tear down unused clusters:** If you are not using Kinetic for days or weeks at a time, remove the entire underlying cluster via `kinetic down` to avoid baseline control plane charges. **Warning:** This will also delete your Cloud Storage buckets and any saved job data.
+
