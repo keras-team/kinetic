@@ -41,7 +41,10 @@ extensions = [
   "sphinx.ext.autosummary",
   "sphinx.ext.viewcode",
   "sphinx_llm.txt",
+  "sphinxcontrib.googleanalytics",
 ]
+
+googleanalytics_id = "G-134NR8C6KG"
 
 intersphinx_mapping = {
   "python": ("https://docs.python.org/3/", None),

@@ -58,6 +58,7 @@ docs = [
     "sphinx_book_theme",
     "sphinx-click",
     "sphinx-llm",
+    "sphinxcontrib-googleanalytics",
 ]
 
 [project.scripts]
