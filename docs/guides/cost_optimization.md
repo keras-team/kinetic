@@ -59,7 +59,7 @@ kinetic pool add --accelerator a100 --spot
 ### Best Practices for Spot Nodes:
 1. **Fault-Tolerant Workloads Only:** Spot instances can be preempted by GCP with only 30 seconds of notice when capacity constraints occur. Do not use Spot pools for stateful production serving or time-critical jobs that cannot afford restarts.
 2. **Use Checkpointing:** Use Kinetic's integration with **Orbax** to continuously flush state to Cloud Storage (`gs://`). If a Spot preemption kills your training run midway, you can resume from the last saved checkpoint instead of restarting from scratch.
-3. **Multi-Host TPUs:** While you can provision Spot pools for multi-node TPUs (`v4` or `v5p`), if any single host in the TPU slice is preempted, the entire slice job will fail. Spot pricing is therefore highly effective for single-host jobs (like `v5litepod-4` or `l4` workloads) where you minimize the probability of aggregate preemption.
+3. **Multi-Host TPUs:** While you can provision Spot pools for multi-node TPUs (such as `v3`, `v4`, `v5p`, or `v6e`), if any single host in the TPU slice is preempted, the entire slice job will fail. Spot pricing is therefore highly effective for single-host jobs (like `v5litepod-4`, `v5litepod-8`, or `l4` workloads) where you minimize the probability of aggregate preemption.
 
 ---
 
