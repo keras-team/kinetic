@@ -43,6 +43,12 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    advanced/containers
 
 .. toctree::
+   :caption: Examples
+   :hidden:
+
+   auto_examples/index
+
+.. toctree::
    :caption: Community
    :hidden:
 

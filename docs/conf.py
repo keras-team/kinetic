@@ -40,8 +40,16 @@ extensions = [
   "sphinx.ext.autodoc",
   "sphinx.ext.autosummary",
   "sphinx.ext.viewcode",
+  "sphinx_gallery.gen_gallery",
   "sphinx_llm.txt",
 ]
+
+sphinx_gallery_conf = {
+  "examples_dirs": ["../examples"],
+  "gallery_dirs": ["auto_examples"],
+  "filename_pattern": r".*\.py$",
+  "plot_gallery": False,
+}
 
 intersphinx_mapping = {
   "python": ("https://docs.python.org/3/", None),
@@ -50,6 +58,10 @@ intersphinx_mapping = {
 intersphinx_disabled_domains = ["std"]
 
 templates_path = ["_templates"]
+
+# Exclude sphinx-gallery generated notebooks/scripts so myst_nb doesn't
+# conflict with the .rst files that sphinx-gallery already produces.
+exclude_patterns = ["auto_examples/*.ipynb", "auto_examples/*.py"]
 
 # -- Options for HTML output
 

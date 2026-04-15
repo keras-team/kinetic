@@ -1,17 +1,22 @@
 """
-Example: Using kinetic with GKE
+Running on GKE (CPU, TPU, GPU)
+==============================
 
-This demonstrates running remote functions on a GKE cluster with kinetic.
+Demonstrates running remote functions on a GKE cluster with Kinetic, covering
+CPU, TPU, and GPU accelerators.
 
-Prerequisites:
+Prerequisites
+-------------
 1. A GKE cluster (CPU or with GPU node pools)
-2. kubectl configured to access the cluster
-3. KINETIC_PROJECT environment variable set
+2. ``kubectl`` configured to access the cluster
+3. ``KINETIC_PROJECT`` environment variable set
 
-Setup (CPU cluster - works out of the box):
+Setup (CPU cluster -- works out of the box)::
+
     ./setup.sh  # Answer 'yes' when prompted for GKE setup
 
-Setup (GPU cluster - for GPU examples):
+Setup (GPU cluster -- for GPU examples)::
+
     # Add a GPU node pool to existing cluster
     gcloud container node-pools create gpu-pool \\
         --cluster kinetic-cluster \\
@@ -24,14 +29,15 @@ Setup (GPU cluster - for GPU examples):
     # Install NVIDIA GPU drivers
     kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
 
-Supported accelerators:
-    - cpu: CPU only (no GPU required)
-    - gpu-t4: NVIDIA T4
-    - gpu-l4: NVIDIA L4
-    - gpu-v100: NVIDIA V100
-    - gpu-a100: NVIDIA A100 (40GB)
-    - gpu-a100-80gb: NVIDIA A100 (80GB)
-    - gpu-h100: NVIDIA H100
+Supported accelerators
+----------------------
+- ``cpu``: CPU only (no GPU required)
+- ``gpu-t4``: NVIDIA T4
+- ``gpu-l4``: NVIDIA L4
+- ``gpu-v100``: NVIDIA V100
+- ``gpu-a100``: NVIDIA A100 (40GB)
+- ``gpu-a100-80gb``: NVIDIA A100 (80GB)
+- ``gpu-h100``: NVIDIA H100
 """
 
 import os

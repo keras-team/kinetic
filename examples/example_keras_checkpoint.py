@@ -1,3 +1,12 @@
+"""
+Keras Checkpointing with Orbax
+===============================
+
+Demonstrates Orbax checkpointing with a Keras model and auto-resume.
+Model weights are serialized via ``model.get_weights()`` and restored
+with ``model.set_weights()``, letting Orbax handle the PyTree persistence.
+"""
+
 import os
 
 # Set backend to JAX before any keras imports
@@ -8,7 +17,6 @@ import kinetic
 
 @kinetic.run(accelerator="cpu")
 def train_keras_with_checkpoints():
-  """Demo function showing Orbax checkpointing with a Keras model and Auto-Resume."""
   import keras
   import numpy as np
   import orbax.checkpoint as ocp

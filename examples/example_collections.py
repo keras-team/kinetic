@@ -1,25 +1,28 @@
 """
-Example: Async Collections with Kinetic
+Async Collections (Batch Jobs)
+==============================
 
-This demonstrates the kinetic.map() workflow for running the same function
-over many inputs — hyperparameter sweeps, data shards, evaluation runs, etc.
+This demonstrates the ``kinetic.map()`` workflow for running the same function
+over many inputs -- hyperparameter sweeps, data shards, evaluation runs, etc.
 
 Instead of submitting jobs one by one and managing handles manually,
-kinetic.map() fans out across accelerators and gives you a single
-BatchHandle to monitor, collect results, and clean up the whole batch.
+``kinetic.map()`` fans out across accelerators and gives you a single
+``BatchHandle`` to monitor, collect results, and clean up the whole batch.
 
-Prerequisites:
+Prerequisites
+-------------
 1. A GKE cluster with a CPU node pool (default setup works)
-2. kubectl configured to access the cluster
-3. KINETIC_PROJECT environment variable set
+2. ``kubectl`` configured to access the cluster
+3. ``KINETIC_PROJECT`` environment variable set
 
-Workflow overview:
-    1. Define a @kinetic.submit function
-    2. kinetic.map()       → fan out over inputs, get a BatchHandle
-    3. statuses/wait       → monitor batch progress
-    4. results()           → collect all results (ordered or streaming)
-    5. attach_batch()      → reattach from a different session
-    6. cleanup()           → release resources
+Workflow overview
+-----------------
+1. Define a ``@kinetic.submit`` function
+2. ``kinetic.map()``    -- fan out over inputs, get a BatchHandle
+3. ``statuses/wait``    -- monitor batch progress
+4. ``results()``        -- collect all results (ordered or streaming)
+5. ``attach_batch()``   -- reattach from a different session
+6. ``cleanup()``        -- release resources
 """
 
 import os

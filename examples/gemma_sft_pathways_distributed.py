@@ -1,3 +1,12 @@
+"""
+Distributed Gemma Fine-Tuning with Pathways
+============================================
+
+Fine-tune Gemma 2B across a multi-host TPU pod using the Pathways backend.
+The example sets up DataParallel distribution via a ``DeviceMesh``, enables
+LoRA for parameter-efficient training, and runs on medical Q&A data.
+"""
+
 import os
 
 # JAX must be set as the backend before importing Keras

@@ -1,20 +1,25 @@
-"""GCS FUSE examples — lazy-mount data instead of downloading it.
+"""
+GCS FUSE Integration
+====================
+
+Lazy-mount data instead of downloading it.
 
 Passing ``fuse=True`` to ``Data(...)`` tells Kinetic to mount the data via the
 GCS FUSE CSI driver rather than downloading it into the container.  This is
 useful for large datasets where you only need to read a subset of the files at
 runtime.
 
-Prerequisites:
-  * A GKE cluster with the GCS FUSE CSI driver addon enabled
-    (``kinetic up`` enables it by default).
+Prerequisites
+-------------
+* A GKE cluster with the GCS FUSE CSI driver addon enabled
+  (``kinetic up`` enables it by default).
 
 Note on local vs. remote execution
 -----------------------------------
 The examples below create local temp directories and pass them to
 ``@kinetic.run`` functions.  Although the data starts on your laptop,
 Kinetic uploads it to GCS behind the scenes and then *mounts* it back
-into the remote pod via the GCS FUSE CSI driver — the pod never
+into the remote pod via the GCS FUSE CSI driver -- the pod never
 downloads a full copy.  This is the key difference from the default
 behaviour (``fuse=False``), where data is downloaded into the container
 before execution.

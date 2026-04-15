@@ -1,3 +1,12 @@
+"""
+Simple Keras JAX Demo
+=====================
+
+A minimal example that trains a CNN on random data using the JAX backend.
+Useful as a quick smoke test to verify that your Kinetic + Keras + JAX
+setup is working end to end.
+"""
+
 import os
 
 os.environ["KERAS_BACKEND"] = "jax"

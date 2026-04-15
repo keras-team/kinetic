@@ -1,23 +1,26 @@
 """
-Example: Async Jobs with Kinetic
+Async Jobs
+==========
 
 This demonstrates the submit/attach/list workflow for detached execution.
-Instead of blocking until the remote function finishes (@kinetic.run),
-@kinetic.submit returns a JobHandle immediately so you can monitor,
+Instead of blocking until the remote function finishes (``@kinetic.run``),
+``@kinetic.submit`` returns a ``JobHandle`` immediately so you can monitor,
 reattach from another session, or manage multiple jobs concurrently.
 
-Prerequisites:
+Prerequisites
+-------------
 1. A GKE cluster with CPU node pool (default setup works)
-2. kubectl configured to access the cluster
-3. KINETIC_PROJECT environment variable set
+2. ``kubectl`` configured to access the cluster
+3. ``KINETIC_PROJECT`` environment variable set
 
-Workflow overview:
-    1. submit()   → fire-and-forget, get a JobHandle back instantly
-    2. status()   → poll the job without blocking
-    3. logs()     → fetch or stream logs
-    4. result()   → block until completion and collect the return value
-    5. attach()   → reattach to a job from a different session using its ID
-    6. list_jobs()→ discover all live jobs on the cluster
+Workflow overview
+-----------------
+1. ``submit()``    -- fire-and-forget, get a JobHandle back instantly
+2. ``status()``    -- poll the job without blocking
+3. ``logs()``      -- fetch or stream logs
+4. ``result()``    -- block until completion and collect the return value
+5. ``attach()``    -- reattach to a job from a different session using its ID
+6. ``list_jobs()`` -- discover all live jobs on the cluster
 """
 
 import os

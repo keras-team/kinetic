@@ -1,3 +1,13 @@
+"""
+Data API
+========
+
+Demonstrates the various ways to pass data to remote functions: as function
+arguments (directories or single files), as fixed-path volume mounts, and
+in nested structures.  Also shows cache-hit behaviour when the same data
+is sent twice.
+"""
+
 import json
 import os
 import tempfile

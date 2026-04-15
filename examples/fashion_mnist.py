@@ -1,3 +1,12 @@
+"""
+Fashion MNIST on TPU
+====================
+
+Train a simple CNN on the Fashion MNIST dataset using a TPU accelerator.
+Demonstrates the basic ``@kinetic.run`` workflow: define a training function,
+decorate it, and call it — Kinetic handles the remote execution.
+"""
+
 import kinetic
 
 

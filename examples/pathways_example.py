@@ -1,3 +1,13 @@
+"""
+Pathways Multi-Host Training
+=============================
+
+Verifies a multi-host Pathways environment and trains a simple model.
+The script checks that JAX sees multiple processes, validates cross-host
+collective communication via ``psum``, then trains a binary classifier
+on random data.
+"""
+
 import os
 
 os.environ["KERAS_BACKEND"] = "jax"

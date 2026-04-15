@@ -1,3 +1,11 @@
+"""
+Gemma 3 Supervised Fine-Tuning
+===============================
+
+A minimal example that fine-tunes the Gemma 3 1B model on a small Q&A
+dataset running on a TPU.
+"""
+
 import os
 
 import keras_hub

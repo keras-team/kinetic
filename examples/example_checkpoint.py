@@ -1,3 +1,13 @@
+"""
+JAX Checkpointing with Orbax
+=============================
+
+Demonstrates Orbax checkpointing with auto-resume in a pure JAX workflow.
+The ``KINETIC_OUTPUT_DIR`` environment variable points to a GCS-backed
+directory that persists across job restarts, making it easy to save and
+restore training state without hardcoding paths.
+"""
+
 import os
 
 # Set backend to JAX before any keras imports
@@ -8,7 +18,6 @@ import kinetic
 
 @kinetic.run(accelerator="cpu")
 def train_with_checkpoints():
-  """Demo function showing Orbax checkpointing with Kinetic and Auto-Resume."""
   import jax.numpy as jnp
   import orbax.checkpoint as ocp
 
