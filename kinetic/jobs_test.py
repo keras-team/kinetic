@@ -409,6 +409,78 @@ class TestJobHandleMethods(absltest.TestCase):
     self.assertEqual(result, 42)
     mock_cleanup.assert_not_called()
 
+  def test_result_invokes_on_status_change_for_each_transition(self):
+    handle = self._make_handle()
+    observed = []
+
+    with (
+      mock.patch.object(
+        handle,
+        "status",
+        side_effect=[
+          JobStatus.PENDING,
+          JobStatus.PENDING,
+          JobStatus.RUNNING,
+          JobStatus.SUCCEEDED,
+        ],
+      ),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={"success": True, "result": "ok"},
+      ),
+      mock.patch.object(handle, "cleanup"),
+      mock.patch("kinetic.jobs.time.sleep"),
+    ):
+      result = handle.result(on_status_change=observed.append)
+
+    self.assertEqual(result, "ok")
+    self.assertEqual(
+      observed,
+      [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.SUCCEEDED],
+    )
+
+  def test_result_on_status_change_fires_once_for_terminal_only(self):
+    handle = self._make_handle()
+    observed = []
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.SUCCEEDED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={"success": True, "result": 1},
+      ),
+      mock.patch.object(handle, "cleanup"),
+    ):
+      handle.result(on_status_change=observed.append)
+
+    self.assertEqual(observed, [JobStatus.SUCCEEDED])
+
+  def test_result_swallows_on_status_change_exceptions(self):
+    handle = self._make_handle()
+
+    def raising_callback(_status):
+      raise RuntimeError("callback boom")
+
+    with (
+      mock.patch.object(
+        handle,
+        "status",
+        side_effect=[JobStatus.RUNNING, JobStatus.SUCCEEDED],
+      ),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={"success": True, "result": 7},
+      ),
+      mock.patch.object(handle, "cleanup"),
+      mock.patch("kinetic.jobs.time.sleep"),
+    ):
+      result = handle.result(on_status_change=raising_callback)
+
+    self.assertEqual(result, 7)
+
   def test_cancel_deletes_only_k8s_resources(self):
     handle = self._make_handle()
 
