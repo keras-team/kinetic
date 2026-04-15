@@ -56,7 +56,7 @@ templates_path = ["_templates"]
 html_theme = "sphinx_book_theme"
 html_theme_options = {
   "analytics": {
-      "google_analytics_id": "G-134NR8C6KG",
+    "google_analytics_id": "G-134NR8C6KG",
   },
   "show_toc_level": 2,
   "repository_url": "https://github.com/keras-team/kinetic",
