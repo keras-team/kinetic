@@ -1,12 +1,16 @@
 import os
 
+# JAX must be set as the backend before importing Keras
+os.environ["KERAS_BACKEND"] = "jax"
+
 import keras_hub
 
-from kinetic import core as kinetic
+import kinetic
 
 
 @kinetic.run(
-  accelerator="tpu-v5litepod-1", capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"]
+  accelerator="tpu-v5litepod-1",
+  capture_env_vars=["KAGGLE_USERNAME", "KAGGLE_KEY"],
 )
 def train_gemma():
   # Data for SFT
@@ -25,13 +29,4 @@ def train_gemma():
 
 
 if __name__ == "__main__":
-  # Set environment variables for TPU
-  os.environ["KERAS_BACKEND"] = "jax"
-  # set environment variables for gcp
-  os.environ["GOOGLE_CLOUD_PROJECT"] = "tpu-prod-123456"
-  os.environ["GOOGLE_CLOUD_ZONE"] = "us-central1-a"
-  # set environment variables for kaggle
-  os.environ["KAGGLE_USERNAME"] = "your_kaggle_username"
-  os.environ["KAGGLE_KEY"] = "your_kaggle_key"
-
   train_gemma()

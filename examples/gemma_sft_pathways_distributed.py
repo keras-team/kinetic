@@ -12,8 +12,6 @@ import kinetic
 
 @kinetic.run(
   accelerator="tpu-v5litepod-2x4",
-  cluster="keras-team-dogfood",
-  project="keras-team-gcp",
   backend="pathways",
   capture_env_vars=["KAGGLE_USERNAME", "KAGGLE_KEY"],
 )

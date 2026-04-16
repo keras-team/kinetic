@@ -9,10 +9,10 @@ from keras import layers
 import kinetic
 
 
-# A simple model that will be executed remotely on pathways
-@kinetic.run(
-  accelerator="tpu-v6e-16", backend="pathways", cluster="keras-team-dogfood"
-)
+# A simple model that will be executed remotely on pathways.
+# Multi-host TPU slices (here: v6e-16 = 4x4 across 4 nodes) auto-select the
+# Pathways backend, so an explicit `backend="pathways"` is not needed.
+@kinetic.run(accelerator="tpu-v6e-16")
 def train_simple_model():
   import jax
   from jax import lax
