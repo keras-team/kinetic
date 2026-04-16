@@ -1,53 +1,81 @@
 # Getting Started
 
+Install Kinetic, point it at a cluster, and run your first remote
+function. If your team has already provisioned a Kinetic cluster, skip
+ahead to [Run your first job](#run-your-first-job).
+
 ## Prerequisites
 
-- Python 3.11+
-- Google Cloud SDK (`gcloud`) — [install here](https://cloud.google.com/sdk/docs/install)
-- A Google Cloud project with [billing enabled](https://docs.cloud.google.com/billing/docs/how-to/modify-project)
+- Python 3.11+.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/), used
+  for the install command below.
+- Google Cloud SDK (`gcloud`): [install guide](https://cloud.google.com/sdk/docs/install).
+- A Google Cloud project with [billing enabled](https://docs.cloud.google.com/billing/docs/how-to/modify-project).
 
-Authenticate with Google Cloud:
+Authenticate with Google Cloud once:
 
 ```bash
 gcloud auth login
 gcloud auth application-default login
 ```
 
-Set your GCP project ID so the library knows where to run jobs:
+Set your GCP project ID so Kinetic knows where to run jobs:
 
 ```bash
 export KINETIC_PROJECT="your-project-id"
 ```
 
-Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it. See :doc:`configuration` for the full list of environment variables.
+Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) so it
+persists. See [Configuration](configuration.md) for the full list of
+environment variables.
 
 ## Install
 
 ```bash
-pip install keras-kinetic
+uv pip install keras-kinetic
 ```
 
-This installs both the `@kinetic.run()` decorator and the `kinetic` CLI for managing infrastructure.
+This installs both the `@kinetic.run()` decorator and the `kinetic`
+CLI for managing infrastructure.
 
-> **Note:** The [Pulumi](https://www.pulumi.com/) CLI (used for infrastructure
-> provisioning) is bundled and managed automatically. It will be installed to
-> `~/.kinetic/pulumi` on first use if not already present.
+> **Note:** The [Pulumi](https://www.pulumi.com/) CLI (used for
+> infrastructure provisioning) is bundled and managed automatically.
+> It will be installed to `~/.kinetic/pulumi` on first use if not
+> already present.
 
-## Provision Infrastructure
+## Are you the first user, or joining a team?
 
-If you are not the first Kinetic user in your org, you can skip this section.
-Otherwise, run the one-time setup step to create a cluster for Kinetic:
+Two paths from here:
+
+- **Joining an existing Kinetic team.** Someone else has already run
+  `kinetic up`. Point your shell at the team's cluster and skip ahead
+  to [Run your first job](#run-your-first-job):
+
+  ```bash
+  export KINETIC_CLUSTER="cluster-name"
+  export KINETIC_ZONE="us-central1-a"  # if it differs from the default
+  ```
+
+- **First user in your project.** You need to provision a cluster once
+  before you can run anything. Continue with the next step.
+
+## Provision infrastructure (first user only)
+
+Skip this section if your team already runs a Kinetic cluster (the
+"joining a team" path above). Otherwise, run the one-time setup. It
+interactively prompts for your GCP project and accelerator type:
 
 ```bash
 kinetic up
 ```
 
-This interactively prompts for your GCP project and accelerator type, then:
+This:
 
-- Enables required APIs (Cloud Build, Artifact Registry, Cloud Storage, GKE)
-- Creates an Artifact Registry repository for container images
-- Provisions a GKE cluster with an accelerator node pool
-- Configures Docker authentication and kubectl access
+- Enables required APIs (Cloud Build, Artifact Registry, Cloud
+  Storage, GKE).
+- Creates an Artifact Registry repository for container images.
+- Provisions a GKE cluster with an accelerator node pool.
+- Configures Docker authentication and `kubectl` access.
 
 You can also run non-interactively:
 
@@ -55,19 +83,59 @@ You can also run non-interactively:
 kinetic up --project=my-project --accelerator=t4 --yes
 ```
 
-> **Cleanup reminder:** When you're done, run `kinetic down` to tear down all resources and avoid ongoing charges. See [CLI Command here](cli.rst#kinetic-down).
+> **Cleanup reminder:** when you're done, run `kinetic down` to tear
+> down all resources and stop incurring costs. See the
+> [CLI Reference](cli) for the full set of commands.
 
-## Run Your First Job
+## Run your first job
 
 ```{literalinclude} ../examples/fashion_mnist.py
     :language: python
 ```
 
-> **First run timing:** The initial execution takes longer (~5 minutes) because
-> it builds a container image with your dependencies. Subsequent runs with
-> unchanged dependencies use the cached image and start in less than a minute.
+Run it:
 
-Once this works, you can try:
+```bash
+python fashion_mnist.py
+```
 
-- More complex examples like [fine-tuning LLMs](guides/llm_finetuning.md)
-- Running on different [accelerators and topologies](accelerators.md)
+:::{note}
+**Expected timing:**
+
+- **First run:** ~5 minutes. The slow part is the first container
+  build via Cloud Build, which freezes your dependencies into an
+  image tagged by their hash.
+- **Subsequent runs (same dependencies):** under a minute. The
+  cached image is reused; only your code changes get re-uploaded.
+- **Subsequent runs (changed dependencies):** ~5 minutes again,
+  since a new hash forces a fresh build.
+:::
+
+:::{tip}
+**Recommended defaults:**
+
+- Stay in **bundled mode** (the default — you don't need to pass
+  `container_image=`). It's the only mode that works without
+  publishing your own base image.
+- Use **`@kinetic.run()`** while you're iterating; switch to
+  **`@kinetic.submit()`** once your jobs run for more than a few
+  minutes and you'd rather not block your local shell.
+- Write any artifacts you want to keep under `KINETIC_OUTPUT_DIR`,
+  not under `/tmp`.
+:::
+
+## Next steps
+
+After your first run works, the most useful follow-ups are:
+
+- [Examples](guides/examples.md): a catalog of runnable scripts that
+  cover async jobs, data, checkpoints, parallel sweeps, and LLM
+  fine-tuning. The fastest way to see real patterns end to end.
+- [Execution Modes](guides/execution_modes.md): bundled vs prebuilt
+  vs custom image, and when to switch.
+- [Detached Jobs](advanced/async_jobs.md): `@kinetic.submit()`,
+  reattach, and the job lifecycle for long-running work.
+- [Data](guides/data.md) and
+  [Checkpointing](guides/checkpointing.md): `kinetic.Data(...)` for
+  inputs and `KINETIC_OUTPUT_DIR` for durable outputs and resumable
+  checkpoints.
