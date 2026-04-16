@@ -6,11 +6,11 @@ Each accelerator and topology requires setting up its own node pool as a prerequ
 
 | Type           | Configurations                                                                                                                |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| TPU v6e        | `v6e-8`, `v6e-16`                                                                                                             |
-| TPU v5p        | `v5p-8`, `v5p-16`, `v5p-32`                                                                                                   |
-| TPU v5 Litepod | `v5litepod-1`, `v5litepod-4`, `v5litepod-8`, `v5litepod-16`, `v5litepod-32`, `v5litepod-64`, `v5litepod-128`, `v5litepod-256` |
-| TPU v4         | `v4-4`, `v4-8`, `v4-16`, `v4-32`, `v4-64`, `v4-128`, `v4-256`, `v4-512`, `v4-1024`, `v4-2048`, `v4-4096`                      |
-| TPU v3         | `v3-4`, `v3-16`, `v3-32`, `v3-64`, `v3-128`, `v3-256`, `v3-512`, `v3-1024`, `v3-2048`                                         |
+| TPU v6e        | `tpu-v6e-8`, `tpu-v6e-16`                                                                                                             |
+| TPU v5p        | `tpu-v5p-8`, `tpu-v5p-16`, `tpu-v5p-32`                                                                                                   |
+| TPU v5 Litepod | `tpu-v5litepod-1`, `tpu-v5litepod-4`, `tpu-v5litepod-8`, `tpu-v5litepod-16`, `tpu-v5litepod-32`, `tpu-v5litepod-64`, `tpu-v5litepod-128`, `tpu-v5litepod-256` |
+| TPU v4         | `tpu-v4-4`, `tpu-v4-8`, `tpu-v4-16`, `tpu-v4-32`, `tpu-v4-64`, `tpu-v4-128`, `tpu-v4-256`, `tpu-v4-512`, `tpu-v4-1024`, `tpu-v4-2048`, `tpu-v4-4096`                      |
+| TPU v3         | `tpu-v3-4`, `tpu-v3-16`, `tpu-v3-32`, `tpu-v3-64`, `tpu-v3-128`, `tpu-v3-256`, `tpu-v3-512`, `tpu-v3-1024`, `tpu-v3-2048`                                         |
 
 ## GPUs
 

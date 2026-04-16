@@ -10,7 +10,7 @@ Use the `capture_env_vars` parameter in the `@kinetic.run()` decorator. It accep
 import kinetic
 
 @kinetic.run(
-    accelerator="v5litepod-1",
+    accelerator="tpu-v5litepod-1",
     capture_env_vars=["KAGGLE_USERNAME", "KAGGLE_KEY", "WANDB_*"]
 )
 def train_model():

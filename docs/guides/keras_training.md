@@ -9,7 +9,7 @@ To run a Keras model remotely, wrap your training logic in a function and apply 
 ```python
 import kinetic
 
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="tpu-v6e-8")
 def train_model():
     import keras
     import numpy as np
@@ -40,7 +40,7 @@ print(f"Final loss: {final_loss}")
 
 When you call a decorated function:
 1. **Packaging**: Kinetic captures your function and any local code dependencies.
-2. **Provisioning**: It ensures the requested accelerator (e.g., `v6e-8` TPU) is available in your GKE cluster.
+2. **Provisioning**: It ensures the requested accelerator (e.g., `tpu-v6e-8` TPU) is available in your GKE cluster.
 3. **Execution**: The function runs inside a container on the remote node.
 4. **Streaming**: Logs are streamed back to your terminal in real-time.
 5. **Return**: The function's return value is serialized and returned to your local process.

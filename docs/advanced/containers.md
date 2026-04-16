@@ -16,11 +16,11 @@ Bundled mode builds a custom container image via Cloud Build with all your depen
 import kinetic
 
 # Bundled mode — these are equivalent:
-@kinetic.run(accelerator="v6e-8")
+@kinetic.run(accelerator="tpu-v6e-8")
 def train():
     ...
 
-@kinetic.run(accelerator="v6e-8", container_image="bundled")
+@kinetic.run(accelerator="tpu-v6e-8", container_image="bundled")
 def train():
     ...
 ```
@@ -36,7 +36,7 @@ def train():
 Prebuilt mode uses a pre-published base image that already contains the accelerator runtime (JAX, CUDA/TPU libraries) and core dependencies. Your project's `requirements.txt` or `pyproject.toml` dependencies are installed at pod startup via `uv pip install`, so there is no Cloud Build step.
 
 ```python
-@kinetic.run(accelerator="v6e-8", container_image="prebuilt")
+@kinetic.run(accelerator="tpu-v6e-8", container_image="prebuilt")
 def train():
     ...
 ```
@@ -85,7 +85,7 @@ Provide a full container image URI to use your own image. Kinetic skips all buil
 
 ```python
 @kinetic.run(
-    accelerator="v6e-8",
+    accelerator="tpu-v6e-8",
     container_image="us-docker.pkg.dev/my-project/kinetic/my-image:v1.0"
 )
 def train():

@@ -57,14 +57,14 @@ management required.
 
     import kinetic
 
-    @kinetic.run(accelerator="v6e-8")
+    @kinetic.run(accelerator="tpu-v6e-8")
     def train_model():
         import keras
         model = keras.Sequential([...])
         model.fit(x_train, y_train)
         return model.history.history["loss"][-1]
 
-    # Executes on TPU v6e-8, returns the result
+    # Executes on tpu-v6e-8, returns the result
     final_loss = train_model()
 
 
@@ -81,4 +81,4 @@ When you call a decorated function, Kinetic handles the entire remote execution 
 Get Started
 -----------
 
-Follow `this guide <getting_started.md>`__ to get started.
+Follow the :doc:`getting_started` guide to get started.

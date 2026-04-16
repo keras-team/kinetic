@@ -10,7 +10,7 @@ When fine-tuning models from Keras Hub or Kaggle, you often need to provide cred
 import kinetic
 
 @kinetic.run(
-    accelerator="v5litepod-1",
+    accelerator="tpu-v5litepod-1",
     capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"]
 )
 def train_gemma():
@@ -25,7 +25,7 @@ def train_gemma():
 Fine-tuning large models often requires massive memory. LoRA significantly reduces the number of trainable parameters, enabling fine-tuning on smaller accelerator slices.
 
 ```python
-@kinetic.run(accelerator="v5litepod-8")
+@kinetic.run(accelerator="tpu-v5litepod-8")
 def train_lora():
     import keras_hub
     gemma_lm = keras_hub.models.GemmaCausalLM.from_preset("gemma_2b_en")
@@ -45,7 +45,7 @@ For larger models or datasets, use the Pathways backend to distribute training a
 
 ```python
 @kinetic.run(
-    accelerator="v5litepod-2x4",
+    accelerator="tpu-v5litepod-2x4",
     backend="pathways"
 )
 def train_distributed():
