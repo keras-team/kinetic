@@ -16,6 +16,7 @@ import zipfile
 
 import cloudpickle
 from absl import logging
+from google.cloud import exceptions as cloud_exceptions
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
 
@@ -31,8 +32,6 @@ def main():
 
   Usage: python remote_runner.py <context_gcs> <payload_gcs> <result_gcs> [requirements_gcs]
   """
-  logging.set_verbosity(logging.INFO)
-
   if len(sys.argv) < 4:
     logging.error(
       "Usage: remote_runner.py <context_gcs> <payload_gcs> <result_gcs>"
@@ -240,8 +239,22 @@ def _start_debug_server(port):
   import debugpy
 
   debugpy.listen(("0.0.0.0", port))
-  # The [DEBUGPY] prefix is used by the client-side wait_for_debug_server()
-  # to detect readiness by polling pod logs via handle.tail().
+
+  try:
+    # Always write GCS sentinel derived strictly from the execution result URI
+    parts = sys.argv[3].replace("gs://", "").split("/")
+    bucket_name = parts[0]
+    job_id = parts[1]
+    blob = storage.Client().bucket(bucket_name).blob(f"{job_id}/.debug_ready")
+    blob.upload_from_string("")
+    logging.info(
+      "Published debugpy GCS sentinel to gs://%s/%s/.debug_ready",
+      bucket_name,
+      job_id,
+    )
+  except cloud_exceptions.GoogleCloudError as e:
+    logging.warning("Failed to publish debug readiness sentinel to GCS: %s", e)
+
   logging.info("[DEBUGPY] Ready \u2014 listening on 0.0.0.0:%d", port)
 
   timeout = int(

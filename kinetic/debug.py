@@ -12,6 +12,7 @@ import time
 from absl import logging
 
 from kinetic.job_status import JobStatus
+from kinetic.utils import storage
 
 DEBUGPY_PORT = 5678
 DEBUGPY_READY_SIGNAL = "[DEBUGPY] Ready"
@@ -136,7 +137,7 @@ def print_attach_instructions(local_port, working_dir=None):
 
 
 def wait_for_debug_server(handle, timeout=300, poll_interval=5):
-  """Poll job logs until the debugpy ready signal appears.
+  """Poll GCS sentinel until the debugpy server confirms readiness.
 
   Logs progress as the job transitions through states so the user
   sees feedback during the wait.
@@ -160,7 +161,7 @@ def wait_for_debug_server(handle, timeout=300, poll_interval=5):
       if status == JobStatus.PENDING:
         logging.info("Waiting for pod to be scheduled...")
       elif status == JobStatus.RUNNING:
-        logging.info("Pod is running, waiting for debugpy server...")
+        logging.info("Pod is running, waiting for debugpy server readiness...")
       last_status = status
 
     if status in _TERMINAL_STATUSES:
@@ -168,13 +169,19 @@ def wait_for_debug_server(handle, timeout=300, poll_interval=5):
         f"Job {handle.job_id} reached terminal state ({status.value}) "
         "before debugpy server was ready."
       )
-    try:
-      logs = handle.tail(n=50)
-      if logs and DEBUGPY_READY_SIGNAL in logs:
-        logging.info("debugpy server is ready.")
-        return
-    except Exception:
-      pass  # Pod may not be ready yet
+
+    if status == JobStatus.RUNNING:
+      try:
+        if storage.blob_exists(
+          handle.bucket_name,
+          f"{handle.job_id}/.debug_ready",
+          project=handle.project,
+        ):
+          logging.info("debugpy server is ready.")
+          return
+      except Exception:
+        pass
+
     time.sleep(poll_interval)
   raise TimeoutError(
     f"Timed out after {timeout}s waiting for debugpy server to start "

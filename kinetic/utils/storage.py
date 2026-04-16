@@ -89,6 +89,28 @@ def _delete_prefix(
   return len(blobs)
 
 
+def blob_exists(
+  bucket_name: str,
+  blob_path: str,
+  project: str | None = None,
+) -> bool:
+  """Check if a specific blob exists in Cloud Storage."""
+  _, bucket = _get_bucket(bucket_name, project)
+  blob = bucket.blob(blob_path)
+  return blob.exists()
+
+
+def upload_empty_blob(
+  bucket_name: str,
+  blob_path: str,
+  project: str | None = None,
+) -> None:
+  """Upload an empty string to a specific blob."""
+  _, bucket = _get_bucket(bucket_name, project)
+  blob = bucket.blob(blob_path)
+  blob.upload_from_string("", retry=DEFAULT_RETRY)
+
+
 def upload_artifacts(
   bucket_name: str,
   job_id: str,
