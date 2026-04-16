@@ -122,8 +122,8 @@ by a hash of your `requirements.txt`.
 
 **Prebuilt image**: A published base image that already has the
 accelerator runtime installed. Your project deps are installed at pod
-startup with `uv pip install`. Selected with `container_image="prebuilt"`.
-Requires you to publish base images with `kinetic build-base` first.
+startup. Selected with `container_image="prebuilt"`. Requires you to
+publish base images with `kinetic build-base` first.
 
 **FUSE**: Filesystem-in-userspace mount. With `kinetic.Data(..., fuse=True)`,
 a GCS bucket is mounted lazily into the pod's filesystem so reads stream
