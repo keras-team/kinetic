@@ -292,20 +292,22 @@ class TestBatchHandle(absltest.TestCase):
         return JobStatus.SUCCEEDED
       return JobStatus.RUNNING
 
+    def mock_result(self_handle, cleanup=True):
+      idx = int(self_handle.job_id.split("-")[1])
+      return f"result-{idx}"
+
     with (
       mock.patch.object(JobHandle, "status", mock_status),
-      mock.patch.object(
-        JobHandle,
-        "result",
-        side_effect=lambda cleanup=True: "first" if cleanup else "first",
-      ),
+      mock.patch.object(JobHandle, "result", mock_result),
       mock.patch("kinetic.collections.time.sleep"),
     ):
       # Use ordered=False to get completion order.
       results = handle.results(ordered=False, cleanup=False)
 
-    # Both results collected.
+    # job-1 completes first (immediate SUCCEEDED), job-0 takes 2 polls.
     self.assertEqual(len(results), 2)
+    self.assertEqual(results[0], "result-1")
+    self.assertEqual(results[1], "result-0")
 
   def test_as_completed_yields_before_submission_complete(self):
     """as_completed() must yield jobs that finish while submission is
@@ -1040,6 +1042,282 @@ class TestJobHandleGroupFields(absltest.TestCase):
     self.assertIsNone(h.group_id)
     self.assertIsNone(h.group_kind)
     self.assertIsNone(h.group_index)
+
+
+class TestSubmissionFailuresProperty(absltest.TestCase):
+  def test_returns_copy_of_errors(self):
+    handle = _make_batch_handle(3)
+    handle._submission_errors = {1: RuntimeError("bad input")}
+    result = handle.submission_failures
+    self.assertEqual(len(result), 1)
+    self.assertIsInstance(result[1], RuntimeError)
+    # Mutating the returned dict must not affect internal state.
+    result[99] = ValueError("injected")
+    self.assertNotIn(99, handle._submission_errors)
+
+  def test_empty_when_no_errors(self):
+    handle = _make_batch_handle(2)
+    self.assertEqual(handle.submission_failures, {})
+
+
+class TestWaitWarnsOnSubmissionErrors(absltest.TestCase):
+  def test_warns_when_submission_errors_present(self):
+    handle = _make_batch_handle(2)
+    handle._submission_errors = {1: RuntimeError("bad")}
+    # Only job-0 is real; job-1 slot is None.
+    handle.jobs[1] = None
+    with (
+      mock.patch.object(JobHandle, "status", return_value=JobStatus.SUCCEEDED),
+      mock.patch("kinetic.collections.time.sleep"),
+      mock.patch("kinetic.collections.logging") as mock_logging,
+    ):
+      handle.wait()
+    mock_logging.warning.assert_called_once()
+    # logging.warning receives the format string and args separately.
+    fmt = mock_logging.warning.call_args[0][0]
+    self.assertIn("input(s) failed at submission time", fmt)
+
+
+class TestFailuresCaching(absltest.TestCase):
+  def test_failures_cached_after_results_cleanup(self):
+    """After results(cleanup=True), failures() should return cached failures."""
+    handle = _make_batch_handle(2)
+
+    call_count = [0]
+
+    def mock_status(self_handle):
+      return JobStatus.SUCCEEDED
+
+    def mock_result(self_handle, cleanup=True):
+      idx = int(self_handle.job_id.split("-")[1])
+      if idx == 1:
+        raise ValueError("job-1 failed")
+      return 42
+
+    with (
+      mock.patch.object(JobHandle, "status", mock_status),
+      mock.patch.object(JobHandle, "result", mock_result),
+      mock.patch("kinetic.collections.time.sleep"),
+    ):
+      with self.assertRaises(BatchError):
+        handle.results(cleanup=True)
+
+    # After cleanup, live status would be NOT_FOUND, but cached
+    # failures should still report the failed job.
+    with mock.patch.object(
+      JobHandle, "status", return_value=JobStatus.NOT_FOUND
+    ):
+      failed = handle.failures()
+    self.assertEqual(len(failed), 1)
+    self.assertEqual(failed[0].job_id, "job-1")
+
+  def test_failures_live_when_no_results_called(self):
+    """Without calling results(), failures() should check live status."""
+    handle = _make_batch_handle(3)
+    with mock.patch.object(
+      JobHandle,
+      "status",
+      side_effect=[
+        JobStatus.SUCCEEDED,
+        JobStatus.FAILED,
+        JobStatus.SUCCEEDED,
+      ],
+    ):
+      failed = handle.failures()
+    self.assertEqual(len(failed), 1)
+
+  def test_failures_cache_is_copy(self):
+    """Modifying the list from failures() must not affect the cache."""
+    handle = _make_batch_handle(2)
+
+    def mock_result(self_handle, cleanup=True):
+      raise ValueError("boom")
+
+    with (
+      mock.patch.object(JobHandle, "status", return_value=JobStatus.SUCCEEDED),
+      mock.patch.object(JobHandle, "result", mock_result),
+      mock.patch("kinetic.collections.time.sleep"),
+    ):
+      with self.assertRaises(BatchError):
+        handle.results()
+
+    first_call = handle.failures()
+    first_call.clear()
+    second_call = handle.failures()
+    self.assertEqual(len(second_call), 2)
+
+
+class TestAttachBatchPolling(absltest.TestCase):
+  def _make_handle_payload(self, job_id, group_index=0):
+    return {
+      "job_id": job_id,
+      "backend": "gke",
+      "project": "proj",
+      "cluster_name": "cluster",
+      "zone": "us-central1-a",
+      "namespace": "default",
+      "bucket_name": "proj-kn-cluster-jobs",
+      "k8s_name": f"kinetic-{job_id}",
+      "image_uri": "image:tag",
+      "accelerator": "cpu",
+      "func_name": "train",
+      "display_name": f"kinetic-train-{job_id}",
+      "created_at": "2026-03-28T10:00:00Z",
+      "group_id": "grp-abc12345",
+      "group_kind": "map",
+      "group_index": group_index,
+    }
+
+  def test_complete_batch_no_polling(self):
+    """When all children are present, no background thread is started."""
+    manifest = {
+      "group_id": "grp-abc12345",
+      "group_kind": "map",
+      "group_name": "test",
+      "tags": {},
+      "created_at": "2026-03-28T10:00:00Z",
+      "total_expected": 2,
+      "submit_fn_name": "train",
+      "children": [
+        {"group_index": 0, "job_id": "job-0", "attempts": 1},
+        {"group_index": 1, "job_id": "job-1", "attempts": 1},
+      ],
+    }
+
+    def download_handle_side_effect(bucket, job_id, project=None):
+      idx = int(job_id.split("-")[1])
+      return self._make_handle_payload(job_id, group_index=idx)
+
+    with (
+      mock.patch(
+        "kinetic.collections.storage.download_manifest",
+        return_value=manifest,
+      ),
+      mock.patch(
+        "kinetic.collections.storage.download_handle",
+        side_effect=download_handle_side_effect,
+      ),
+    ):
+      handle = attach_batch("grp-abc12345", project="proj", cluster="cluster")
+
+    self.assertTrue(handle._submission_complete.is_set())
+    self.assertEqual(len([j for j in handle.jobs if j is not None]), 2)
+
+  def test_partial_batch_polls_manifest(self):
+    """Partial batch should poll manifest until all children appear."""
+    partial_manifest = {
+      "group_id": "grp-abc12345",
+      "group_kind": "map",
+      "group_name": "test",
+      "tags": {},
+      "created_at": "2026-03-28T10:00:00Z",
+      "total_expected": 3,
+      "submit_fn_name": "train",
+      "children": [
+        {"group_index": 0, "job_id": "job-0", "attempts": 1},
+      ],
+    }
+    full_manifest = {
+      **partial_manifest,
+      "children": [
+        {"group_index": 0, "job_id": "job-0", "attempts": 1},
+        {"group_index": 1, "job_id": "job-1", "attempts": 1},
+        {"group_index": 2, "job_id": "job-2", "attempts": 1},
+      ],
+    }
+
+    # Gate to hold the poll loop until we've checked the initial state.
+    gate = threading.Event()
+    download_manifest_calls = [0]
+
+    def download_manifest_side_effect(bucket, group_id, project=None):
+      download_manifest_calls[0] += 1
+      if download_manifest_calls[0] <= 1:
+        # Initial call from attach_batch().
+        return partial_manifest
+      # Poll-loop calls: wait for the gate, then return full manifest.
+      gate.wait(timeout=5)
+      return full_manifest
+
+    def download_handle_side_effect(bucket, job_id, project=None):
+      idx = int(job_id.split("-")[1])
+      return self._make_handle_payload(job_id, group_index=idx)
+
+    with (
+      mock.patch(
+        "kinetic.collections.storage.download_manifest",
+        side_effect=download_manifest_side_effect,
+      ),
+      mock.patch(
+        "kinetic.collections.storage.download_handle",
+        side_effect=download_handle_side_effect,
+      ),
+      mock.patch("kinetic.collections.time.sleep"),
+    ):
+      handle = attach_batch(
+        "grp-abc12345",
+        project="proj",
+        cluster="cluster",
+        poll_interval=0.01,
+      )
+      # Should NOT be set immediately for partial batch.
+      self.assertFalse(handle._submission_complete.is_set())
+      # Release the poll loop.
+      gate.set()
+      # Wait for the background poll thread to complete.
+      handle._submission_complete.wait(timeout=5)
+
+    self.assertTrue(handle._submission_complete.is_set())
+    self.assertEqual(len([j for j in handle.jobs if j is not None]), 3)
+
+  def test_partial_batch_timeout(self):
+    """Polling should stop and set _submission_complete on timeout."""
+    partial_manifest = {
+      "group_id": "grp-abc12345",
+      "group_kind": "map",
+      "group_name": "test",
+      "tags": {},
+      "created_at": "2026-03-28T10:00:00Z",
+      "total_expected": 3,
+      "submit_fn_name": "train",
+      "children": [
+        {"group_index": 0, "job_id": "job-0", "attempts": 1},
+      ],
+    }
+
+    def download_handle_side_effect(bucket, job_id, project=None):
+      idx = int(job_id.split("-")[1])
+      return self._make_handle_payload(job_id, group_index=idx)
+
+    # Use real monotonic time to let the timeout elapse.
+    with (
+      mock.patch(
+        "kinetic.collections.storage.download_manifest",
+        return_value=partial_manifest,
+      ),
+      mock.patch(
+        "kinetic.collections.storage.download_handle",
+        side_effect=download_handle_side_effect,
+      ),
+      mock.patch("kinetic.collections.time.sleep"),
+      mock.patch(
+        "kinetic.collections.time.monotonic",
+        side_effect=[0, 100],
+      ),
+    ):
+      handle = attach_batch(
+        "grp-abc12345",
+        project="proj",
+        cluster="cluster",
+        poll_interval=0.01,
+        poll_timeout=0.05,
+      )
+      handle._submission_complete.wait(timeout=5)
+
+    # _submission_complete set even on timeout (so wait() doesn't hang).
+    self.assertTrue(handle._submission_complete.is_set())
+    # Only 1 of 3 loaded.
+    self.assertEqual(len([j for j in handle.jobs if j is not None]), 1)
 
 
 if __name__ == "__main__":

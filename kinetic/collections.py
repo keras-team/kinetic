@@ -32,6 +32,7 @@ from kinetic.utils import storage
 
 _DEFAULT_MAX_CONCURRENT = 64
 _STATUS_POLL_INTERVAL = 5.0
+_MANIFEST_POLL_INTERVAL = 10.0
 
 
 def _resolve_bucket(
@@ -101,6 +102,12 @@ class BatchHandle:
     default_factory=dict, repr=False, compare=False
   )
 
+  # Cached failure list populated by results() so that failures()
+  # remains accurate after cleanup deletes K8s resources.
+  _cached_failures: list[JobHandle] | None = field(
+    default=None, repr=False, compare=False
+  )
+
   # ------------------------------------------------------------------
   # Observation
   # ------------------------------------------------------------------
@@ -155,12 +162,20 @@ class BatchHandle:
         for job in self.jobs
         if job is not None
       ):
-        return
+        break
       if deadline is not None and time.monotonic() >= deadline:
         raise TimeoutError(
           f"Timed out waiting for batch {self.group_id} after {timeout}s"
         )
       time.sleep(_STATUS_POLL_INTERVAL)
+
+    if self._submission_errors:
+      logging.warning(
+        "Batch %s: %d input(s) failed at submission time. "
+        "Use handle.submission_failures to inspect.",
+        self.group_id,
+        len(self._submission_errors),
+      )
 
   def as_completed(
     self,
@@ -282,6 +297,8 @@ class BatchHandle:
         else:
           failures.append(job)
 
+    with self._lock:
+      self._cached_failures = list(failures)
     return results_list, failures
 
   def _results_completion_order(
@@ -311,6 +328,8 @@ class BatchHandle:
       else:
         failures.append(None)  # type: ignore[arg-type]
 
+    with self._lock:
+      self._cached_failures = list(failures)
     return results_list, failures
 
   def failures(self) -> list[JobHandle]:
@@ -320,16 +339,35 @@ class BatchHandle:
     `NOT_FOUND` (e.g. after cleanup) are excluded because the
     status is ambiguous — use `statuses()` for finer control.
 
-    Note:
-      If `results(cleanup=True)` was called (the default), child
-      resources are deleted and their status becomes `NOT_FOUND`.
-      In that case, this method will return an empty list.
+    After ``results()`` has been called, this returns the cached
+    failure list from that collection pass, so it remains accurate
+    even if cleanup has deleted K8s resources.
+
+    See Also:
+      ``submission_failures``: returns per-input errors for inputs
+      that failed at submission time (``jobs[idx]`` is ``None``).
     """
+    with self._lock:
+      if self._cached_failures is not None:
+        return list(self._cached_failures)
     return [
       job
       for job in self.jobs
       if job is not None and job.status() == JobStatus.FAILED
     ]
+
+  @property
+  def submission_failures(self) -> dict[int, Exception]:
+    """Return a copy of per-input submission errors (index -> exception).
+
+    These are inputs where the submission itself failed (e.g. validation
+    error, network error).  The corresponding ``jobs[idx]`` slot is
+    ``None``.  These errors are included in ``results()`` output but are
+    **not** reflected by ``failures()`` which only inspects live job
+    statuses.
+    """
+    with self._lock:
+      return dict(self._submission_errors)
 
   def cancel(self) -> None:
     """Cancel all non-terminal jobs in the collection."""
@@ -373,6 +411,77 @@ class BatchHandle:
           logging.warning(
             "Failed to clean up manifest for group %s", self.group_id
           )
+
+
+# ------------------------------------------------------------------
+# Manifest polling for reattached partial batches
+# ------------------------------------------------------------------
+
+
+def _manifest_poll_loop(
+  handle: BatchHandle,
+  bucket_name: str,
+  group_id: str,
+  project: str,
+  total_expected: int,
+  poll_interval: float,
+  timeout: float | None,
+) -> None:
+  """Poll GCS manifest until all children appear, then set ``_submission_complete``.
+
+  Used by ``attach_batch()`` when the manifest shows fewer children
+  than ``total_expected``, indicating the original ``map()`` is still
+  submitting.
+  """
+  deadline = None if timeout is None else time.monotonic() + timeout
+
+  try:
+    while True:
+      if deadline is not None and time.monotonic() >= deadline:
+        logging.warning(
+          "Timed out polling manifest for batch %s (%d/%d children)",
+          group_id,
+          sum(1 for j in handle.jobs if j is not None),
+          total_expected,
+        )
+        break
+
+      time.sleep(poll_interval)
+
+      try:
+        manifest = storage.download_manifest(
+          bucket_name, group_id, project=project
+        )
+      except Exception:
+        logging.warning("Failed to poll manifest for batch %s", group_id)
+        continue
+
+      children = manifest.get("children", [])
+      for child in children:
+        idx = child["group_index"]
+        if not isinstance(idx, int) or idx < 0 or idx >= total_expected:
+          continue
+        with handle._lock:
+          if handle.jobs[idx] is not None:
+            continue
+        try:
+          payload = storage.download_handle(
+            bucket_name, child["job_id"], project=project
+          )
+          with handle._lock:
+            handle.jobs[idx] = JobHandle.from_dict(payload)
+        except Exception:
+          logging.warning(
+            "Could not load handle for child %s (index %d)",
+            child["job_id"],
+            idx,
+          )
+
+      loaded = sum(1 for j in handle.jobs if j is not None)
+      if loaded >= total_expected:
+        break
+  finally:
+    handle._submission_complete.set()
 
 
 # ------------------------------------------------------------------
@@ -677,16 +786,27 @@ def attach_batch(
   group_id: str,
   project: str | None = None,
   cluster: str | None = None,
+  poll_interval: float = _MANIFEST_POLL_INTERVAL,
+  poll_timeout: float | None = None,
 ) -> BatchHandle:
   """Reattach to an existing batch collection by *group_id*.
 
   Downloads the group manifest from GCS, reconstructs `JobHandle`
   objects for each child, and returns a fully usable `BatchHandle`.
 
+  If the manifest has fewer children than ``total_expected`` (i.e.
+  the original ``map()`` is still submitting), the returned handle
+  polls the manifest in a background thread until all children
+  appear or *poll_timeout* is reached.
+
   Args:
     group_id: The collection identifier (e.g. `"grp-a1b2c3d4"`).
     project: GCP project (uses default when *None*).
     cluster: GKE cluster name (uses default when *None*).
+    poll_interval: Seconds between manifest polls when the batch
+      is partially submitted.
+    poll_timeout: Maximum seconds to poll for remaining children.
+      ``None`` means poll indefinitely.
 
   Returns:
     A hydrated `BatchHandle` ready for `results()`, etc.
@@ -726,14 +846,6 @@ def attach_batch(
         idx,
       )
 
-  if len(children) < total_expected:
-    logging.warning(
-      "Batch %s was partially submitted: %d of %d expected jobs",
-      group_id,
-      len(children),
-      total_expected,
-    )
-
   handle = BatchHandle(
     group_id=manifest["group_id"],
     name=manifest.get("group_name"),
@@ -742,8 +854,32 @@ def attach_batch(
     _bucket_name=bucket_name,
     _project=resolved_project,
   )
-  # Submission is already complete for reattached handles — the
-  # reattached handle has no submission thread.
-  handle._submission_complete.set()
+
+  loaded = sum(1 for j in jobs if j is not None)
+  if loaded >= total_expected:
+    # All children present — mark complete immediately.
+    handle._submission_complete.set()
+  else:
+    logging.warning(
+      "Batch %s was partially submitted: %d of %d expected jobs. "
+      "Polling manifest for remaining children.",
+      group_id,
+      loaded,
+      total_expected,
+    )
+    thread = threading.Thread(
+      target=_manifest_poll_loop,
+      kwargs={
+        "handle": handle,
+        "bucket_name": bucket_name,
+        "group_id": group_id,
+        "project": resolved_project,
+        "total_expected": total_expected,
+        "poll_interval": poll_interval,
+        "timeout": poll_timeout,
+      },
+      daemon=True,
+    )
+    thread.start()
 
   return handle
