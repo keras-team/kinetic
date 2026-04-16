@@ -27,9 +27,9 @@ import kinetic
 
 @kinetic.submit(accelerator="tpu-v5e-1")
 def train():
-    import keras
-    # ... training code ...
-    return history.history
+  import keras
+  # ... training code ...
+  return history.history
 ```
 
 ### 3. Job Management
@@ -43,6 +43,11 @@ For jobs submitted with `@kinetic.submit()`:
 ### 4. Data Management
 Use `kinetic.Data` to pass local or GCS data to your remote functions.
 ```python
+@kinetic.run(accelerator="tpu-v5e-1")
+def train(data_dir):
+  # ...
+  pass
+
 train(kinetic.Data("./my_dataset/"))
 ```
 

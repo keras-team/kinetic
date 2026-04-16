@@ -27,7 +27,7 @@ Synchronous execution. Blocks until the remote function returns.
 ```python
 @kinetic.run(accelerator="tpu-v5e-1")
 def my_func(arg1):
-    return "result"
+  return "result"
 ```
 
 ### `@kinetic.submit()`
@@ -36,7 +36,7 @@ Asynchronous execution. Returns a `JobHandle` immediately.
 ```python
 @kinetic.submit(accelerator="gpu-l4")
 def my_func(arg1):
-    return "result"
+  return "result"
 
 job = my_func("val")
 print(job.job_id)
@@ -54,6 +54,8 @@ train(Data("./dataset"))
 
 # As volume mount
 @kinetic.run(volumes={"/data": Data("./dataset")})
+def train():
+  pass
 ```
 
 ## Environment Variables
