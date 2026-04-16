@@ -68,6 +68,7 @@ def submit_pathways_job(
   spot=False,
   requirements_uri=None,
   fuse_volume_specs=None,
+  debug=False,
 ):
   """Submit a LeaderWorkerSet to GKE cluster.
 
@@ -110,6 +111,7 @@ def submit_pathways_job(
     version=lws_version,
     requirements_uri=requirements_uri,
     fuse_volume_specs=fuse_volume_specs,
+    debug=debug,
   )
 
   custom_api = _custom_api()
@@ -427,6 +429,7 @@ def _create_lws_spec(
   version=LWS_VERSION,
   requirements_uri=None,
   fuse_volume_specs=None,
+  debug=False,
 ):
   """Create a LeaderWorkerSet manifest."""
 
@@ -510,6 +513,27 @@ def _create_lws_spec(
       fuse_mounts
     )
 
+  # When debugging, create a separate leader template with debug env vars
+  # and port. Workers run normally without the debugger.
+  if debug:
+    import copy
+
+    from kinetic.debug import DEBUGPY_PORT
+
+    leader_template = copy.deepcopy(pod_template)
+    leader_container = leader_template["spec"]["containers"][0]
+    leader_container["env"].extend(
+      [
+        {"name": "KINETIC_DEBUG", "value": "1"},
+        {"name": "PYTHONBREAKPOINT", "value": "debugpy.breakpoint"},
+      ]
+    )
+    leader_container["ports"] = [
+      {"containerPort": DEBUGPY_PORT, "name": "debugpy"},
+    ]
+  else:
+    leader_template = pod_template
+
   return {
     "apiVersion": f"{LWS_GROUP}/{version}",
     "kind": "LeaderWorkerSet",
@@ -523,7 +547,7 @@ def _create_lws_spec(
       "leaderWorkerTemplate": {
         "size": num_workers + 1,  # 1 leader + N workers
         "restartPolicy": "RecreateGroupOnPodRestart",
-        "leaderTemplate": pod_template,
+        "leaderTemplate": leader_template,
         "workerTemplate": pod_template,
       },
     },

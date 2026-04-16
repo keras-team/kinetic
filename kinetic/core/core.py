@@ -83,14 +83,25 @@ def _make_decorator(
   spot,
   sync,
   output_dir,
+  debug,
 ):
   """Build a decorator that submits the wrapped function for remote execution.
 
   Args:
     sync: If True, block on result (`run()` semantics).
       If False, return a `JobHandle` immediately (`submit()` semantics).
+    debug: If True, enable debugpy remote debugging.
   """
   _validate_volumes(volumes)
+
+  if debug and spot:
+    import warnings
+
+    warnings.warn(
+      "debug=True with spot=True is not recommended — your debug "
+      "session may be interrupted by preemption.",
+      stacklevel=3,
+    )
 
   def decorator(func):
     @functools.wraps(func)
@@ -121,6 +132,7 @@ def _make_decorator(
         cluster_name=resolved_cluster,
         volumes=volumes,
         spot=spot,
+        debug=debug,
         output_dir=output_dir,
         base_image_repo=base_image_repo,
       )
@@ -135,7 +147,13 @@ def _make_decorator(
         )
 
       handle = submit_remote(ctx, backend_inst)
-      return handle.result(stream_logs=True) if sync else handle
+
+      if sync:
+        if debug:
+          handle.debug_attach(working_dir=ctx.working_dir)
+          return handle.result(stream_logs=False, cleanup=False)
+        return handle.result(stream_logs=True)
+      return handle
 
     return wrapper
 
@@ -155,6 +173,7 @@ def run(
   volumes: dict[str, Data] | None = None,
   spot: bool = False,
   output_dir: str | None = None,
+  debug: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
   """Execute function on remote TPU/GPU.
 
@@ -185,6 +204,9 @@ def run(
     output_dir: GCS directory where job outputs should be saved.
       Propagated to the remote worker as the `KINETIC_OUTPUT_DIR`
       environment variable. Defaults to `gs://{bucket_name}/outputs/{job_id}`.
+    debug: If True, enable debugpy remote debugging. The pod will start
+      a debugpy server and wait for a VS Code debugger to attach before
+      executing the function. Port-forwarding is set up automatically.
   """
   return _make_decorator(
     accelerator,
@@ -200,6 +222,7 @@ def run(
     spot,
     sync=True,
     output_dir=output_dir,
+    debug=debug,
   )
 
 
@@ -216,6 +239,7 @@ def submit(
   volumes: dict[str, Data] | None = None,
   spot: bool = False,
   output_dir: str | None = None,
+  debug: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., JobHandle]]:
   """Submit function for remote execution, returning a `JobHandle`.
 
@@ -240,4 +264,5 @@ def submit(
     spot,
     sync=False,
     output_dir=output_dir,
+    debug=debug,
   )

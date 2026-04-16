@@ -94,6 +94,12 @@ def main():
       resolve_volumes(volumes, storage_client)
     args, kwargs = resolve_data_refs(args, kwargs, storage_client)
 
+    # Start debugpy server if debug mode is enabled
+    is_debug = os.environ.get("KINETIC_DEBUG") == "1"
+    if is_debug:
+      _install_debugger()
+      _start_debug_server(5678)
+
     # Execute function and capture result
     logging.info("Executing %s()", func.__name__)
     result = None
@@ -101,6 +107,10 @@ def main():
     remote_traceback = None
 
     try:
+      if is_debug:
+        import debugpy
+
+        debugpy.breakpoint()
       result = func(*args, **kwargs)
       logging.info("Function completed successfully")
     except BaseException as e:
@@ -180,6 +190,39 @@ def _install_requirements(storage_client, requirements_gcs):
       f"stderr:\n{result.stderr}"
     )
   logging.info("User requirements installed successfully")
+
+
+def _install_debugger():
+  """Install debugpy via uv pip at pod startup."""
+  logging.info("Installing debugpy...")
+  result = subprocess.run(
+    ["uv", "pip", "install", "--system", "debugpy"],
+    capture_output=True,
+    text=True,
+  )
+  if result.returncode != 0:
+    raise RuntimeError(
+      f"Failed to install debugpy (exit {result.returncode}).\n"
+      f"stderr:\n{result.stderr}"
+    )
+  logging.info("debugpy installed successfully")
+
+
+def _start_debug_server(port):
+  """Start debugpy server and wait for client attachment.
+
+  Args:
+      port: TCP port for debugpy to listen on.
+  """
+  import debugpy
+
+  debugpy.listen(("0.0.0.0", port))
+  # The [DEBUGPY] prefix is used by the client-side wait_for_debug_server()
+  # to detect readiness by polling pod logs via handle.tail().
+  logging.info("[DEBUGPY] Ready \u2014 listening on 0.0.0.0:%d", port)
+  logging.info("[DEBUGPY] Waiting for debugger to attach...")
+  debugpy.wait_for_client()
+  logging.info("[DEBUGPY] Debugger attached!")
 
 
 def resolve_volumes(

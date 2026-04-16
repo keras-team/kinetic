@@ -66,6 +66,7 @@ class JobContext:
 
   # Configuration modifiers
   spot: bool = False
+  debug: bool = False
   output_dir: Optional[str] = None
 
   # Artifact paths (set during prepare phase)
@@ -99,6 +100,7 @@ class JobContext:
     cluster_name: Optional[str] = None,
     volumes: Optional[dict] = None,
     spot: bool = False,
+    debug: bool = False,
     output_dir: Optional[str] = None,
     base_image_repo: Optional[str] = None,
   ) -> "JobContext":
@@ -124,6 +126,7 @@ class JobContext:
       working_dir=_resolve_working_dir(func),
       volumes=volumes,
       spot=spot,
+      debug=debug,
       output_dir=output_dir or os.environ.get("KINETIC_OUTPUT_DIR"),
     )
 
@@ -194,6 +197,7 @@ class GKEBackend(BaseK8sBackend):
       spot=ctx.spot,
       requirements_uri=requirements_uri,
       fuse_volume_specs=ctx.fuse_volume_specs,
+      debug=ctx.debug,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -249,6 +253,7 @@ class PathwaysBackend(BaseK8sBackend):
       spot=ctx.spot,
       requirements_uri=requirements_uri,
       fuse_volume_specs=ctx.fuse_volume_specs,
+      debug=ctx.debug,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:

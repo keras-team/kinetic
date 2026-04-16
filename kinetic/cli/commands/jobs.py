@@ -168,6 +168,29 @@ def cancel(
 @jobs.command()
 @click.argument("job_id")
 @click.option(
+  "--port",
+  type=int,
+  default=5678,
+  help="Local port for debugpy port-forwarding.",
+)
+@common_options
+def debug(job_id, port, project, zone, cluster_name):
+  """Attach a debugger to a running debug-enabled job.
+
+  Sets up kubectl port-forward and prints VS Code attach configuration.
+  """
+  handle = _attach(job_id, project, cluster_name)
+  if not handle.debug:
+    raise click.ClickException(
+      f"Job {job_id} was not submitted with debug=True. "
+      "Resubmit with debug=True to enable debugging."
+    )
+  handle.debug_attach(local_port=port)
+
+
+@jobs.command()
+@click.argument("job_id")
+@click.option(
   "--k8s/--no-k8s",
   default=True,
   help="Delete Kubernetes resources.",
