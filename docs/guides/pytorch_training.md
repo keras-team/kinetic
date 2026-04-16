@@ -103,3 +103,12 @@ Use `spot=True` to reduce costs for fault-tolerant workloads:
 def train():
     ...
 ```
+
+## Related pages
+
+- [Dependencies](dependencies.md) — how `torch` gets installed in
+  the remote container.
+- [Accelerators](../accelerators.md) — full list of GPUs and
+  multi-GPU configurations.
+- [Cost Optimization](cost_optimization.md) — spot capacity for
+  GPU workloads.

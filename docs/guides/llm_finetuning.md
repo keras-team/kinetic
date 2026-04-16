@@ -56,3 +56,12 @@ def train_distributed():
 ```
 
 See the [Distributed Training](distributed_training.md) guide for more details on scaling your workloads.
+
+## Related pages
+
+- [Distributed Training](distributed_training.md) — multi-host
+  Pathways setup that LLM fine-tuning typically needs.
+- [Checkpointing](checkpointing.md) — Orbax + `KINETIC_OUTPUT_DIR`
+  for resumable fine-tuning runs.
+- [Examples](examples.md) — the Gemma SFT examples are full
+  end-to-end LLM fine-tuning walkthroughs.

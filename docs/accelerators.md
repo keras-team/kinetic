@@ -40,3 +40,12 @@ kinetic pool add --accelerator tpu-v6e-8 --reservation my-v6e-reservation --proj
 ```
 
 See the [Capacity Reservations](advanced/reservations.md) guide for details.
+
+## Related pages
+
+- [Cost Optimization](guides/cost_optimization.md) — spot vs
+  reservations vs on-demand for each accelerator class.
+- [Distributed Training](guides/distributed_training.md) — which
+  TPU topologies are multi-host and need Pathways.
+- [Multiple Clusters](advanced/clusters.md) — when to put accelerator
+  pools in separate clusters.

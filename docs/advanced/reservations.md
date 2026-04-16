@@ -44,3 +44,12 @@ gcloud compute reservations delete my-h100-reservation \
 ```
 
 > **Note:** Reservations accrue charges based on the reserved machine type regardless of whether VMs are running.
+
+## Related pages
+
+- [Cost Optimization](../guides/cost_optimization.md) — when to choose
+  reservations over spot or on-demand.
+- [Multiple Clusters](clusters.md) — isolating reserved capacity in
+  its own cluster.
+- [Accelerators](../accelerators.md) — which accelerators benefit
+  most from reservations.

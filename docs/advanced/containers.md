@@ -1,6 +1,35 @@
 # Container Images
 
+This page is the deep reference for the container image system: the
+three modes side by side, the prebuilt-base workflow, the custom-image
+contract, and the `kinetic build-base` command.
+
+For a higher-level overview and the recommendation matrix on which
+mode to pick, start with [Execution Modes](../guides/execution_modes.md).
+
 Kinetic supports three container image modes that control how your remote execution environment is built and deployed. Choose the mode that best fits your workflow by setting the `container_image` parameter in the `@kinetic.run()` or `@kinetic.submit()` decorator.
+
+:::{note}
+**Expected timing:**
+
+- **Bundled, cold (first run / dep change):** ~2–5 minutes for the
+  Cloud Build step.
+- **Bundled, warm (cached image):** under a minute to schedule and
+  start the pod.
+- **Prebuilt:** 30–60 seconds for the base image pull (cached after
+  first use on a node), plus the time to `uv pip install` your
+  `requirements.txt`.
+- **Custom:** a single image pull, then immediate execution. Cold
+  pulls vary widely with image size and registry latency.
+:::
+
+:::{warning}
+**When not to use custom image mode:** if you only need different
+Python packages, bundled or prebuilt are simpler and cheaper. Reach
+for custom images when you have non-Python system libraries (CUDA
+builds, C++ deps), corporate compliance requirements, or you genuinely
+want to manage the image lifecycle yourself.
+:::
 
 | Mode                  | `container_image=`    | Build step                       | Dependencies installed              |
 | --------------------- | --------------------- | -------------------------------- | ----------------------------------- |
@@ -147,3 +176,12 @@ kinetic build-base --repo myuser/kinetic --tag v2.0.0
 
 - **Docker Hub**: Credentials are stored in GCP Secret Manager and used by Cloud Build during the push. The command prompts for your Docker Hub username and access token on first use.
 - **Artifact Registry**: No additional credentials needed — the build service account authenticates automatically. The command prints the required `gcloud` setup commands for creating the repository and granting permissions.
+
+## Related pages
+
+- [Execution Modes](../guides/execution_modes.md) — start here for
+  the high-level mode-selection guidance.
+- [Dependencies](../guides/dependencies.md) — what gets discovered
+  and what gets installed in each mode.
+- [Configuration](../configuration.md) — `KINETIC_BASE_IMAGE_REPO`
+  and other relevant env vars.

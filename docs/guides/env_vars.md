@@ -48,3 +48,12 @@ Kinetic automatically sets some environment variables in the remote worker envir
 > lifecycle rule or specify a custom `output_dir` pointing to a different
 > location.
 
+## Related pages
+
+- [Configuration](../configuration.md) — full list of `KINETIC_*`
+  variables and precedence rules.
+- [Checkpointing](checkpointing.md) — how `KINETIC_OUTPUT_DIR` fits
+  into the durable-output story.
+- [LLM Fine-tuning](llm_finetuning.md) — `capture_env_vars` is the
+  canonical way to forward Kaggle and other model-hub credentials.
+

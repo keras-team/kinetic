@@ -4,6 +4,24 @@ Kinetic is designed to provide seamless cloud execution on Google Cloud Platform
 
 This guide covers the primary configurations and workflows for optimizing your cloud bill when using Kinetic.
 
+:::{tip}
+**Recommended defaults:**
+
+- Leave node pools at `--min-nodes 0` (the default) so accelerators
+  scale to zero between jobs.
+- Pick a container mode that minimizes Cloud Build runs. Bundled mode
+  (the default) reuses cached images across runs as long as your
+  dependencies are stable, so you only pay for the first build per
+  dependency set. Prebuilt mode skips Cloud Build entirely, but
+  requires you to publish your own base image first with
+  `kinetic build-base`.
+- Use `--spot` only on fault-tolerant single-host workloads with
+  frequent checkpoints — spot is risky on multi-host slices because
+  any host preemption fails the whole slice.
+- Run `kinetic pool list` periodically and remove pools you no
+  longer use.
+:::
+
 ---
 
 ## 1. Understanding Scale-to-Zero Architecture
@@ -106,4 +124,13 @@ kinetic pool add --accelerator h100 --reservation my-h100-reservation
 - [ ] **Utilize Spot capacity:** Use `--spot` for long-running pretraining jobs, ensuring you regularly save model weights to Cloud Storage.
 - [ ] **Prune inactive pools:** Actively review your existing infrastructure by running `kinetic pool list` and drop idle pools using `kinetic pool remove <pool_name>`.
 - [ ] **Tear down unused clusters:** If you are not using Kinetic for days or weeks at a time, remove the entire underlying cluster via `kinetic down` to avoid baseline control plane charges. **Warning:** This will also delete your Cloud Storage buckets and any saved job data.
+
+## Related pages
+
+- [Execution Modes](execution_modes.md) — bundled vs prebuilt
+  tradeoffs when build cost matters.
+- [Capacity Reservations](../advanced/reservations.md) — guaranteed
+  capacity for newer accelerators.
+- [Multiple Clusters](../advanced/clusters.md) — when separate
+  control planes are worth the extra ~$0.10/hr.
 

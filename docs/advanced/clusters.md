@@ -61,3 +61,20 @@ Kinetic uses the cluster name to scope its GCP resources. For a cluster named `g
 - **GKE Cluster**: `gpu-cluster`
 - **Artifact Registry**: `kn-gpu-cluster`
 - **Storage Bucket**: `{project}-kn-gpu-cluster-jobs`
+
+:::{warning}
+**When not to use this:** most users only need one cluster.
+Each additional cluster has its own GKE control plane (~$0.10/hr,
+or ~$74/month) and its own Artifact Registry, so don't add a second
+cluster speculatively. Add one when you have a real reason: GPU vs
+TPU isolation, regional separation, or dev vs prod environments.
+:::
+
+## Related pages
+
+- [Cost Optimization](../guides/cost_optimization.md) — control plane
+  costs and how the GKE free tier covers exactly one cluster.
+- [Capacity Reservations](reservations.md) — when reservations make
+  multi-cluster setups worth the overhead.
+- [Configuration](../configuration.md) — `KINETIC_CLUSTER` and the
+  precedence rules.
