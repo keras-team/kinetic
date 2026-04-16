@@ -298,7 +298,8 @@ class JobHandle:
     """
     self._ensure_credentials()
 
-    # Wait for pod Running + debugpy ready signal in logs
+    # Wait for pod Running + debugpy ready sentinel file
+    # before starting port-forward
     wait_for_debug_server(self)
 
     # Start kubectl port-forward
