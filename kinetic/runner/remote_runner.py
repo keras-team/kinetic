@@ -96,9 +96,10 @@ def main():
 
     # Start debugpy server if debug mode is enabled
     is_debug = os.environ.get("KINETIC_DEBUG") == "1"
+    debugger_attached = False
     if is_debug:
       _install_debugger()
-      _start_debug_server(5678)
+      debugger_attached = _start_debug_server(5678)
 
     # Execute function and capture result
     logging.info("Executing %s()", func.__name__)
@@ -107,7 +108,7 @@ def main():
     remote_traceback = None
 
     try:
-      if is_debug:
+      if debugger_attached:
         import debugpy
 
         debugpy.breakpoint()
@@ -208,21 +209,56 @@ def _install_debugger():
   logging.info("debugpy installed successfully")
 
 
+_DEBUG_WAIT_TIMEOUT_DEFAULT = 600  # 10 minutes
+
+
 def _start_debug_server(port):
   """Start debugpy server and wait for client attachment.
 
+  Waits up to ``KINETIC_DEBUG_WAIT_TIMEOUT`` seconds (default 600) for
+  a debugger to attach. If no client connects in time, execution
+  proceeds without the debugger so the pod doesn't hang indefinitely.
+
   Args:
       port: TCP port for debugpy to listen on.
+
+  Returns:
+      True if a debugger client attached, False if timed out.
   """
+  import threading
+
   import debugpy
 
   debugpy.listen(("0.0.0.0", port))
   # The [DEBUGPY] prefix is used by the client-side wait_for_debug_server()
   # to detect readiness by polling pod logs via handle.tail().
   logging.info("[DEBUGPY] Ready \u2014 listening on 0.0.0.0:%d", port)
-  logging.info("[DEBUGPY] Waiting for debugger to attach...")
-  debugpy.wait_for_client()
-  logging.info("[DEBUGPY] Debugger attached!")
+
+  timeout = int(
+    os.environ.get("KINETIC_DEBUG_WAIT_TIMEOUT", _DEBUG_WAIT_TIMEOUT_DEFAULT)
+  )
+  logging.info("[DEBUGPY] Waiting up to %ds for debugger to attach...", timeout)
+
+  # debugpy.wait_for_client() has no timeout parameter, so we use a
+  # background thread + Event to implement one.
+  attached = threading.Event()
+
+  def _wait():
+    debugpy.wait_for_client()
+    attached.set()
+
+  waiter = threading.Thread(target=_wait, daemon=True)
+  waiter.start()
+
+  if attached.wait(timeout=timeout):
+    logging.info("[DEBUGPY] Debugger attached!")
+    return True
+
+  logging.warning(
+    "[DEBUGPY] No debugger attached after %ds \u2014 proceeding without debugger.",
+    timeout,
+  )
+  return False
 
 
 def resolve_volumes(

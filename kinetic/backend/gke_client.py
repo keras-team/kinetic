@@ -12,6 +12,7 @@ from kinetic.backend import k8s_utils
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.credentials import invalidate_credential_cache
+from kinetic.debug import DEBUGPY_PORT
 from kinetic.job_status import JobStatus
 
 
@@ -372,8 +373,6 @@ def _create_job_spec(
   }
 
   if debug:
-    from kinetic.debug import DEBUGPY_PORT
-
     container_kwargs["ports"] = [
       client.V1ContainerPort(container_port=DEBUGPY_PORT, name="debugpy"),
     ]

@@ -6,6 +6,7 @@ for cross-session reattachment and `list_jobs()` for discovery.
 """
 
 import contextlib
+import subprocess
 import time
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
@@ -26,6 +27,12 @@ from kinetic.constants import (
   get_required_project,
 )
 from kinetic.credentials import ensure_credentials
+from kinetic.debug import (
+  DEBUGPY_PORT,
+  print_attach_instructions,
+  start_port_forward,
+  wait_for_debug_server,
+)
 from kinetic.job_status import JobStatus  # re-export
 from kinetic.utils import storage
 
@@ -273,24 +280,22 @@ class JobHandle:
     self,
     local_port: int = 5678,
     working_dir: str | None = None,
-  ) -> None:
+  ) -> subprocess.Popen:
     """Wait for debugpy, start port-forward, and print VS Code config.
 
-    Blocks until the user presses Ctrl+C or the job reaches a
-    terminal state.
+    Returns the port-forward subprocess so the caller can manage its
+    lifecycle (e.g. terminate it after ``result()`` completes).
 
     Args:
       local_port: Local port to forward debugpy traffic to.
       working_dir: Local working directory for VS Code path mappings.
           If None, a placeholder is used.
-    """
-    from kinetic.debug import (
-      DEBUGPY_PORT,
-      print_attach_instructions,
-      start_port_forward,
-      wait_for_debug_server,
-    )
 
+    Returns:
+      The ``subprocess.Popen`` handle for the kubectl port-forward
+      process. The caller should call
+      ``kinetic.debug.cleanup_port_forward(proc)`` when done.
+    """
     self._ensure_credentials()
 
     # Wait for pod Running + debugpy ready signal in logs
@@ -310,14 +315,7 @@ class JobHandle:
     # Print VS Code attach config
     print_attach_instructions(local_port, working_dir)
 
-    # Block until Ctrl+C or job reaches terminal state
-    try:
-      while self.status() not in _TERMINAL_STATUSES:
-        time.sleep(5)
-    except KeyboardInterrupt:
-      pass
-    finally:
-      pf_proc.terminate()
+    return pf_proc
 
   def result(
     self,

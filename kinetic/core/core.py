@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import os
+import warnings
 from typing import Any, Callable
 
 from kinetic.backend.execution import (
@@ -13,6 +14,7 @@ from kinetic.backend.execution import (
 from kinetic.constants import DEFAULT_CLUSTER_NAME, get_default_namespace
 from kinetic.core import accelerators
 from kinetic.data import Data
+from kinetic.debug import cleanup_port_forward
 from kinetic.jobs import JobHandle
 
 
@@ -95,8 +97,6 @@ def _make_decorator(
   _validate_volumes(volumes)
 
   if debug and spot:
-    import warnings
-
     warnings.warn(
       "debug=True with spot=True is not recommended — your debug "
       "session may be interrupted by preemption.",
@@ -150,8 +150,11 @@ def _make_decorator(
 
       if sync:
         if debug:
-          handle.debug_attach(working_dir=ctx.working_dir)
-          return handle.result(stream_logs=False, cleanup=False)
+          pf_proc = handle.debug_attach(working_dir=ctx.working_dir)
+          try:
+            return handle.result(stream_logs=False, cleanup=False)
+          finally:
+            cleanup_port_forward(pf_proc)
         return handle.result(stream_logs=True)
       return handle
 

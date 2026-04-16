@@ -1,5 +1,6 @@
 """Pathways (LeaderWorkerSet) job submission for kinetic."""
 
+import copy
 import functools
 import time
 
@@ -12,6 +13,7 @@ from kinetic.backend.log_streaming import LogStreamer
 from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.core import accelerators
 from kinetic.credentials import invalidate_credential_cache
+from kinetic.debug import DEBUGPY_PORT
 from kinetic.job_status import JobStatus
 
 LWS_GROUP = "leaderworkerset.x-k8s.io"
@@ -516,10 +518,6 @@ def _create_lws_spec(
   # When debugging, create a separate leader template with debug env vars
   # and port. Workers run normally without the debugger.
   if debug:
-    import copy
-
-    from kinetic.debug import DEBUGPY_PORT
-
     leader_template = copy.deepcopy(pod_template)
     leader_container = leader_template["spec"]["containers"][0]
     leader_container["env"].extend(

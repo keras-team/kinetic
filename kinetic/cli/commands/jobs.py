@@ -1,10 +1,14 @@
 """kinetic jobs command group — inspect and manage async jobs."""
 
+import time
+
 import click
 from rich.table import Table
 
 from kinetic.cli.options import cleanup_options, common_options, jobs_options
 from kinetic.cli.output import banner, console, success, warning
+from kinetic.debug import cleanup_port_forward
+from kinetic.job_status import JobStatus
 from kinetic.jobs import attach, list_jobs
 
 
@@ -178,6 +182,7 @@ def debug(job_id, port, project, zone, cluster_name):
   """Attach a debugger to a running debug-enabled job.
 
   Sets up kubectl port-forward and prints VS Code attach configuration.
+  Blocks until Ctrl+C or the job completes, then tears down the tunnel.
   """
   handle = _attach(job_id, project, cluster_name)
   if not handle.debug:
@@ -185,7 +190,17 @@ def debug(job_id, port, project, zone, cluster_name):
       f"Job {job_id} was not submitted with debug=True. "
       "Resubmit with debug=True to enable debugging."
     )
-  handle.debug_attach(local_port=port)
+  pf_proc = handle.debug_attach(local_port=port)
+  terminal = frozenset(
+    {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.NOT_FOUND}
+  )
+  try:
+    while handle.status() not in terminal:
+      time.sleep(5)
+  except KeyboardInterrupt:
+    pass
+  finally:
+    cleanup_port_forward(pf_proc)
 
 
 @jobs.command()
