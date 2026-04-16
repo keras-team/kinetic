@@ -45,7 +45,7 @@ For larger models or datasets, use the Pathways backend to distribute training a
 
 ```python
 @kinetic.run(
-    accelerator="tpu-v5litepod-2x4",
+    accelerator="tpu-v6e-8",
     backend="pathways"
 )
 def train_distributed():

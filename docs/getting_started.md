@@ -19,7 +19,7 @@ Set your GCP project ID so the library knows where to run jobs:
 export KINETIC_PROJECT="your-project-id"
 ```
 
-Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it. See :doc:`guides/configuration` for the full list of environment variables.
+Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it. See :doc:`configuration` for the full list of environment variables.
 
 ## Install
 

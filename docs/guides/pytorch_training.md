@@ -94,7 +94,7 @@ def train_multi_gpu():
 
 ## GPU Selection
 
-See [Accelerator Support](accelerators.md) for the full list of GPUs, multi-GPU counts, and TPU configurations.
+See [Accelerator Support](../accelerators.md) for the full list of GPUs, multi-GPU counts, and TPU configurations.
 
 Use `spot=True` to reduce costs for fault-tolerant workloads:
 
