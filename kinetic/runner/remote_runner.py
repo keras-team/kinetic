@@ -120,6 +120,10 @@ def main():
       if debugger_attached:
         import debugpy
 
+        # === KINETIC DEBUG ===
+        # The debugger will pause on the next line.
+        # Press Step Into (F11) to enter your function, or
+        # Step Over (F10) to run it without stepping.
         debugpy.breakpoint()
       result = func(*args, **kwargs)
       logging.info("Function completed successfully")
