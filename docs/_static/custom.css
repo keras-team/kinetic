@@ -16,3 +16,10 @@
     margin-top: 0.75rem !important;
     margin-bottom: 0.25rem !important;
 }
+
+/* Soften the look of sphinx-design badges (used as tags on examples cards). */
+.sd-badge.sd-bg-secondary {
+    background-color: rgba(108, 117, 125, 0.12) !important;
+    color: var(--pst-color-text-base) !important;
+    font-weight: 500;
+}

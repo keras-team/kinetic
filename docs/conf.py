@@ -35,6 +35,7 @@ version = ""
 extensions = [
   "myst_nb",
   "sphinx_click",
+  "sphinx_design",
   "sphinx.ext.intersphinx",
   "sphinx.ext.napoleon",
   "sphinx.ext.autodoc",
@@ -42,6 +43,8 @@ extensions = [
   "sphinx.ext.viewcode",
   "sphinx_llm.txt",
 ]
+
+myst_enable_extensions = ["colon_fence"]
 
 intersphinx_mapping = {
   "python": ("https://docs.python.org/3/", None),
