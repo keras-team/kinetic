@@ -1,0 +1,4 @@
+keras==3.13.2
+keras-hub==0.27.1
+tokenizers==0.22.2
+sentencepiece==0.2.1
