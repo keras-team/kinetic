@@ -8,6 +8,7 @@ for cross-session reattachment and `list_jobs()` for discovery.
 import contextlib
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from typing import Any
@@ -325,6 +326,7 @@ class JobHandle:
     cleanup_timeout: float = 180,
     cleanup_poll_interval: float = 2,
     stream_logs: bool | None = None,
+    on_status_change: Callable[[JobStatus], None] | None = None,
   ) -> Any:
     """Wait for the job result and return it or re-raise the user exception.
 
@@ -342,6 +344,11 @@ class JobHandle:
       stream_logs: When *True*, stream live pod logs to the terminal
         while waiting for the job to complete.  Defaults to *False*
         for debug jobs to avoid Rich panel conflicts.
+      on_status_change: Optional callback invoked with the new
+        `JobStatus` each time the polled status differs from the
+        previous one, including the first observation and the final
+        terminal status.  Exceptions raised by the callback are
+        logged and swallowed so they never break result collection.
 
     Returns:
       The function's return value.
@@ -358,6 +365,7 @@ class JobHandle:
 
     deadline = None if timeout is None else time.monotonic() + timeout
     observed_status = None
+    previous_status = None
     streamer_ctx = None
 
     if stream_logs:
@@ -367,6 +375,17 @@ class JobHandle:
     with streamer_ctx if streamer_ctx is not None else contextlib.nullcontext():
       while True:
         observed_status = self.status()
+        if on_status_change is not None and observed_status != previous_status:
+          try:
+            on_status_change(observed_status)
+          except Exception as exc:
+            logging.exception(
+              "on_status_change callback raised for job %s at status %s: %s",
+              self.job_id,
+              observed_status.value,
+              exc,
+            )
+        previous_status = observed_status
         if observed_status in _TERMINAL_STATUSES:
           break
         if deadline is not None and time.monotonic() >= deadline:
