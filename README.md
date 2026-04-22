@@ -64,18 +64,18 @@ dependencies via Cloud Build). Subsequent runs with unchanged
 dependencies start in under a minute.
 
 For the full first-run walkthrough, see the
-[Getting Started](https://keras-team.github.io/kinetic/getting_started.html)
+[Getting Started](https://kinetic.readthedocs.io/en/latest/getting_started.html)
 guide.
 
 ## Where to go next
 
-| Question                                         | Where to look                                                                                                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| How do I get my first job running?               | [Getting Started](https://keras-team.github.io/kinetic/getting_started.html)                                                                      |
-| When should I use `submit()` instead of `run()`? | [Detached Jobs](https://keras-team.github.io/kinetic/advanced/async_jobs.html)                                                                    |
-| How do I ship data and persist outputs?          | [Data](https://keras-team.github.io/kinetic/guides/data.html) and [Checkpointing](https://keras-team.github.io/kinetic/guides/checkpointing.html) |
-| Bundled vs prebuilt vs custom image — which one? | [Execution Modes](https://keras-team.github.io/kinetic/guides/execution_modes.html)                                                               |
-| Something's broken; where do I start?            | [Troubleshooting](https://keras-team.github.io/kinetic/troubleshooting.html)                                                                      |
+| Question                                         | Where to look                                                                                                                                             |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| How do I get my first job running?               | [Getting Started](https://kinetic.readthedocs.io/en/latest/getting_started.html)                                                                          |
+| When should I use `submit()` instead of `run()`? | [Detached Jobs](https://kinetic.readthedocs.io/en/latest/advanced/async_jobs.html)                                                                        |
+| How do I ship data and persist outputs?          | [Data](https://kinetic.readthedocs.io/en/latest/guides/data.html) and [Checkpointing](https://kinetic.readthedocs.io/en/latest/guides/checkpointing.html) |
+| Bundled vs prebuilt vs custom image — which one? | [Execution Modes](https://kinetic.readthedocs.io/en/latest/guides/execution_modes.html)                                                                   |
+| Something's broken; where do I start?            | [Troubleshooting](https://kinetic.readthedocs.io/en/latest/troubleshooting.html)                                                                          |
 
 ## Configuration
 
@@ -91,11 +91,11 @@ export KINETIC_CLUSTER="kinetic-cluster"      # optional
 
 The full surface — every variable, every CLI flag, and how the
 precedence rules combine them — lives in the
-[Configuration reference](https://keras-team.github.io/kinetic/configuration.html).
+[Configuration reference](https://kinetic.readthedocs.io/en/latest/configuration.html).
 
 ## Contributing
 
-See the [Contributing guide](https://keras-team.github.io/kinetic/contributing.html).
+See the [Contributing guide](https://kinetic.readthedocs.io/en/latest/contributing.html).
 
 ## License
 
