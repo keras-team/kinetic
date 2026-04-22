@@ -474,14 +474,17 @@ def _manifest_poll_loop(
         continue
 
       for child in manifest.get("children", []):
+        idx = child.get("group_index")
+        if not isinstance(idx, int) or idx < 0 or idx >= total_expected:
+          continue
         with handle._lock:
-          if handle.jobs[child.get("group_index", -1)] is not None:
+          if handle.jobs[idx] is not None:
             continue
         result = _load_child_handle(bucket_name, child, total_expected, project)
         if result is not None:
-          idx, job_handle = result
+          loaded_idx, job_handle = result
           with handle._lock:
-            handle.jobs[idx] = job_handle
+            handle.jobs[loaded_idx] = job_handle
 
       loaded = sum(1 for j in handle.jobs if j is not None)
       if loaded >= total_expected:
@@ -631,7 +634,7 @@ def _poll_and_handle_terminal(state: _SubmissionState) -> None:
   handle = state.handle
 
   # Collect all newly-terminal jobs in one pass.
-  newly_terminal: list[tuple[int, JobStatus]] = []
+  newly_terminal: list[tuple[int, JobStatus, JobHandle]] = []
   for idx in list(state.active):
     job = handle.jobs[idx]
     if job is None:
@@ -639,11 +642,11 @@ def _poll_and_handle_terminal(state: _SubmissionState) -> None:
     try:
       status = job.status()
       if status in _TERMINAL_STATUSES:
-        newly_terminal.append((idx, status))
-    except RuntimeError:
+        newly_terminal.append((idx, status, job))
+    except (RuntimeError, google_exceptions.GoogleAPIError):
       logging.warning("Failed to poll status for index %d", idx)
 
-  for idx, status in newly_terminal:
+  for idx, status, job in newly_terminal:
     state.active.discard(idx)
 
     if status not in (JobStatus.FAILED, JobStatus.NOT_FOUND):
@@ -652,7 +655,7 @@ def _poll_and_handle_terminal(state: _SubmissionState) -> None:
     if state.attempt_counts[idx] < state.max_attempts:
       # Retry: clean up previous attempt's K8s resources and re-queue.
       try:
-        handle.jobs[idx].cleanup(k8s=True, gcs=False)  # type: ignore[union-attr]
+        job.cleanup(k8s=True, gcs=False)
       except RuntimeError:
         logging.warning("Failed to clean up before retry for index %d", idx)
       state.pending.append(idx)

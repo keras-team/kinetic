@@ -1344,6 +1344,74 @@ class TestAttachBatchPolling(absltest.TestCase):
     # Only 1 of 3 loaded.
     self.assertEqual(len([j for j in handle.jobs if j is not None]), 1)
 
+  def test_poll_loop_skips_invalid_group_index(self):
+    """Poll loop must skip children with missing/non-int/out-of-range indices.
+
+    Regression: previously the loop used ``child.get("group_index", -1)``
+    which both aliased missing indices to ``jobs[-1]`` and raised
+    ``IndexError`` for out-of-range indices, crashing the poll thread.
+    """
+    partial_manifest = {
+      "group_id": "grp-abc12345",
+      "group_kind": "map",
+      "group_name": "test",
+      "tags": {},
+      "created_at": "2026-03-28T10:00:00Z",
+      "total_expected": 2,
+      "submit_fn_name": "train",
+      "children": [
+        {"group_index": 0, "job_id": "job-0", "attempts": 1},
+      ],
+    }
+    # Poll manifest contains one valid child (index 1) plus junk entries
+    # that used to break the loop.
+    poll_manifest = {
+      **partial_manifest,
+      "children": [
+        {"group_index": 0, "job_id": "job-0", "attempts": 1},
+        {"job_id": "job-missing-idx", "attempts": 1},  # no group_index
+        {"group_index": "bad", "job_id": "job-str-idx", "attempts": 1},
+        {"group_index": 99, "job_id": "job-oob", "attempts": 1},
+        {"group_index": 1, "job_id": "job-1", "attempts": 1},
+      ],
+    }
+
+    manifest_calls = [0]
+
+    def download_manifest_side_effect(bucket, group_id, project=None):
+      manifest_calls[0] += 1
+      if manifest_calls[0] <= 1:
+        return partial_manifest
+      return poll_manifest
+
+    def download_handle_side_effect(bucket, job_id, project=None):
+      idx = int(job_id.split("-")[1])
+      return self._make_handle_payload(job_id, group_index=idx)
+
+    with (
+      mock.patch(
+        "kinetic.collections.storage.download_manifest",
+        side_effect=download_manifest_side_effect,
+      ),
+      mock.patch(
+        "kinetic.collections.storage.download_handle",
+        side_effect=download_handle_side_effect,
+      ),
+      mock.patch("kinetic.collections.time.sleep"),
+    ):
+      handle = attach_batch(
+        "grp-abc12345",
+        project="proj",
+        cluster="cluster",
+        poll_interval=0.01,
+      )
+      handle._submission_complete.wait(timeout=5)
+
+    # Poll thread survived the junk entries and loaded the valid child.
+    self.assertTrue(handle._submission_complete.is_set())
+    self.assertIsNotNone(handle.jobs[0])
+    self.assertIsNotNone(handle.jobs[1])
+
 
 if __name__ == "__main__":
   absltest.main()
