@@ -27,7 +27,6 @@ import tempfile
 import kinetic
 from kinetic import Data
 
-
 # Decorators that do not need to close over any local state can be defined at
 # module scope. Test 1 reads from a fixed mount path that is bound when the
 # decorator is built, so the decorator must be constructed inside main() once
