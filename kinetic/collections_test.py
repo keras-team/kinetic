@@ -1144,6 +1144,33 @@ class TestFailuresCaching(absltest.TestCase):
     second_call = handle.failures()
     self.assertEqual(len(second_call), 2)
 
+  def test_failures_with_return_exceptions(self):
+    """failures() should return failed jobs even when return_exceptions=True."""
+    handle = _make_batch_handle(2)
+
+    def mock_status(self_handle):
+      return JobStatus.SUCCEEDED
+
+    def mock_result(self_handle, cleanup=True):
+      idx = int(self_handle.job_id.split("-")[1])
+      if idx == 1:
+        raise ValueError("job-1 failed")
+      return 42
+
+    with (
+      mock.patch.object(JobHandle, "status", mock_status),
+      mock.patch.object(JobHandle, "result", mock_result),
+      mock.patch("kinetic.collections.time.sleep"),
+    ):
+      results = handle.results(return_exceptions=True, cleanup=False)
+
+    self.assertEqual(results[0], 42)
+    self.assertIsInstance(results[1], ValueError)
+
+    failed = handle.failures()
+    self.assertEqual(len(failed), 1)
+    self.assertEqual(failed[0].job_id, "job-1")
+
 
 class TestAttachBatchPolling(absltest.TestCase):
   def _make_handle_payload(self, job_id, group_index=0):

@@ -279,19 +279,17 @@ class BatchHandle:
           exc = self._submission_errors[i]
           if return_exceptions:
             results_list[i] = exc
-          else:
-            failures.append(None)  # type: ignore[arg-type]
+          failures.append(None)  # type: ignore[arg-type]
         continue
       try:
         results_list[i] = job.result(cleanup=cleanup)
       except Exception as exc:
         if return_exceptions:
           results_list[i] = exc
-        else:
-          failures.append(job)
+        failures.append(job)
 
     with self._lock:
-      self._cached_failures = list(failures)
+      self._cached_failures = [f for f in failures if f is not None]
     return results_list, failures
 
   def _results_completion_order(
@@ -311,18 +309,16 @@ class BatchHandle:
       except Exception as exc:
         if return_exceptions:
           results_list.append(exc)
-        else:
-          failures.append(job)
+        failures.append(job)
 
     for idx in sorted(self._submission_errors):
       exc = self._submission_errors[idx]
       if return_exceptions:
         results_list.append(exc)
-      else:
-        failures.append(None)  # type: ignore[arg-type]
+      failures.append(None)  # type: ignore[arg-type]
 
     with self._lock:
-      self._cached_failures = list(failures)
+      self._cached_failures = [f for f in failures if f is not None]
     return results_list, failures
 
   def failures(self) -> list[JobHandle]:
