@@ -1,5 +1,16 @@
 # Examples
 
+```{toctree}
+:maxdepth: 2
+:hidden:
+
+examples/keras_training
+examples/jax_training
+examples/pytorch_training
+examples/gemma4_finetuning
+examples/llm_finetuning
+```
+
 A catalog of runnable example scripts using Kinetic. Click any card to open the source code on GitHub.
 
 Tier badges:
@@ -225,7 +236,7 @@ example of forwarding Kaggle credentials into the remote pod.
 
 ## Related pages
 
-- [Getting Started](../getting_started.md): your first run, end-to-end.
-- [Keras Training](keras_training.md): patterns for Keras users.
-- [LLM Fine-tuning](llm_finetuning.md): extended walkthrough using the
+- [Getting Started](getting_started.md): your first run, end-to-end.
+- [Keras Training](examples/keras_training.md): patterns for Keras users.
+- [LLM Fine-tuning](guides/llm_finetuning.md): extended walkthrough using the
   Gemma examples.

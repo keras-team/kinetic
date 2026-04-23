@@ -23,3 +23,9 @@
     color: var(--pst-color-text-base) !important;
     font-weight: 500;
 }
+
+/* Make the Examples top-level navigation header extra bold and larger */
+.bd-links li.toctree-l1 > a {
+    font-weight: 800 !important;
+    font-size: 1.05rem !important;
+}

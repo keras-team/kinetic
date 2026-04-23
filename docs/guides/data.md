@@ -156,7 +156,7 @@ payload — no redundant upload of the same bytes.
 ## Related pages
 
 - [Checkpointing](checkpointing.md): durable outputs and `KINETIC_OUTPUT_DIR`.
-- [Examples](examples.md): walks through the Data API end-to-end.
+- [Examples](../examples.md): walks through the Data API end-to-end.
 - [Cost Optimization](cost_optimization.md): FUSE vs download tradeoffs
   for repeated jobs.
 

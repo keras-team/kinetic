@@ -51,7 +51,7 @@ def fine_tune_gemma4():
     ...
 ```
 
-This pattern is covered in depth in the [Environment Variables](env_vars.md) guide.
+This pattern is covered in depth in the [Environment Variables](../guides/env_vars.md) guide.
 
 `keras-hub` and its tokenizer backends are not installed in the Kinetic base container by default. Add a `requirements.txt` to your project so Kinetic picks them up automatically:
 
@@ -62,7 +62,7 @@ tokenizers==0.22.2
 sentencepiece==0.2.1
 ```
 
-Kinetic detects changes to this file and rebuilds the container only when needed. See the [Managing Dependencies](dependencies.md) guide for details.
+Kinetic detects changes to this file and rebuilds the container only when needed. See the [Managing Dependencies](../guides/dependencies.md) guide for details.
 
 ## Fine-tuning with LoRA
 
@@ -326,5 +326,5 @@ kinetic down --project your-project-id
 
 ## Next Steps
 
-- **Checkpointing during training:** use Orbax to save intermediate checkpoints so a long run can resume if interrupted. See the [Checkpointing](checkpointing.md) guide.
-- **Distributed training:** scale to larger TPU slices or multiple hosts. See the [Distributed Training](distributed_training.md) guide.
+- **Checkpointing during training:** use Orbax to save intermediate checkpoints so a long run can resume if interrupted. See the [Checkpointing](../guides/checkpointing.md) guide.
+- **Distributed training:** scale to larger TPU slices or multiple hosts. See the [Distributed Training](../guides/distributed_training.md) guide.
