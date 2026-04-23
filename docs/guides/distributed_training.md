@@ -155,5 +155,5 @@ inspect non-leader logs to diagnose a crash.
 - [Accelerators](../accelerators.md) — slice topologies and naming.
 - [Checkpointing](checkpointing.md) — frequent checkpoints are
   essential here.
-- [Multiple Clusters](../advanced/clusters.md) — when to isolate
+- [Multiple Clusters](clusters.md) — when to isolate
   multi-host TPUs from the rest of your workloads.

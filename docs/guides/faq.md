@@ -7,7 +7,7 @@ result. Use `@kinetic.submit()` when the job is long enough that you'd
 rather get a `JobHandle` back, walk away, and reattach later. `submit()` is
 the right call for anything multi-hour, anything you might want to monitor
 from a different machine, or anything you want to fan out and check on in
-parallel. See [Managing Async Jobs](../advanced/async_jobs.md).
+parallel. See [Managing Async Jobs](async_jobs.md).
 
 ## Why is the first run slower?
 
@@ -57,7 +57,7 @@ metadata Kinetic persisted to GCS at submit time, so you can call
 `.status()`, `.result()`, `.tail()`, or `.cleanup()` from any machine that
 has Kinetic and your GCP credentials. The `job_id` is what `submit()`
 returned originally. If you have lost it, `kinetic.list_jobs()` enumerates
-jobs on the cluster. See [Managing Async Jobs](../advanced/async_jobs.md).
+jobs on the cluster. See [Managing Async Jobs](async_jobs.md).
 
 ## What gets cleaned up automatically?
 
@@ -82,7 +82,7 @@ restart. See [Cost Optimization](cost_optimization.md).
 Most users don't. Spin up a second cluster when you want to isolate GPU
 and TPU workloads, run jobs in different regions, or separate dev from
 prod environments. Each cluster has its own GKE control plane management
-fee, so don't add them speculatively. See [Multiple Clusters](../advanced/clusters.md).
+fee, so don't add them speculatively. See [Multiple Clusters](clusters.md).
 
 ## What does Pathways mean in practice?
 

@@ -77,7 +77,7 @@ def train_distributed():
 ```
 
 See [Distributed Training](../guides/distributed_training.md) for the full
-multi-host setup, and [LLM Fine-tuning](../guides/llm_finetuning.md) for a
+multi-host setup, and [LLM Fine-tuning](llm_finetuning.md) for a
 concrete Gemma example.
 
 ## Data
@@ -125,4 +125,4 @@ access patterns.
 - [Data](../guides/data.md) — shipping local files and reading from GCS.
 - [Checkpointing](../guides/checkpointing.md) — `KINETIC_OUTPUT_DIR` and resumable
   training.
-- [LLM Fine-tuning](../guides/llm_finetuning.md) — KerasHub + Gemma walkthrough.
+- [LLM Fine-tuning](llm_finetuning.md) — KerasHub + Gemma walkthrough.

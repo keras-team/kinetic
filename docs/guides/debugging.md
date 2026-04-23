@@ -165,7 +165,7 @@ you're ready.
 
 ## Related pages
 
-- [Detached Jobs](../advanced/async_jobs.md) — pairs with
+- [Detached Jobs](async_jobs.md) — pairs with
   `kinetic jobs debug <job_id>` for long debug sessions.
 - [Configuration](../configuration.md) — `KINETIC_DEBUG_WAIT_TIMEOUT`
   and the other user-facing environment variables.

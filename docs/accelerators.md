@@ -39,7 +39,7 @@ Newer accelerators (TPU v6e, H100) can have limited on-demand availability. If `
 kinetic pool add --accelerator tpu-v6e-8 --reservation my-v6e-reservation --project your-project-id
 ```
 
-See the [Capacity Reservations](advanced/reservations.md) guide for details.
+See the [Capacity Reservations](guides/reservations.md) guide for details.
 
 ## Related pages
 
@@ -47,5 +47,5 @@ See the [Capacity Reservations](advanced/reservations.md) guide for details.
   reservations vs on-demand for each accelerator class.
 - [Distributed Training](guides/distributed_training.md) — which
   TPU topologies are multi-host and need Pathways.
-- [Multiple Clusters](advanced/clusters.md) — when to put accelerator
+- [Multiple Clusters](guides/clusters.md) — when to put accelerator
   pools in separate clusters.

@@ -1,17 +1,23 @@
 # Examples
 
 ```{toctree}
-:maxdepth: 2
 :hidden:
 
-examples/keras_training
-examples/jax_training
-examples/pytorch_training
-examples/gemma4_finetuning
-examples/llm_finetuning
+examples/fashion_mnist
+examples/simple_demo
+examples/example_async_jobs
+examples/example_data_api
+examples/example_checkpoint
+examples/example_keras_checkpoint
+examples/example_collections
+examples/example_gke
+examples/pathways_example
+examples/gemma_sft_pathways_distributed
+examples/gemma3_sft_demo
+examples/tunix_sft
 ```
 
-A catalog of runnable example scripts using Kinetic. Click any card to open the source code on GitHub.
+A catalog of runnable example scripts using Kinetic. Every example below is rendered directly on this site and is also available as a raw Python script in the GitHub repository.
 
 Tier badges:
 
@@ -39,7 +45,7 @@ python examples/fashion_mnist.py
 :class-container: sd-text-left
 
 :::{grid-item-card} Fashion-MNIST on a TPU
-:link: https://github.com/keras-team/kinetic/blob/main/examples/fashion_mnist.py
+:link: examples/fashion_mnist
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -55,7 +61,7 @@ stream a real result back to your shell.
 :::
 
 :::{grid-item-card} Keras + JAX smoke test
-:link: https://github.com/keras-team/kinetic/blob/main/examples/simple_demo.py
+:link: examples/simple_demo
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -79,7 +85,7 @@ ask for hardware.
 :class-container: sd-text-left
 
 :::{grid-item-card} Submit, monitor, and reattach
-:link: https://github.com/keras-team/kinetic/blob/main/examples/example_async_jobs.py
+:link: examples/example_async_jobs
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -95,7 +101,7 @@ Walks through every part of the detached-job API end-to-end: `submit()`,
 :::
 
 :::{grid-item-card} Ship local files into the job
-:link: https://github.com/keras-team/kinetic/blob/main/examples/example_data_api.py
+:link: examples/example_data_api
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -111,7 +117,7 @@ to know whether the bytes started on your laptop or in GCS.
 :::
 
 :::{grid-item-card} Resumable JAX training with Orbax
-:link: https://github.com/keras-team/kinetic/blob/main/examples/example_checkpoint.py
+:link: examples/example_checkpoint
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -128,7 +134,7 @@ same function and seeing it skip already-completed steps.
 :::
 
 :::{grid-item-card} Resumable Keras training
-:link: https://github.com/keras-team/kinetic/blob/main/examples/example_keras_checkpoint.py
+:link: examples/example_keras_checkpoint
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -145,7 +151,7 @@ save/load code.
 :::
 
 :::{grid-item-card} Parallel hyperparameter sweep
-:link: https://github.com/keras-team/kinetic/blob/main/examples/example_collections.py
+:link: examples/example_collections
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -161,7 +167,7 @@ job that inevitably fails halfway through.
 :::
 
 :::{grid-item-card} Mix accelerators in one driver
-:link: https://github.com/keras-team/kinetic/blob/main/examples/example_gke.py
+:link: examples/example_gke
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -184,7 +190,7 @@ actually serve.
 :class-container: sd-text-left
 
 :::{grid-item-card} Multi-host JAX on Pathways
-:link: https://github.com/keras-team/kinetic/blob/main/examples/pathways_example.py
+:link: examples/pathways_example
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -201,7 +207,7 @@ trust them with a real workload.
 :::
 
 :::{grid-item-card} Distributed Gemma 2B fine-tune
-:link: https://github.com/keras-team/kinetic/blob/main/examples/gemma_sft_pathways_distributed.py
+:link: examples/gemma_sft_pathways_distributed
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -218,7 +224,7 @@ weights from Kaggle and runs on Pathways.
 :::
 
 :::{grid-item-card} Single-TPU Gemma 3 fine-tune
-:link: https://github.com/keras-team/kinetic/blob/main/examples/gemma3_sft_demo.py
+:link: examples/gemma3_sft_demo
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -234,7 +240,7 @@ example of forwarding Kaggle credentials into the remote pod.
 :::
 
 :::{grid-item-card} Tunix SFT Example
-:link: https://github.com/keras-team/kinetic/blob/main/examples/tunix_sft.py
+:link: examples/tunix_sft
 :class-card: sd-shadow-sm
 :class-body: sd-fs-6
 :class-title: sd-fs-5
@@ -255,5 +261,5 @@ capture for credentials.
 
 - [Getting Started](getting_started.md): your first run, end-to-end.
 - [Keras Training](examples/keras_training.md): patterns for Keras users.
-- [LLM Fine-tuning](guides/llm_finetuning.md): extended walkthrough using the
+- [LLM Fine-tuning](examples/llm_finetuning.md): extended walkthrough using the
   Gemma examples.

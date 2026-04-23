@@ -97,7 +97,7 @@ def train():
 blessed prebuilt base images. Before you can use prebuilt mode, run
 `kinetic build-base --repo <your-repo>` once and set
 `KINETIC_BASE_IMAGE_REPO=<your-repo>` (or pass `base_image_repo=` to the
-decorator). See [Container Images](../advanced/containers.md) for the full
+decorator). See [Container Images](containers.md) for the full
 workflow.
 :::
 
@@ -185,6 +185,6 @@ picked:
 ## Related pages
 
 - [Dependencies](dependencies.md) — how Kinetic discovers what to install.
-- [Container Images](../advanced/containers.md) — base-image workflow and
+- [Container Images](containers.md) — base-image workflow and
   `kinetic build-base`.
 - [Getting Started](../getting_started.md) — your first run end-to-end.

@@ -120,7 +120,7 @@ You have two practical options:
   container image with them installed and pass it as
   `container_image="<your-image-uri>"`. This gives you full control
   over the build environment, including `pip.conf`, secret mounts, and
-  `gcloud` authentication. See [Container Images](../advanced/containers.md).
+  `gcloud` authentication. See [Container Images](containers.md).
 
 Avoid embedding secrets in `requirements.txt`
 (`https://user:token@host/...`); the file is uploaded to GCS and used
@@ -150,7 +150,7 @@ up in build logs and cached artifacts.
 ## Related pages
 
 - [Execution Modes](execution_modes.md) — where the discovered deps go.
-- [Container Images](../advanced/containers.md) — custom image and
+- [Container Images](containers.md) — custom image and
   base-image workflows.
 - [Troubleshooting](../troubleshooting.md) — what to check when an
   import fails on the remote.

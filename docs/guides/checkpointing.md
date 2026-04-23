@@ -149,7 +149,7 @@ After the snippet:
 ## Related pages
 
 - [Data](data.md) — input side of the I/O story.
-- [Managing Async Jobs](../advanced/async_jobs.md) — long jobs are also
+- [Managing Async Jobs](async_jobs.md) — long jobs are also
   the place where you most want detached submission.
 - [Cost Optimization](cost_optimization.md) — spot instances make
   checkpointing essential.

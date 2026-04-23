@@ -129,8 +129,8 @@ kinetic pool add --accelerator h100 --reservation my-h100-reservation
 
 - [Execution Modes](execution_modes.md) — bundled vs prebuilt
   tradeoffs when build cost matters.
-- [Capacity Reservations](../advanced/reservations.md) — guaranteed
+- [Capacity Reservations](reservations.md) — guaranteed
   capacity for newer accelerators.
-- [Multiple Clusters](../advanced/clusters.md) — when separate
+- [Multiple Clusters](clusters.md) — when separate
   control planes are worth the extra ~$0.10/hr.
 
