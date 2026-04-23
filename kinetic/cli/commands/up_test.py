@@ -12,7 +12,7 @@ from kinetic.cli.infra.state import StackState
 from kinetic.core.accelerators import GpuConfig, TpuConfig
 
 
-def _make_state(node_pools=None):
+def _make_state(node_pools=None, force_destroy=True):
   """Create a StackState for testing."""
   return StackState(
     project="test-project",
@@ -20,6 +20,7 @@ def _make_state(node_pools=None):
     cluster_name="kinetic-cluster",
     node_pools=node_pools or [],
     stack=mock.MagicMock(),
+    force_destroy=force_destroy,
   )
 
 
@@ -208,6 +209,51 @@ class UpCommandPoolPreservationTest(absltest.TestCase):
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("Setup Complete", result.output)
+
+
+class UpCommandForceDestroyTest(absltest.TestCase):
+  """Precedence for force_destroy: explicit CLI flag > state > default True."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    self.mocks = _start_patches(self)
+
+  def test_default_when_no_flag_and_no_existing_state(self):
+    self.mocks["load_state"].return_value = _make_state()
+
+    result = self.runner.invoke(up, _CLI_ARGS)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    config = self.mocks["apply_update"].call_args[0][0]
+    self.assertTrue(config.force_destroy)
+
+  def test_preserves_false_from_existing_state(self):
+    self.mocks["load_state"].return_value = _make_state(force_destroy=False)
+
+    result = self.runner.invoke(up, _CLI_ARGS)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    config = self.mocks["apply_update"].call_args[0][0]
+    self.assertFalse(config.force_destroy)
+
+  def test_explicit_flag_overrides_state(self):
+    self.mocks["load_state"].return_value = _make_state(force_destroy=False)
+
+    result = self.runner.invoke(up, _CLI_ARGS + ["--force-destroy"])
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    config = self.mocks["apply_update"].call_args[0][0]
+    self.assertTrue(config.force_destroy)
+
+  def test_no_force_destroy_flag_overrides_default(self):
+    self.mocks["load_state"].return_value = _make_state()
+
+    result = self.runner.invoke(up, _CLI_ARGS + ["--no-force-destroy"])
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    config = self.mocks["apply_update"].call_args[0][0]
+    self.assertFalse(config.force_destroy)
 
 
 if __name__ == "__main__":

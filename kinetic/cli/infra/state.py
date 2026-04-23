@@ -15,6 +15,7 @@ from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from kinetic.cli.infra.program import create_program
 from kinetic.cli.infra.stack_manager import (
+  get_current_force_destroy,
   get_current_node_pools,
   get_stack,
 )
@@ -32,6 +33,7 @@ class StackState:
   cluster_name: str
   node_pools: list[NodePoolConfig] = field(default_factory=list)
   stack: auto.Stack | None = None
+  force_destroy: bool = True
 
 
 def load_state(
@@ -91,6 +93,7 @@ def load_state(
     warning("State refresh encountered an issue (using cached state).")
 
   node_pools = get_current_node_pools(stack)
+  force_destroy = get_current_force_destroy(stack)
 
   return StackState(
     project=project,
@@ -98,6 +101,7 @@ def load_state(
     cluster_name=cluster_name,
     node_pools=node_pools,
     stack=stack,
+    force_destroy=force_destroy,
   )
 
 

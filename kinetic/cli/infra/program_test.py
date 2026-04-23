@@ -81,13 +81,14 @@ class TestCreateTpuNodePool(parameterized.TestCase):
       self.assertIsNone(placement)
 
 
-def _make_config(node_pools=None):
+def _make_config(node_pools=None, force_destroy=True):
   """Create a mock InfraConfig for testing."""
   config = mock.MagicMock()
   config.project = "test-project"
   config.zone = "us-central1-a"
   config.cluster_name = "test-cluster"
   config.node_pools = node_pools or []
+  config.force_destroy = force_destroy
   return config
 
 
@@ -138,6 +139,47 @@ class TestGpuDriverConditional(absltest.TestCase):
       if c.args[0] == "nvidia-gpu-drivers"
     ]
     self.assertEmpty(gpu_calls)
+
+
+class TestForceDestroy(parameterized.TestCase):
+  """force_destroy on InfraConfig must flow to both GCS buckets."""
+
+  @parameterized.named_parameters(
+    dict(testcase_name="enabled", force_destroy=True),
+    dict(testcase_name="disabled", force_destroy=False),
+  )
+  def test_buckets_receive_force_destroy(self, force_destroy):
+    config = _make_config(force_destroy=force_destroy)
+
+    with (
+      mock.patch.object(program, "pulumi"),
+      mock.patch.object(program, "command"),
+      mock.patch.object(program, "gcp") as gcp_mock,
+      mock.patch.object(program, "k8s"),
+    ):
+      program.create_program(config)()
+
+    bucket_calls = gcp_mock.storage.Bucket.call_args_list
+    self.assertLen(bucket_calls, 2)
+    for call in bucket_calls:
+      self.assertEqual(call.kwargs["force_destroy"], force_destroy)
+
+  def test_force_destroy_is_exported(self):
+    config = _make_config(force_destroy=False)
+
+    with (
+      mock.patch.object(program, "pulumi") as pulumi_mock,
+      mock.patch.object(program, "command"),
+      mock.patch.object(program, "gcp"),
+      mock.patch.object(program, "k8s"),
+    ):
+      program.create_program(config)()
+
+    exported = {
+      call.args[0]: call.args[1] for call in pulumi_mock.export.call_args_list
+    }
+    self.assertIn("force_destroy", exported)
+    self.assertFalse(exported["force_destroy"])
 
 
 if __name__ == "__main__":

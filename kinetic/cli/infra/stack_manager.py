@@ -61,6 +61,19 @@ def get_stack(program_fn, config):
   return stack
 
 
+def get_current_force_destroy(stack) -> bool:
+  """Read ``force_destroy`` from stack outputs, defaulting to True.
+
+  Stacks created before this setting was exported do not have the output,
+  in which case they used ``force_destroy=True`` implicitly, so the same
+  default is returned for compatibility.
+  """
+  outputs = stack.outputs()
+  if "force_destroy" in outputs:
+    return bool(outputs["force_destroy"].value)
+  return True
+
+
 def get_current_node_pools(stack) -> list[NodePoolConfig]:
   """Read the current node pool list from Pulumi stack exports.
 
