@@ -14,26 +14,20 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    :caption: Core Workflows
    :hidden:
 
-   advanced/async_jobs
    guides/data
    guides/checkpointing
    guides/dependencies
    guides/env_vars
+   guides/async_jobs
+   guides/batched_jobs
    guides/debugging
+   guides/cost_optimization
+   guides/clusters
+   guides/distributed_training
+   guides/containers
+   guides/reservations
 
    examples
-
-.. toctree::
-   :caption: Scaling and Operations
-   :hidden:
-
-   guides/cost_optimization
-   advanced/clusters
-   guides/distributed_training
-   advanced/batched_jobs
-   guides/llm_finetuning
-   advanced/containers
-   advanced/reservations
 
 .. toctree::
    :caption: Reference
@@ -84,7 +78,7 @@ Three entry points cover what most new users need first:
    * - Install, point at a cluster, and run a real Keras job in minutes.
        :doc:`Getting Started <getting_started>`.
      - Switch from blocking ``run()`` to detached ``submit()`` for jobs
-       that take hours. :doc:`Detached Jobs <advanced/async_jobs>`.
+       that take hours. :doc:`Detached Jobs <guides/async_jobs>`.
      - Ship local files in, write durable artifacts back out via
        ``KINETIC_OUTPUT_DIR``. :doc:`Data <guides/data>` and
        :doc:`Checkpointing <guides/checkpointing>`.

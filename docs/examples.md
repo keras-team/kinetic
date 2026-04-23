@@ -2,12 +2,13 @@
 
 ```{toctree}
 :maxdepth: 2
-:caption: Contents
+:hidden:
 
 examples/keras_training
 examples/jax_training
 examples/pytorch_training
 examples/gemma4_finetuning
+examples/llm_finetuning
 ```
 
 A catalog of runnable example scripts using Kinetic. Click any card to open the source code on GitHub.
