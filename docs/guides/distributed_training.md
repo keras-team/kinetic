@@ -62,8 +62,8 @@ def train_data_parallel():
 ```
 
 For a richer end-to-end example using a real model, see
-[`pathways_example.py`](examples.md) and
-[`gemma_sft_pathways_distributed.py`](examples.md).
+[`pathways_example.py`](../examples.md) and
+[`gemma_sft_pathways_distributed.py`](../examples.md).
 
 ## How to think about it
 

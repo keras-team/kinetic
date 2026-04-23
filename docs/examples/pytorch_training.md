@@ -11,7 +11,7 @@ torch
 torchvision
 ```
 
-Kinetic will install these in the remote container automatically. See [Managing Dependencies](dependencies.md) for details on how dependency detection works.
+Kinetic will install these in the remote container automatically. See [Managing Dependencies](../guides/dependencies.md) for details on how dependency detection works.
 
 ## Basic Usage
 
@@ -106,9 +106,9 @@ def train():
 
 ## Related pages
 
-- [Dependencies](dependencies.md) — how `torch` gets installed in
+- [Dependencies](../guides/dependencies.md) — how `torch` gets installed in
   the remote container.
 - [Accelerators](../accelerators.md) — full list of GPUs and
   multi-GPU configurations.
-- [Cost Optimization](cost_optimization.md) — spot capacity for
+- [Cost Optimization](../guides/cost_optimization.md) — spot capacity for
   GPU workloads.

@@ -44,7 +44,7 @@ A few things to note:
   [Accelerators](../accelerators.md).
 
 For the canonical end-to-end example with a real dataset, see
-[`fashion_mnist.py`](examples.md) (first entry under Quickstart).
+[`fashion_mnist.py`](../examples.md) (first entry under Quickstart).
 
 ## How to think about it
 
@@ -53,7 +53,7 @@ remote node. That has two practical consequences:
 
 - **No local state crosses the boundary.** Anything the function needs
   must either be passed as an argument, captured by closure, or shipped
-  via [`kinetic.Data`](data.md). Locally-loaded variables that you reference
+  via [`kinetic.Data`](../guides/data.md). Locally-loaded variables that you reference
   by global name will not be there on the remote.
 - **The Keras backend is whatever the remote has installed.** By default
   Kinetic's prebuilt and bundled images use JAX. Set `KERAS_BACKEND` if
@@ -76,8 +76,8 @@ def train_distributed():
     ...
 ```
 
-See [Distributed Training](distributed_training.md) for the full
-multi-host setup, and [LLM Fine-tuning](llm_finetuning.md) for a
+See [Distributed Training](../guides/distributed_training.md) for the full
+multi-host setup, and [LLM Fine-tuning](../guides/llm_finetuning.md) for a
 concrete Gemma example.
 
 ## Data
@@ -109,20 +109,20 @@ train(Data("gs://my-bucket/dataset/"))
 train(Data("gs://my-bucket/large/", fuse=True))
 ```
 
-`Data` accepts both local paths and `gs://` URIs. See [Data](data.md)
+`Data` accepts both local paths and `gs://` URIs. See [Data](../guides/data.md)
 for the decision matrix between downloaded, FUSE-mounted, and direct
 access patterns.
 
 ## Next steps
 
-- [`fashion_mnist.py`](examples.md) — full working example with a real
+- [`fashion_mnist.py`](../examples.md) — full working example with a real
   dataset (first entry under Quickstart).
-- [Checkpointing](checkpointing.md) — persist model weights and resume
+- [Checkpointing](../guides/checkpointing.md) — persist model weights and resume
   across runs.
 
 ## Related pages
 
-- [Data](data.md) — shipping local files and reading from GCS.
-- [Checkpointing](checkpointing.md) — `KINETIC_OUTPUT_DIR` and resumable
+- [Data](../guides/data.md) — shipping local files and reading from GCS.
+- [Checkpointing](../guides/checkpointing.md) — `KINETIC_OUTPUT_DIR` and resumable
   training.
-- [LLM Fine-tuning](llm_finetuning.md) — KerasHub + Gemma walkthrough.
+- [LLM Fine-tuning](../guides/llm_finetuning.md) — KerasHub + Gemma walkthrough.

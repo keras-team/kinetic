@@ -70,7 +70,7 @@ for you:
   in `requirements.txt`.
 - **JAX packages in your `requirements.txt` are filtered out** before
   install so they don't shadow the accelerator-correct copy in the
-  image. See [Dependencies](dependencies.md) for the filter behavior.
+  image. See [Dependencies](../guides/dependencies.md) for the filter behavior.
 
 Inside the function, `jax.devices()` returns whatever the pod sees: an
 8-chip TPU slice for `tpu-v6e-8`, an 8-device array for
@@ -114,7 +114,7 @@ def train_distributed():
 ```
 
 Without `backend="pathways"`, multi-host JAX collectives won't have a
-working coordinator. See [Distributed Training](distributed_training.md)
+working coordinator. See [Distributed Training](../guides/distributed_training.md)
 for the full multi-host setup.
 
 ## Data
@@ -146,21 +146,21 @@ train(Data("gs://my-bucket/dataset/"))
 train(Data("gs://my-bucket/large/", fuse=True))
 ```
 
-`Data` accepts both local paths and `gs://` URIs. See [Data](data.md)
+`Data` accepts both local paths and `gs://` URIs. See [Data](../guides/data.md)
 for the decision matrix between downloaded, FUSE-mounted, and direct
 access patterns.
 
 ## Next steps
 
-- [Distributed Training](distributed_training.md) — multi-host JAX with
+- [Distributed Training](../guides/distributed_training.md) — multi-host JAX with
   Pathways.
-- [Checkpointing](checkpointing.md) — Orbax checkpoint patterns under
+- [Checkpointing](../guides/checkpointing.md) — Orbax checkpoint patterns under
   `KINETIC_OUTPUT_DIR`.
 
 ## Related pages
 
-- [Distributed Training](distributed_training.md) — Pathways and
+- [Distributed Training](../guides/distributed_training.md) — Pathways and
   multi-host coordination.
-- [Dependencies](dependencies.md) — JAX filtering and what gets
+- [Dependencies](../guides/dependencies.md) — JAX filtering and what gets
   installed.
-- [Checkpointing](checkpointing.md) — Orbax + `KINETIC_OUTPUT_DIR`.
+- [Checkpointing](../guides/checkpointing.md) — Orbax + `KINETIC_OUTPUT_DIR`.
