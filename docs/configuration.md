@@ -7,17 +7,18 @@ disagree.
 
 ## Environment variables
 
-Variable                  | Used by                   | Default                          | Description
-------------------------- | ------------------------- | -------------------------------- | --------------------------------------------------------------------------------
-`KINETIC_PROJECT`         | CLI + decorators          | _(required)_                     | GCP project ID. Falls back to `GOOGLE_CLOUD_PROJECT` if unset.
-`KINETIC_ZONE`            | CLI + decorators          | `us-central1-a`                  | GCP zone for jobs and clusters.
-`KINETIC_CLUSTER`         | CLI + decorators          | `kinetic-cluster`                | GKE cluster name.
-`KINETIC_NAMESPACE`       | CLI + decorators          | `default`                        | Kubernetes namespace.
-`KINETIC_BASE_IMAGE_REPO` | Decorator (prebuilt mode) | `kinetic`                        | Repo for prebuilt base images. See [Execution Modes](guides/execution_modes.md).
-`KINETIC_OUTPUT_DIR`      | CLI + remote pod          | `gs://{bucket}/outputs/{job_id}` | Per-job durable artifact prefix. See [Checkpointing](guides/checkpointing.md).
-`KINETIC_RESERVATION`     | `kinetic pool add`        | _(unset)_                        | GCP capacity reservation to consume. Pool-level config, not a per-job setting.
-`KINETIC_LOG_LEVEL`       | Library                   | `INFO`                           | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`.
-`KINETIC_STATE_DIR`       | Library                   | `~/.kinetic/pulumi`              | Pulumi state directory used by `kinetic up`/`down`.
+Variable                     | Used by                   | Default                          | Description
+---------------------------- | ------------------------- | -------------------------------- | --------------------------------------------------------------------------------
+`KINETIC_PROJECT`            | CLI + decorators          | _(required)_                     | GCP project ID. Falls back to `GOOGLE_CLOUD_PROJECT` if unset.
+`KINETIC_ZONE`               | CLI + decorators          | `us-central1-a`                  | GCP zone for jobs and clusters.
+`KINETIC_CLUSTER`            | CLI + decorators          | `kinetic-cluster`                | GKE cluster name.
+`KINETIC_NAMESPACE`          | CLI + decorators          | `default`                        | Kubernetes namespace.
+`KINETIC_BASE_IMAGE_REPO`    | Decorator (prebuilt mode) | `kinetic`                        | Repo for prebuilt base images. See [Execution Modes](guides/execution_modes.md).
+`KINETIC_OUTPUT_DIR`         | CLI + remote pod          | `gs://{bucket}/outputs/{job_id}` | Per-job durable artifact prefix. See [Checkpointing](guides/checkpointing.md).
+`KINETIC_RESERVATION`        | `kinetic pool add`        | _(unset)_                        | GCP capacity reservation to consume. Pool-level config, not a per-job setting.
+`KINETIC_LOG_LEVEL`          | Library                   | `INFO`                           | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`.
+`KINETIC_STATE_DIR`          | Library                   | `~/.kinetic/pulumi`              | Pulumi state directory used by `kinetic up`/`down`.
+`KINETIC_DEBUG_WAIT_TIMEOUT` | Library + remote pod      | `600`                            | Seconds the remote pod waits for a debugger client to attach when `debug=True`. Applies on both sides (local `debug_attach()` and the pod's debugpy server).
 
 Set them in your shell profile (`~/.bashrc`, `~/.zshrc`) so they
 persist across sessions:
@@ -79,8 +80,8 @@ the resolved value of the most common variables (project, zone,
 cluster, namespace, output dir, and the local Pulumi state dir) and
 where each came from. Run it before reaching for `kinetic doctor`.
 Variables that aren't shown there (`KINETIC_BASE_IMAGE_REPO`,
-`KINETIC_RESERVATION`, `KINETIC_LOG_LEVEL`) can be inspected with `env
-| grep KINETIC_`.
+`KINETIC_RESERVATION`, `KINETIC_LOG_LEVEL`, `KINETIC_DEBUG_WAIT_TIMEOUT`)
+can be inspected with `env | grep KINETIC_`.
 
 ## Related pages
 

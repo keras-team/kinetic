@@ -19,5 +19,3 @@ called, the system follows these steps:
 5.  **Job Submission**: Based on the requested accelerator type, Kinetic submits a Kubernetes Job (for GKE) or a LeaderWorkerSet (for multi-host Pathways) to the target cluster.
 6.  **Remote Execution**: The remote pod pulls the container image, retrieves the serialized artifacts, mounts the required data volumes, and executes the function.
 7.  **Result Retrieval**: Upon completion, the function's return value is retrieved from GCS, deserialized, and returned to the local Python process.
-
-TODO(jeffcarp): Expand here
