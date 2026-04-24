@@ -21,47 +21,69 @@ def config(ctx):
     ctx.invoke(show)
 
 
+def _resolve(env_var, profile_value, default):
+  """Return (value, source) following the CLI precedence chain.
+
+  CLI flag is not visible to `config show`, so the effective precedence
+  reported here is: env var > active profile > built-in default.
+  """
+  env_val = os.environ.get(env_var)
+  if env_val:
+    return env_val, env_var
+  if profile_value is not None:
+    return profile_value, "profile"
+  return default, f"default ({default})" if default else ""
+
+
 @config.command()
-def show():
+@click.pass_context
+def show(ctx):
   """Show current configuration."""
   banner("kinetic Configuration")
+
+  # Root group resolves the active profile (respecting --profile, env,
+  # and stored 'current') and stashes it in ctx.obj.
+  active = None
+  if ctx.obj:
+    active = ctx.obj.get("active_profile")
+
+  if active is not None:
+    console.print(f"Active profile: [bold]{active.name}[/bold]")
+  else:
+    console.print("[dim]No active profile.[/dim]")
 
   table = Table()
   table.add_column("Setting", style="bold")
   table.add_column("Value", style="green")
   table.add_column("Source", style="dim")
 
-  # Project
-  project = os.environ.get("KINETIC_PROJECT")
-  table.add_row(
-    "Project",
-    project or "(not set)",
-    "KINETIC_PROJECT" if project else "",
+  project, src = _resolve(
+    "KINETIC_PROJECT",
+    active.project if active else None,
+    None,
   )
+  table.add_row("Project", project or "(not set)", src or "")
 
-  # Zone
-  zone = os.environ.get("KINETIC_ZONE")
-  table.add_row(
-    "Zone",
-    zone or DEFAULT_ZONE,
-    "KINETIC_ZONE" if zone else f"default ({DEFAULT_ZONE})",
+  zone, src = _resolve(
+    "KINETIC_ZONE",
+    active.zone if active else None,
+    DEFAULT_ZONE,
   )
+  table.add_row("Zone", zone, src)
 
-  # Cluster name
-  cluster = os.environ.get("KINETIC_CLUSTER")
-  table.add_row(
-    "Cluster Name",
-    cluster or DEFAULT_CLUSTER_NAME,
-    "KINETIC_CLUSTER" if cluster else f"default ({DEFAULT_CLUSTER_NAME})",
+  cluster, src = _resolve(
+    "KINETIC_CLUSTER",
+    active.cluster if active else None,
+    DEFAULT_CLUSTER_NAME,
   )
+  table.add_row("Cluster Name", cluster, src)
 
-  # Namespace
-  namespace = os.environ.get("KINETIC_NAMESPACE")
-  table.add_row(
-    "Namespace",
-    namespace or "default",
-    "KINETIC_NAMESPACE" if namespace else "default (default)",
+  namespace, src = _resolve(
+    "KINETIC_NAMESPACE",
+    active.namespace if active else None,
+    "default",
   )
+  table.add_row("Namespace", namespace, src)
 
   # Output directory
   output_dir = os.environ.get("KINETIC_OUTPUT_DIR")
@@ -82,9 +104,10 @@ def show():
   console.print()
   console.print(table)
   console.print()
-  console.print("Set values via environment variables:")
-  console.print("  export KINETIC_PROJECT=my-project")
-  console.print(f"  export KINETIC_ZONE={DEFAULT_ZONE}")
-  console.print("  export KINETIC_CLUSTER=kinetic-cluster")
-  console.print("  export KINETIC_NAMESPACE=my-namespace")
+  console.print(
+    "Precedence: CLI flag > KINETIC_* env var > active profile > default."
+  )
+  console.print(
+    "Manage profiles with 'kinetic profile create|ls|use|show|rm'."
+  )
   console.print()
