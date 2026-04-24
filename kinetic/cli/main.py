@@ -7,6 +7,7 @@ from kinetic.cli.commands.build_base import build_base
 from kinetic.cli.commands.config import config
 from kinetic.cli.commands.doctor import doctor
 from kinetic.cli.commands.down import down
+from kinetic.cli.commands.init import init
 from kinetic.cli.commands.jobs import jobs
 from kinetic.cli.commands.pool import pool
 from kinetic.cli.commands.profile import profile
@@ -88,6 +89,7 @@ def _spread_defaults(group, defaults):
 
 
 cli.add_command(accelerators)
+cli.add_command(init)
 cli.add_command(up)
 cli.add_command(down)
 cli.add_command(status)

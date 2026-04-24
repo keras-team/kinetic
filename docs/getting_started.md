@@ -19,16 +19,6 @@ gcloud auth login
 gcloud auth application-default login
 ```
 
-Set your GCP project ID so Kinetic knows where to run jobs:
-
-```bash
-export KINETIC_PROJECT="your-project-id"
-```
-
-Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) so it
-persists. See [Configuration](configuration.md) for the full list of
-environment variables.
-
 ## Install
 
 ```bash
@@ -43,44 +33,40 @@ CLI for managing infrastructure.
 > It will be installed to `~/.kinetic/pulumi` on first use if not
 > already present.
 
-## Are you the first user, or joining a team?
-
-Two paths from here:
-
-- **Joining an existing Kinetic team.** Someone else has already run
-  `kinetic up`. Point your shell at the team's cluster and skip ahead
-  to [Run your first job](#run-your-first-job):
-
-  ```bash
-  export KINETIC_CLUSTER="cluster-name"
-  export KINETIC_ZONE="us-central1-a"  # if it differs from the default
-  ```
-
-- **First user in your project.** You need to provision a cluster once
-  before you can run anything. Continue with the next step.
-
-## Provision infrastructure (first user only)
-
-Skip this section if your team already runs a Kinetic cluster (the
-"joining a team" path above). Otherwise, run the one-time setup. It
-interactively prompts for your GCP project and accelerator type:
+## Set up your environment
 
 ```bash
-kinetic up
+kinetic init
 ```
 
-This:
+`kinetic init` checks your local tools, auth, and project, then routes
+you down one of two paths:
 
-- Enables required APIs (Cloud Build, Artifact Registry, Cloud
-  Storage, GKE).
-- Creates an Artifact Registry repository for container images.
-- Provisions a GKE cluster with an accelerator node pool.
-- Configures Docker authentication and `kubectl` access.
+- **Join** — if your shell has previously provisioned a cluster in
+  this project, `init` lists it and configures `kubectl` for you.
+- **Create** — if no local cluster is found, `init` calls
+  `kinetic up` to enable APIs, provision a GKE cluster with an
+  accelerator node pool, and wire up Docker / `kubectl` access.
 
-You can also run non-interactively:
+Either way, `init` ends by saving a **profile** (a named bundle of
+project, zone, cluster, and namespace) and setting it as active. Every
+subsequent `kinetic` command picks that up automatically — no
+`export KINETIC_*` needed.
+
+> **Joining a cluster someone else provisioned?** If the team cluster
+> isn't in your local Pulumi state yet, `init` won't find it. Create
+> the profile directly:
+>
+> ```bash
+> kinetic profile create team-prod \
+>   --project my-proj --zone us-central1-a --cluster team-cluster
+> kinetic profile use team-prod
+> ```
+
+To run `init` non-interactively, you can still pre-set the project:
 
 ```bash
-kinetic up --project=my-project --accelerator=t4 --yes
+kinetic init --project=my-project --yes
 ```
 
 > **Cleanup reminder:** when you're done, run `kinetic down` to tear

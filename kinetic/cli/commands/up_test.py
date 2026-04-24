@@ -1,6 +1,9 @@
 """Tests for kinetic.cli.commands.up — resilience to partial failures."""
 
+import json
 import subprocess
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 from absl.testing import absltest
@@ -58,20 +61,44 @@ def _start_patches(test_case):
   return mocks
 
 
+def _isolate_profiles(test_case):
+  """Redirect profile storage to a tempdir for the test and return the path."""
+  td = tempfile.TemporaryDirectory()
+  test_case.addCleanup(td.cleanup)
+  path = str(Path(td.name) / "profiles.json")
+  test_case.enterContext(
+    mock.patch.dict("os.environ", {"KINETIC_PROFILES_FILE": path})
+  )
+  return Path(path)
+
+
 class UpCommandResilienceTest(absltest.TestCase):
   def setUp(self):
     super().setUp()
     self.runner = CliRunner()
     self.mocks = _start_patches(self)
+    self.profiles_path = _isolate_profiles(self)
 
   def test_full_success(self):
-    """All steps succeed — exit code 0, 'Setup Complete' shown."""
+    """All steps succeed — exit code 0, 'Setup Complete' shown, profile saved."""
     result = self.runner.invoke(up, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("Setup Complete", result.output)
     self.assertNotIn("Warnings", result.output)
     self.mocks["configure_kubectl"].assert_called_once()
+    # The env-var hint block is gone; a profile replaces it.
+    self.assertNotIn("export KINETIC_PROJECT", result.output)
+    self.assertIn("created and active", result.output)
+    # Profile was persisted and set as current.
+    data = json.loads(self.profiles_path.read_text())
+    self.assertEqual(data["current"], "kinetic-cluster")
+    self.assertEqual(
+      data["profiles"]["kinetic-cluster"]["project"], "test-project"
+    )
+    self.assertEqual(
+      data["profiles"]["kinetic-cluster"]["zone"], "us-central2-b"
+    )
 
   def test_pulumi_failure_still_runs_post_deploy(self):
     """apply_update returns False — post-deploy steps still execute."""
@@ -117,6 +144,7 @@ class UpCommandPoolPreservationTest(absltest.TestCase):
     super().setUp()
     self.runner = CliRunner()
     self.mocks = _start_patches(self)
+    self.profiles_path = _isolate_profiles(self)
 
   def test_preserves_existing_pools_ignores_accelerator_flag(self):
     """Re-running `up` with --accelerator keeps only existing pools."""
@@ -254,6 +282,40 @@ class UpCommandForceDestroyTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 0, result.output)
     config = self.mocks["apply_update"].call_args[0][0]
     self.assertFalse(config.force_destroy)
+
+
+class UpCommandProfileSaveTest(absltest.TestCase):
+  """Tests covering the profile that `up` saves at the end of a run."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    self.mocks = _start_patches(self)
+    self.profiles_path = _isolate_profiles(self)
+
+  def test_name_flag_overrides_default(self):
+    args = [*_CLI_ARGS, "--name", "my-profile"]
+    result = self.runner.invoke(up, args)
+    self.assertEqual(result.exit_code, 0, result.output)
+    data = json.loads(self.profiles_path.read_text())
+    self.assertIn("my-profile", data["profiles"])
+    self.assertEqual(data["current"], "my-profile")
+    self.assertNotIn("kinetic-cluster", data["profiles"])
+
+  def test_namespace_flag_lands_on_profile(self):
+    args = [*_CLI_ARGS, "--namespace", "team-x"]
+    result = self.runner.invoke(up, args)
+    self.assertEqual(result.exit_code, 0, result.output)
+    data = json.loads(self.profiles_path.read_text())
+    self.assertEqual(data["profiles"]["kinetic-cluster"]["namespace"], "team-x")
+
+  def test_profile_still_saved_on_pulumi_warning(self):
+    """Pulumi warnings shouldn't block profile save — infra is partially up."""
+    self.mocks["apply_update"].return_value = False
+    result = self.runner.invoke(up, _CLI_ARGS)
+    self.assertEqual(result.exit_code, 0, result.output)
+    data = json.loads(self.profiles_path.read_text())
+    self.assertEqual(data["current"], "kinetic-cluster")
 
 
 if __name__ == "__main__":

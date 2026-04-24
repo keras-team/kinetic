@@ -45,27 +45,29 @@ This installs both the decorator and the `kinetic` CLI.
 
 ## One-time setup
 
-If nobody on your team has provisioned a Kinetic cluster yet, run:
-
 ```bash
-kinetic up
+kinetic init
 ```
 
-This enables the required GCP APIs, creates an Artifact Registry
-repository, provisions a GKE cluster with an accelerator node pool,
-and configures local Docker / `kubectl` access. Run `kinetic down`
-when you're finished to tear everything back down.
+This detects your local environment, then either joins a Kinetic
+cluster you've already provisioned or walks you through creating a new
+one. It ends by saving a profile that becomes your active context —
+subsequent commands pick up project, zone, and cluster automatically.
+
+Behind the scenes, the Create path runs `kinetic up` to enable APIs,
+provision a GKE cluster with an accelerator node pool, and configure
+local Docker / `kubectl` access. Run `kinetic down` when you're done.
 
 ## Recommended first run
 
 ```bash
-export KINETIC_PROJECT="your-gcp-project-id"
 python examples/fashion_mnist.py
 ```
 
-The first run takes ~5 minutes (it builds a container image with your
-dependencies via Cloud Build). Subsequent runs with unchanged
-dependencies start in under a minute.
+No environment variables needed — `kinetic init` set an active
+profile. The first run takes ~5 minutes (it builds a container image
+with your dependencies via Cloud Build). Subsequent runs with
+unchanged dependencies start in under a minute.
 
 For the full first-run walkthrough, see the
 [Getting Started](https://kinetic.readthedocs.io/en/latest/getting_started.html)
@@ -83,18 +85,17 @@ guide.
 
 ## Configuration
 
-Kinetic reads `KINETIC_PROJECT` (required), `KINETIC_ZONE`,
-`KINETIC_CLUSTER`, and a handful of other environment variables. The
-short version:
+The recommended way to configure Kinetic is via a profile — the named
+context that `kinetic init` creates and `kinetic profile ls | use`
+manages. For ad-hoc overrides, every profile field also has a
+`KINETIC_*` env-var equivalent (`KINETIC_PROJECT`, `KINETIC_ZONE`,
+`KINETIC_CLUSTER`, `KINETIC_NAMESPACE`) and a matching CLI flag.
 
-```bash
-export KINETIC_PROJECT="your-project-id"      # required
-export KINETIC_ZONE="us-central1-a"           # optional
-export KINETIC_CLUSTER="kinetic-cluster"      # optional
-```
+Precedence is: **CLI flag > `KINETIC_*` env var > active profile >
+built-in default.**
 
-The full surface — every variable, every CLI flag, and how the
-precedence rules combine them — lives in the
+The full surface — every variable, every CLI flag, and the profile
+model — lives in the
 [Configuration reference](https://kinetic.readthedocs.io/en/latest/configuration.html).
 
 ## Contributing

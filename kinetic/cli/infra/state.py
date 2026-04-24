@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 import click
 import pulumi.automation as auto
+from google.cloud import storage
 
 from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
@@ -19,6 +20,7 @@ from kinetic.cli.infra.stack_manager import (
   get_current_node_pools,
   get_stack,
 )
+from kinetic.cli.infra.state_backend import state_backend_url
 from kinetic.cli.output import LiveOutputPanel, console, success, warning
 from kinetic.cli.prerequisites_check import check_all
 from kinetic.cli.prompts import resolve_project
@@ -179,6 +181,42 @@ def apply_preview(config):
     return True
   warning(f"Preview failed: {preview_error}")
   return False
+
+
+def list_clusters(project):
+  """Return names of Kinetic clusters known to ``project``'s state bucket.
+
+  Reads ``gs://{project}-kinetic-state/.pulumi/stacks/kinetic/`` and
+  returns the cluster portions of stack file names (``{project}-{cluster}``).
+  Sorted; empty list if the bucket is missing, unreachable, or has no
+  stacks. Surfaces clusters provisioned by any teammate, not just this
+  machine.
+  """
+  bucket_name = state_backend_url(project).removeprefix("gs://")
+  try:
+    client = storage.Client(project=project)
+    bucket = client.bucket(bucket_name)
+    if not bucket.exists():
+      return []
+    blobs = client.list_blobs(
+      bucket_name, prefix=".pulumi/stacks/kinetic/"
+    )
+    names = [b.name for b in blobs]
+  except Exception:  # noqa: BLE001 — discovery is best-effort
+    return []
+
+  prefix = f".pulumi/stacks/kinetic/{project}-"
+  suffix = ".json"
+  clusters = []
+  for name in names:
+    if not name.startswith(prefix) or not name.endswith(suffix):
+      continue
+    stem = name[len(prefix) : -len(suffix)]
+    # Skip Pulumi-internal backup variants like ".bak.json".
+    if not stem or stem.endswith(".bak"):
+      continue
+    clusters.append(stem)
+  return sorted(clusters)
 
 
 def apply_destroy(config):
