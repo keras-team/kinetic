@@ -63,8 +63,7 @@ def cli(ctx, profile_name):
     return
 
   defaults = {
-    param: getattr(active, field)
-    for field, param in _PROFILE_TO_PARAM.items()
+    param: getattr(active, field) for field, param in _PROFILE_TO_PARAM.items()
   }
   ctx.default_map = _spread_defaults(cli, defaults)
 

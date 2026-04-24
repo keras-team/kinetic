@@ -10,6 +10,7 @@ from kinetic.cli.profiles import (
   ProfileError,
   get_profile,
   list_profiles,
+  load_store,
   remove_profile,
   set_current,
   upsert_profile,
@@ -68,8 +69,6 @@ def profile_create(name, project, zone, cluster_name, namespace, force):
     validate_name(name)
   except ProfileError as e:
     raise click.BadParameter(str(e), param_hint="NAME") from e
-
-  from kinetic.cli.profiles import load_store
 
   _, existing = load_store()
   if name in existing and not force:
@@ -150,7 +149,9 @@ def profile_ls(ctx):
     else:
       console.print(f"Active profile: [bold]{effective_name}[/bold]")
   else:
-    console.print("[dim]No active profile. Run 'kinetic profile use <name>'.[/dim]")
+    console.print(
+      "[dim]No active profile. Run 'kinetic profile use <name>'.[/dim]"
+    )
 
 
 @profile.command("use")

@@ -94,11 +94,15 @@ def load_store():
 
   current = data.get("current")
   if current is not None and not isinstance(current, str):
-    raise ProfileError(f"Malformed profiles file {path}: 'current' must be a string")
+    raise ProfileError(
+      f"Malformed profiles file {path}: 'current' must be a string"
+    )
 
   raw = data.get("profiles", {})
   if not isinstance(raw, dict):
-    raise ProfileError(f"Malformed profiles file {path}: 'profiles' must be an object")
+    raise ProfileError(
+      f"Malformed profiles file {path}: 'profiles' must be an object"
+    )
 
   profiles = {}
   for name, fields in raw.items():

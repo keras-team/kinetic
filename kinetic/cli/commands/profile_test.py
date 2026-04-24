@@ -57,9 +57,16 @@ class ProfileCreateTest(absltest.TestCase):
     tmp = _tmp(self)
     env = _make_runner_env(tmp)
     args = [
-      "create", "dev",
-      "--project", "p1",
-      "--zone", "z", "--cluster", "c", "--namespace", "n",
+      "create",
+      "dev",
+      "--project",
+      "p1",
+      "--zone",
+      "z",
+      "--cluster",
+      "c",
+      "--namespace",
+      "n",
     ]
     runner.invoke(profile_cmd, args, env=env)
     result = runner.invoke(profile_cmd, args, env=env)
@@ -100,11 +107,16 @@ class ProfileLsTest(absltest.TestCase):
       runner.invoke(
         profile_cmd,
         [
-          "create", name,
-          "--project", "p",
-          "--zone", "z",
-          "--cluster", "c",
-          "--namespace", "n",
+          "create",
+          name,
+          "--project",
+          "p",
+          "--zone",
+          "z",
+          "--cluster",
+          "c",
+          "--namespace",
+          "n",
         ],
         env=env,
       )
@@ -125,8 +137,16 @@ class ProfileUseTest(absltest.TestCase):
       runner.invoke(
         profile_cmd,
         [
-          "create", name, "--project", "p",
-          "--zone", "z", "--cluster", "c", "--namespace", "n",
+          "create",
+          name,
+          "--project",
+          "p",
+          "--zone",
+          "z",
+          "--cluster",
+          "c",
+          "--namespace",
+          "n",
         ],
         env=env,
       )
@@ -152,8 +172,16 @@ class ProfileShowTest(absltest.TestCase):
     runner.invoke(
       profile_cmd,
       [
-        "create", "dev", "--project", "proj-1",
-        "--zone", "z", "--cluster", "c", "--namespace", "n",
+        "create",
+        "dev",
+        "--project",
+        "proj-1",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
       ],
       env=env,
     )
@@ -181,8 +209,16 @@ class ProfileRmTest(absltest.TestCase):
     runner.invoke(
       profile_cmd,
       [
-        "create", "dev", "--project", "p",
-        "--zone", "z", "--cluster", "c", "--namespace", "n",
+        "create",
+        "dev",
+        "--project",
+        "p",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
       ],
       env=env,
     )
@@ -214,11 +250,16 @@ class DefaultMapIntegrationTest(absltest.TestCase):
     runner.invoke(
       profile_cmd,
       [
-        "create", "mine",
-        "--project", "super-proj",
-        "--zone", "us-west4-b",
-        "--cluster", "my-cluster",
-        "--namespace", "my-ns",
+        "create",
+        "mine",
+        "--project",
+        "super-proj",
+        "--zone",
+        "us-west4-b",
+        "--cluster",
+        "my-cluster",
+        "--namespace",
+        "my-ns",
       ],
       env=env,
     )
@@ -240,11 +281,16 @@ class DefaultMapIntegrationTest(absltest.TestCase):
     runner.invoke(
       profile_cmd,
       [
-        "create", "mine",
-        "--project", "from-profile",
-        "--zone", "us-west4-b",
-        "--cluster", "c",
-        "--namespace", "n",
+        "create",
+        "mine",
+        "--project",
+        "from-profile",
+        "--zone",
+        "us-west4-b",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
       ],
       env=env,
     )
@@ -263,8 +309,16 @@ class DefaultMapIntegrationTest(absltest.TestCase):
       runner.invoke(
         profile_cmd,
         [
-          "create", name, "--project", proj,
-          "--zone", "z", "--cluster", "c", "--namespace", "n",
+          "create",
+          name,
+          "--project",
+          proj,
+          "--zone",
+          "z",
+          "--cluster",
+          "c",
+          "--namespace",
+          "n",
         ],
         env=env,
       )
@@ -299,8 +353,16 @@ class ProfileGroupRespectsSelectorTest(absltest.TestCase):
       runner.invoke(
         profile_cmd,
         [
-          "create", name, "--project", proj,
-          "--zone", "z", "--cluster", "c", "--namespace", "n",
+          "create",
+          name,
+          "--project",
+          proj,
+          "--zone",
+          "z",
+          "--cluster",
+          "c",
+          "--namespace",
+          "n",
         ],
         env=env,
       )
@@ -358,12 +420,14 @@ class ProfileCreateEnvVarsTest(absltest.TestCase):
     runner = CliRunner()
     tmp = _tmp(self)
     env = _make_runner_env(tmp)
-    env.update({
-      "KINETIC_PROJECT": "env-proj",
-      "KINETIC_ZONE": "env-zone",
-      "KINETIC_CLUSTER": "env-cluster",
-      "KINETIC_NAMESPACE": "env-ns",
-    })
+    env.update(
+      {
+        "KINETIC_PROJECT": "env-proj",
+        "KINETIC_ZONE": "env-zone",
+        "KINETIC_CLUSTER": "env-cluster",
+        "KINETIC_NAMESPACE": "env-ns",
+      }
+    )
     # Passing no input on stdin — if the command prompts, the runner
     # will produce a non-zero exit from the empty-input stream.
     result = runner.invoke(profile_cmd, ["create", "dev"], env=env, input="")
@@ -382,9 +446,16 @@ class ProfileCreateEnvVarsTest(absltest.TestCase):
     result = runner.invoke(
       profile_cmd,
       [
-        "create", "dev",
-        "--project", "flag-proj",
-        "--zone", "z", "--cluster", "c", "--namespace", "n",
+        "create",
+        "dev",
+        "--project",
+        "flag-proj",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
       ],
       env=env,
     )

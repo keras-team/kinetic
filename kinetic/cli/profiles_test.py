@@ -35,7 +35,9 @@ class ValidateNameTest(absltest.TestCase):
 
 class LoadStoreTest(absltest.TestCase):
   def test_missing_file_returns_empty(self):
-    with mock.patch.object(profiles, "PROFILES_FILE", Path("/nonexistent/x.json")):
+    with mock.patch.object(
+      profiles, "PROFILES_FILE", Path("/nonexistent/x.json")
+    ):
       current, p = profiles.load_store()
     self.assertIsNone(current)
     self.assertEqual(p, {})
