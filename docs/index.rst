@@ -21,6 +21,7 @@ Kinetic: Run ML workloads on cloud TPUs and GPUs
    guides/checkpointing
    guides/dependencies
    guides/env_vars
+   guides/profiles
    guides/debugging
    guides/examples
 
