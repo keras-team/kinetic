@@ -16,6 +16,7 @@ STATE_DIR = os.environ.get(
   os.path.expanduser("~/.kinetic/pulumi"),
 )
 PULUMI_ROOT = os.path.expanduser("~/.kinetic/pulumi-cli")
+PROFILES_FILE = os.path.expanduser("~/.kinetic/profiles.json")
 REQUIRED_APIS = [
   "compute.googleapis.com",
   "cloudbuild.googleapis.com",
