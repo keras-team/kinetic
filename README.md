@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI - Version](https://img.shields.io/pypi/v/:keras-kinetic)](https://pypi.org/project/keras-kinetic/)
 
 Run Keras and JAX workloads on cloud TPUs and GPUs with a simple decorator. No infrastructure management required.
 
