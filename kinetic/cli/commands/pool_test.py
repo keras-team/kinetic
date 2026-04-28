@@ -167,6 +167,36 @@ class PoolRemoveTest(absltest.TestCase):
     self.assertIn("not found", result.output)
 
 
+class PoolListProjectResolutionTest(absltest.TestCase):
+  """Regression: `kinetic pool list` (no --project) with `kinetic config
+  set state-backend gcs` previously failed because the command tried to
+  expand the gcs sentinel before project was resolved. Now the raw
+  state_backend value is forwarded to load_state, which normalizes it
+  *after* resolve_project()."""
+
+  def test_gcs_sentinel_normalized_after_project_resolution(self):
+    runner = CliRunner()
+    mock_load = self.enterContext(
+      mock.patch("kinetic.cli.commands.pool.load_state")
+    )
+    self.enterContext(
+      mock.patch("kinetic.cli.commands.pool.infrastructure_state")
+    )
+    mock_load.return_value = _make_state(stack=mock.MagicMock())
+    mock_load.return_value.stack.outputs.return_value = {"x": mock.MagicMock()}
+
+    result = runner.invoke(
+      pool, ["list", "--state-backend", "gcs", "--project", "p"]
+    )
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    # load_state was passed the raw 'gcs' sentinel — not a pre-normalized
+    # URL — so the (potentially still-unresolved) project doesn't matter
+    # at the call site.
+    _, kwargs = mock_load.call_args
+    self.assertEqual(kwargs["state_backend"], "gcs")
+
+
 class PoolListTest(absltest.TestCase):
   def setUp(self):
     super().setUp()

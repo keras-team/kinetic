@@ -19,6 +19,7 @@ from kinetic.cli.infra.stack_manager import (
   get_current_node_pools,
   get_stack,
 )
+from kinetic.cli.infra.state_backend import normalize_state_backend_url
 from kinetic.cli.output import LiveOutputPanel, console, success, warning
 from kinetic.cli.prerequisites_check import check_all
 from kinetic.cli.prompts import resolve_project
@@ -34,6 +35,11 @@ class StackState:
   node_pools: list[NodePoolConfig] = field(default_factory=list)
   stack: auto.Stack | None = None
   force_destroy: bool = True
+  # Fully-resolved Pulumi backend URL used to load this state. Callers
+  # should reuse it when building follow-up InfraConfigs (e.g. for
+  # apply_update) to avoid re-resolving — and to avoid the "gcs"
+  # sentinel failing if project resolution races.
+  state_backend_url: str | None = None
 
 
 def load_state(
@@ -43,6 +49,8 @@ def load_state(
   *,
   allow_missing=False,
   check_prerequisites=True,
+  state_backend=None,
+  state_backend_url=None,
 ):
   """Load full infrastructure state from the Pulumi stack.
 
@@ -53,6 +61,14 @@ def load_state(
       allow_missing: If True, return empty state when no stack exists
           instead of raising an error. Useful for first-run scenarios.
       check_prerequisites: If True, run prerequisite checks (gcloud, etc.).
+      state_backend: Raw user-intent value for the backend (None |
+          "local" | "gcs" | "gs://..."). Normalized internally *after*
+          ``project`` resolves so the "gcs" sentinel can expand against
+          the resolved project — this is the right entry point for
+          callers that don't know the project up-front.
+      state_backend_url: Fully resolved Pulumi backend URL. Useful for
+          callers that have already resolved project and want to
+          short-circuit the normalization. Wins over ``state_backend``.
 
   Returns:
       A StackState with all state dimensions populated.
@@ -67,8 +83,14 @@ def load_state(
   zone = zone or DEFAULT_ZONE
   cluster_name = cluster_name or DEFAULT_CLUSTER_NAME
 
+  if state_backend_url is None:
+    state_backend_url = normalize_state_backend_url(state_backend, project)
+
   base_config = InfraConfig(
-    project=project, zone=zone, cluster_name=cluster_name
+    project=project,
+    zone=zone,
+    cluster_name=cluster_name,
+    state_backend_url=state_backend_url,
   )
 
   try:
@@ -76,7 +98,12 @@ def load_state(
     stack = get_stack(program, base_config)
   except auto.errors.CommandError as e:
     if allow_missing:
-      return StackState(project=project, zone=zone, cluster_name=cluster_name)
+      return StackState(
+        project=project,
+        zone=zone,
+        cluster_name=cluster_name,
+        state_backend_url=state_backend_url,
+      )
     raise click.ClickException(
       f"No Pulumi stack found for project '{project}': {e}\n"
       "Run 'kinetic up' to provision infrastructure first."
@@ -102,6 +129,7 @@ def load_state(
     node_pools=node_pools,
     stack=stack,
     force_destroy=force_destroy,
+    state_backend_url=state_backend_url,
   )
 
 

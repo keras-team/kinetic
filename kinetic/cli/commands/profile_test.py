@@ -78,16 +78,149 @@ class ProfileCreateTest(absltest.TestCase):
     tmp = _tmp(self)
     env = _make_runner_env(tmp)
     # Order: project, zone (default accepted), cluster (default accepted),
-    # namespace (default accepted).
+    # namespace (default accepted), state-backend (default 'local').
     result = runner.invoke(
       profile_cmd,
       ["create", "dev"],
-      input="my-proj\n\n\n\n",
+      input="my-proj\n\n\n\n\n",
       env=env,
     )
     self.assertEqual(result.exit_code, 0, msg=result.output)
     data = json.loads((tmp / "profiles.json").read_text())
     self.assertEqual(data["profiles"]["dev"]["project"], "my-proj")
+
+
+class ProfileCreateStateBackendTest(absltest.TestCase):
+  def test_default_local_choice_stores_local_explicitly(self):
+    """Picking 'local' interactively persists 'local' (not None) so the
+    profile keeps overriding any global state-backend setting."""
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    # Order: project, zone (default), cluster (default), namespace (default),
+    # state-backend choice (default 'local').
+    result = runner.invoke(
+      profile_cmd,
+      ["create", "dev"],
+      input="my-proj\n\n\n\n\n",
+      env=env,
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertEqual(data["profiles"]["dev"]["state_backend"], "local")
+
+  def test_gcs_choice_stores_sentinel(self):
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    result = runner.invoke(
+      profile_cmd,
+      ["create", "dev"],
+      input="my-proj\n\n\n\ngcs\n",
+      env=env,
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertEqual(data["profiles"]["dev"]["state_backend"], "gcs")
+
+  def test_custom_choice_with_url(self):
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    result = runner.invoke(
+      profile_cmd,
+      ["create", "dev"],
+      input="my-proj\n\n\n\ncustom\ngs://my-team-bucket\n",
+      env=env,
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertEqual(
+      data["profiles"]["dev"]["state_backend"], "gs://my-team-bucket"
+    )
+
+  def test_flag_overrides_prompt(self):
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    result = runner.invoke(
+      profile_cmd,
+      [
+        "create",
+        "dev",
+        "--project",
+        "p",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
+        "--state-backend",
+        "gs://flag-bucket",
+      ],
+      env=env,
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertEqual(
+      data["profiles"]["dev"]["state_backend"], "gs://flag-bucket"
+    )
+
+  def test_local_flag_stores_local_explicitly(self):
+    """`--state-backend local` is an explicit opt-out — must persist as
+    'local' so it overrides any global `kinetic config set` value."""
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    result = runner.invoke(
+      profile_cmd,
+      [
+        "create",
+        "dev",
+        "--project",
+        "p",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
+        "--state-backend",
+        "local",
+      ],
+      env=env,
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertEqual(data["profiles"]["dev"]["state_backend"], "local")
+
+  def test_no_prompt_no_flag_stays_unset(self):
+    """All other fields supplied non-interactively, no --state-backend
+    flag → state_backend stays unset (not 'local'), so global settings
+    can still apply."""
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    result = runner.invoke(
+      profile_cmd,
+      [
+        "create",
+        "dev",
+        "--project",
+        "p",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
+      ],
+      env=env,
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertNotIn("state_backend", data["profiles"]["dev"])
 
 
 class ProfileLsTest(absltest.TestCase):
@@ -437,6 +570,7 @@ class ProfileCreateEnvVarsTest(absltest.TestCase):
     self.assertEqual(data["profiles"]["dev"]["zone"], "env-zone")
     self.assertEqual(data["profiles"]["dev"]["cluster"], "env-cluster")
     self.assertEqual(data["profiles"]["dev"]["namespace"], "env-ns")
+    self.assertNotIn("state_backend", data["profiles"]["dev"])
 
   def test_flag_overrides_env_var(self):
     runner = CliRunner()

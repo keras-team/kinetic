@@ -8,7 +8,7 @@ from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from kinetic.cli.infra.post_deploy import configure_kubectl
 from kinetic.cli.infra.state import apply_preview, apply_update, load_state
-from kinetic.cli.options import common_options, force_destroy_option
+from kinetic.cli.options import force_destroy_option, infra_options
 from kinetic.cli.output import (
   banner,
   config_summary,
@@ -22,7 +22,7 @@ from kinetic.core.accelerators import generate_pool_name
 
 
 @click.command()
-@common_options
+@infra_options
 @force_destroy_option
 @click.option(
   "--accelerator",
@@ -47,6 +47,7 @@ def up(
   zone,
   accelerator,
   cluster_name,
+  state_backend,
   min_nodes,
   yes,
   preview,
@@ -76,13 +77,16 @@ def up(
 
   # If a stack already exists, preserve its node pools as-is.
   # Users should manage pools via `kinetic pool add/remove` after
-  # initial setup.
+  # initial setup. load_state normalizes the backend value once `project`
+  # is resolved, then reports the resolved URL on `state` for follow-up
+  # InfraConfig construction.
   state = load_state(
     project,
     zone,
     cluster_name,
     allow_missing=True,
     check_prerequisites=False,
+    state_backend=state_backend,
   )
 
   # Precedence: explicit CLI flag > existing stack state > default True.
@@ -95,6 +99,7 @@ def up(
     zone=zone,
     cluster_name=cluster_name,
     force_destroy=resolved_force_destroy,
+    state_backend_url=state.state_backend_url,
   )
 
   if state.node_pools:

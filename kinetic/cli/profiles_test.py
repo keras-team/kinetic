@@ -206,5 +206,66 @@ class AtomicWriteTest(absltest.TestCase):
     self.assertEqual(data["current"], "a")
 
 
+class StateBackendFieldTest(absltest.TestCase):
+  def test_round_trip_gcs_sentinel(self):
+    tmp = _tmp(self)
+    with _patched_path(tmp):
+      profiles.upsert_profile(
+        profiles.Profile("dev", "p", "z", "c", state_backend="gcs")
+      )
+      _, loaded = profiles.load_store()
+    self.assertEqual(loaded["dev"].state_backend, "gcs")
+
+  def test_round_trip_explicit_url(self):
+    tmp = _tmp(self)
+    with _patched_path(tmp):
+      profiles.upsert_profile(
+        profiles.Profile(
+          "dev", "p", "z", "c", state_backend="gs://team-a/state"
+        )
+      )
+      _, loaded = profiles.load_store()
+    self.assertEqual(loaded["dev"].state_backend, "gs://team-a/state")
+
+  def test_old_profile_without_field_loads(self):
+    """Existing profile JSON without the new field still loads cleanly."""
+    tmp = _tmp(self) / "profiles.json"
+    tmp.write_text(
+      json.dumps(
+        {
+          "current": "old",
+          "profiles": {
+            "old": {
+              "project": "p",
+              "zone": "z",
+              "cluster": "c",
+              "namespace": "default",
+            }
+          },
+        }
+      )
+    )
+    with mock.patch.object(profiles, "PROFILES_FILE", tmp):
+      _, loaded = profiles.load_store()
+    self.assertIsNone(loaded["old"].state_backend)
+
+  def test_serialization_omits_none(self):
+    """Profiles with state_backend=None must not write the key."""
+    tmp = _tmp(self)
+    with _patched_path(tmp):
+      profiles.upsert_profile(profiles.Profile("dev", "p", "z", "c"))
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertNotIn("state_backend", data["profiles"]["dev"])
+
+  def test_serialization_includes_set_value(self):
+    tmp = _tmp(self)
+    with _patched_path(tmp):
+      profiles.upsert_profile(
+        profiles.Profile("dev", "p", "z", "c", state_backend="gcs")
+      )
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertEqual(data["profiles"]["dev"]["state_backend"], "gcs")
+
+
 if __name__ == "__main__":
   absltest.main()

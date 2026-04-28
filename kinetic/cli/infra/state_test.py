@@ -113,6 +113,53 @@ class LoadStateTest(absltest.TestCase):
 
     mock_check.assert_not_called()
 
+  def test_explicit_state_backend_url_passed_to_get_stack(self):
+    state.load_state(
+      "proj",
+      "us-central1-a",
+      "cluster",
+      state_backend_url="gs://my-bucket",
+    )
+
+    # The InfraConfig handed to create_program / get_stack must carry
+    # the URL so it reaches stack_manager.get_stack.
+    base_config = self.mock_create.call_args[0][0]
+    self.assertEqual(base_config.state_backend_url, "gs://my-bucket")
+    get_stack_config = self.mock_get_stack.call_args[0][1]
+    self.assertEqual(get_stack_config.state_backend_url, "gs://my-bucket")
+
+  def test_raw_state_backend_normalized_after_project_resolves(self):
+    """The 'gcs' sentinel is normalized using the resolved project — even
+    when the caller never supplies project up-front. This is what makes
+    `pool list` work for a no-profile user with `kinetic config set
+    state-backend gcs`."""
+    state.load_state(None, None, None, state_backend="gcs")
+
+    # resolve_project mock returns "test-proj" (see setUp).
+    base_config = self.mock_create.call_args[0][0]
+    self.assertEqual(
+      base_config.state_backend_url, "gs://test-proj-kinetic-state"
+    )
+
+  def test_default_state_backend_url_falls_back_to_local(self):
+    state.load_state("proj", "us-central1-a", "cluster")
+
+    base_config = self.mock_create.call_args[0][0]
+    self.assertTrue(base_config.state_backend_url.startswith("file://"))
+
+  def test_state_backend_url_wins_over_state_backend(self):
+    """When both kwargs are passed, the already-resolved URL wins
+    (skipping the normalization roundtrip)."""
+    state.load_state(
+      "proj",
+      "us-central1-a",
+      "cluster",
+      state_backend="gcs",
+      state_backend_url="gs://explicit",
+    )
+    base_config = self.mock_create.call_args[0][0]
+    self.assertEqual(base_config.state_backend_url, "gs://explicit")
+
 
 class FormatChangesTest(absltest.TestCase):
   def test_mixed_changes(self):

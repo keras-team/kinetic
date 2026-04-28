@@ -5,16 +5,17 @@ import click
 from kinetic.cli.config import InfraConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from kinetic.cli.infra.state import apply_destroy
-from kinetic.cli.options import common_options
+from kinetic.cli.infra.state_backend import normalize_state_backend_url
+from kinetic.cli.options import infra_options
 from kinetic.cli.output import banner, console, warning
 from kinetic.cli.prerequisites_check import check_all
 from kinetic.cli.prompts import resolve_project
 
 
 @click.command()
-@common_options
+@infra_options
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def down(project, zone, cluster_name, yes):
+def down(project, zone, cluster_name, state_backend, yes):
   """Tear down kinetic GCP infrastructure."""
   banner("kinetic Cleanup")
 
@@ -23,6 +24,7 @@ def down(project, zone, cluster_name, yes):
   project = project or resolve_project(allow_create=False)
   zone = zone or DEFAULT_ZONE
   cluster_name = cluster_name or DEFAULT_CLUSTER_NAME
+  state_backend_url = normalize_state_backend_url(state_backend, project)
 
   # Warning
   console.print()
@@ -40,7 +42,12 @@ def down(project, zone, cluster_name, yes):
 
   console.print()
 
-  config = InfraConfig(project=project, zone=zone, cluster_name=cluster_name)
+  config = InfraConfig(
+    project=project,
+    zone=zone,
+    cluster_name=cluster_name,
+    state_backend_url=state_backend_url,
+  )
   apply_destroy(config)
 
   # Summary

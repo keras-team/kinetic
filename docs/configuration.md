@@ -21,7 +21,9 @@ Variable                     | Used by                   | Default              
 `KINETIC_OUTPUT_DIR`         | CLI + remote pod          | `gs://{bucket}/outputs/{job_id}` | Per-job durable artifact prefix. See [Checkpointing](guides/checkpointing.md).
 `KINETIC_RESERVATION`        | `kinetic pool add`        | _(unset)_                        | GCP capacity reservation to consume. Pool-level config, not a per-job setting.
 `KINETIC_LOG_LEVEL`          | Library                   | `INFO`                           | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `FATAL`.
-`KINETIC_STATE_DIR`          | Library                   | `~/.kinetic/pulumi`              | Pulumi state directory used by `kinetic up`/`down`.
+`KINETIC_STATE_DIR`          | Library                   | `~/.kinetic/pulumi`              | Pulumi state directory used by `kinetic up`/`down` when the local file backend is in use.
+`KINETIC_STATE_BACKEND`      | CLI (infra cmds)          | `local`                          | Pulumi state backend. One of `local`, `gcs` (auto-bucket per project), or `gs://bucket[/prefix]` (custom). See [Shared state for team collaboration](#shared-state-for-team-collaboration).
+`KINETIC_SETTINGS_FILE`      | Library                   | `~/.kinetic/settings.json`       | Override path for the persisted global-settings store written by `kinetic config set`.
 `KINETIC_DEBUG_WAIT_TIMEOUT` | Library + remote pod      | `600`                            | Seconds the remote pod waits for a debugger client to attach when `debug=True`. Applies on both sides (local `debug_attach()` and the pod's debugpy server).
 
 Set them in your shell profile (`~/.bashrc`, `~/.zshrc`) so they
@@ -43,6 +45,7 @@ Project         | `project=`         | `--project`                      | `KINET
 Zone            | `zone=`            | `--zone`                         | `KINETIC_ZONE`                                  | `zone`                               | `us-central1-a`
 Cluster         | `cluster=`         | `--cluster`                      | `KINETIC_CLUSTER`                               | `cluster`                            | `kinetic-cluster`
 Namespace       | `namespace=`       | `--namespace`                    | `KINETIC_NAMESPACE`                             | `namespace`                          | `default`
+State backend   | _(n/a)_            | `--state-backend`                | `KINETIC_STATE_BACKEND`                         | `state_backend` (then settings)      | `local` (`file://~/.kinetic/pulumi`)
 Output dir      | `output_dir=`      | `--output-dir`                   | `KINETIC_OUTPUT_DIR`                            | _(n/a)_                              | `gs://{bucket}/outputs/{job_id}`
 Base image repo | `base_image_repo=` | `kinetic build-base --repo`      | `KINETIC_BASE_IMAGE_REPO`                       | _(n/a)_                              | `kinetic`
 Reservation\*   | _(n/a)_            | `kinetic pool add --reservation` | `KINETIC_RESERVATION`                           | _(n/a)_                              | _(unset)_
@@ -78,12 +81,95 @@ verbosity:
 export KINETIC_LOG_LEVEL=DEBUG
 ```
 
+## Shared state for team collaboration
+
+By default, `kinetic up` writes Pulumi state to `~/.kinetic/pulumi` on the
+local machine. That works for a single admin, but two people running
+`kinetic up` against the same GCP project will see independent copies of
+the stack and can clobber each other's infrastructure. To share one
+authoritative state across a team, point Kinetic at a Google Cloud
+Storage bucket.
+
+### Opting in
+
+Pick whichever fits your workflow. All forms of opt-in produce the same
+final URL — pick one and keep team members on the same value.
+
+1. **Global setting (no profile required).** Persisted in
+   `~/.kinetic/settings.json`; applies to every kinetic invocation that
+   doesn't override it.
+
+   ```bash
+   # Auto-derived bucket name: gs://{your-gcp-project}-kinetic-state
+   kinetic config set state-backend gcs
+
+   # Or an explicit bucket — useful when several teams share a GCP project.
+   kinetic config set state-backend gs://acme-platform/kinetic-state
+
+   # Revert to local state.
+   kinetic config unset state-backend
+   ```
+
+2. **Per-profile.** When the team has multiple infra targets and not all
+   of them share state, encode the choice in the profile.
+
+   ```bash
+   kinetic profile create prod   # picks 'gcs' or 'custom' interactively
+   ```
+
+3. **Per-invocation.** Useful for one-off destroys or testing.
+
+   ```bash
+   KINETIC_STATE_BACKEND=gs://acme-platform/kinetic-state kinetic up
+   kinetic up --state-backend gcs
+   ```
+
+### Bucket naming and creation
+
+Without an explicit URL, Kinetic uses `gs://{project}-kinetic-state` —
+GCS bucket names are globally unique, so prefixing with the GCP project
+ID keeps team buckets distinct. The bucket is created on first use, with
+**versioning enabled** and **uniform bucket-level access**, no public
+ACL. Subsequent admins running against the same configuration find the
+bucket already there and reuse it.
+
+### IAM
+
+Kinetic uses Application Default Credentials, the same auth path as
+`gcloud`. The first admin needs `roles/storage.admin` on the project to
+create the bucket. After that, every team member only needs
+`roles/storage.objectAdmin` on the bucket itself to read and write
+state — Kinetic deliberately does not check for `storage.buckets.get`
+on subsequent runs, so collaborators without bucket-level read still
+proceed straight to Pulumi.
+
+### Migrating an existing local stack to GCS
+
+Pulumi ships first-class export/import commands. With `pulumi` on your
+PATH (the same binary Kinetic auto-installs into `~/.kinetic/pulumi-cli`):
+
+```bash
+# 1. Export the local stack.
+pulumi --cwd . stack export --stack {project}-{cluster} > stack.json
+
+# 2. Switch Kinetic to the GCS backend.
+kinetic config set state-backend gcs
+
+# 3. Initialize the stack on the new backend and import.
+pulumi stack init {project}-{cluster}
+pulumi stack import --file stack.json
+```
+
+After this, `kinetic up`/`pool add`/etc will read and write the GCS
+bucket.
+
 ## Where to look
 
 If a setting isn't behaving the way you expect, `kinetic config` prints
 the resolved value of the most common variables (project, zone,
-cluster, namespace, output dir, and the local Pulumi state dir) and
-where each came from (env var, [profile](guides/profiles.md), or
+cluster, namespace, output dir, the Pulumi state backend, and — when
+the backend is `file://` — the local state dir) and where each came
+from (env var, [profile](guides/profiles.md), global setting, or
 default). Run it before reaching for `kinetic doctor`.
 Variables that aren't shown there (`KINETIC_BASE_IMAGE_REPO`,
 `KINETIC_RESERVATION`, `KINETIC_LOG_LEVEL`, `KINETIC_DEBUG_WAIT_TIMEOUT`)

@@ -17,6 +17,19 @@ STATE_DIR = os.environ.get(
 )
 PULUMI_ROOT = os.path.expanduser("~/.kinetic/pulumi-cli")
 PROFILES_FILE = os.path.expanduser("~/.kinetic/profiles.json")
+SETTINGS_FILE = os.path.expanduser("~/.kinetic/settings.json")
+STATE_BACKEND_ENV_VAR = "KINETIC_STATE_BACKEND"
+
+
+def default_gcs_bucket_name(project: str) -> str:
+  """Default GCS bucket name for the Pulumi state backend.
+
+  Single source of truth for the convention. GCS bucket names are globally
+  unique, so prefixing with the GCP project ID keeps team buckets distinct.
+  """
+  return f"{project}-kinetic-state"
+
+
 REQUIRED_APIS = [
   "compute.googleapis.com",
   "cloudbuild.googleapis.com",

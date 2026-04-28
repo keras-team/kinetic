@@ -29,6 +29,26 @@ def common_options(f):
   return f
 
 
+def infra_options(f):
+  """common_options + --state-backend for infra-touching commands.
+
+  Used by ``up``, ``down``, and ``pool`` — commands that interact with
+  the Pulumi state backend. ``jobs`` does not touch Pulumi state and so
+  uses ``common_options`` directly.
+  """
+  f = common_options(f)
+  f = click.option(
+    "--state-backend",
+    envvar="KINETIC_STATE_BACKEND",
+    default=None,
+    help=(
+      "Pulumi state backend: 'local', 'gcs' (auto-derived bucket), or an "
+      "explicit 'gs://bucket[/prefix]' URL [env: KINETIC_STATE_BACKEND]"
+    ),
+  )(f)
+  return f
+
+
 def cleanup_options(f):
   """Shared --cleanup-timeout and --cleanup-poll-interval options."""
   f = click.option(

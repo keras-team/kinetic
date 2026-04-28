@@ -4,6 +4,7 @@ import click
 from rich.table import Table
 
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
+from kinetic.cli.infra.state_backend import normalize_state_backend_url
 from kinetic.cli.output import banner, console, error, success, warning
 from kinetic.cli.profiles import (
   Profile,
@@ -51,11 +52,22 @@ def profile():
   help="Kubernetes namespace [env: KINETIC_NAMESPACE]",
 )
 @click.option(
+  "--state-backend",
+  envvar="KINETIC_STATE_BACKEND",
+  default=None,
+  help=(
+    "Pulumi state backend: 'local', 'gcs', or 'gs://bucket[/prefix]' "
+    "[env: KINETIC_STATE_BACKEND]"
+  ),
+)
+@click.option(
   "--force",
   is_flag=True,
   help="Overwrite an existing profile with the same name.",
 )
-def profile_create(name, project, zone, cluster_name, namespace, force):
+def profile_create(
+  name, project, zone, cluster_name, namespace, state_backend, force
+):
   """Create a new profile.
 
   Any unset field is resolved in this order:
@@ -77,18 +89,27 @@ def profile_create(name, project, zone, cluster_name, namespace, force):
       "or 'kinetic profile rm' to delete it first."
     )
 
+  prompted_any = False
   if project is None:
     project = click.prompt("GCP project ID", type=str)
+    prompted_any = True
   if zone is None:
     zone = click.prompt("GCP zone", default=DEFAULT_ZONE, type=str)
+    prompted_any = True
   if cluster_name is None:
     cluster_name = click.prompt(
       "GKE cluster name", default=DEFAULT_CLUSTER_NAME, type=str
     )
+    prompted_any = True
   if namespace is None:
     namespace = click.prompt(
       "Kubernetes namespace", default="default", type=str
     )
+    prompted_any = True
+
+  state_backend = _resolve_state_backend_input(
+    state_backend, project, prompt_if_unset=prompted_any
+  )
 
   p = Profile(
     name=name,
@@ -96,6 +117,7 @@ def profile_create(name, project, zone, cluster_name, namespace, force):
     zone=zone,
     cluster=cluster_name,
     namespace=namespace,
+    state_backend=state_backend,
   )
   became_current = upsert_profile(p)
   success(f"Saved profile '{name}'.")
@@ -218,6 +240,54 @@ def profile_rm(name, yes):
   success(f"Removed profile '{name}'.")
 
 
+def _resolve_state_backend_input(value, project, *, prompt_if_unset):
+  """Resolve the profile's state_backend field.
+
+  Precedence: explicit value (--state-backend or KINETIC_STATE_BACKEND)
+  > interactive 3-way prompt (only when prompt_if_unset is True; i.e. the
+  command is already running interactively for other fields) > None
+  (no preference; falls through to global settings then local default
+  at command time).
+
+  Returns the value to persist: None | "local" | "gcs" | "gs://...".
+
+  ``"local"`` is preserved as an *explicit* opt-out — distinct from
+  ``None`` ("unset, defer to settings"). This is what lets a profile
+  override a global ``kinetic config set state-backend gcs`` back to the
+  local file backend.
+  """
+  if value is not None:
+    # Provided by flag or env. Validate by attempting to normalize. Keep
+    # "local" verbatim so it overrides any global setting at apply time.
+    normalize_state_backend_url(value, project)
+    return value
+
+  if not prompt_if_unset:
+    return None
+
+  choice = click.prompt(
+    "Pulumi state backend",
+    type=click.Choice(["local", "gcs", "custom"]),
+    default="local",
+    show_choices=True,
+  )
+  if choice == "local":
+    return "local"
+  if choice == "gcs":
+    return "gcs"
+  while True:
+    custom = click.prompt(
+      "GCS state URL (e.g. gs://my-team-bucket or gs://bucket/prefix)",
+      type=str,
+    )
+    try:
+      normalize_state_backend_url(custom, project)
+    except click.BadParameter as e:
+      console.print(f"[red]{e.message}[/red]")
+      continue
+    return custom
+
+
 def _print_profile(p):
   table = Table(title=f"Profile: {p.name}")
   table.add_column("Setting", style="bold")
@@ -226,6 +296,7 @@ def _print_profile(p):
   table.add_row("Zone", p.zone)
   table.add_row("Cluster", p.cluster)
   table.add_row("Namespace", p.namespace)
+  table.add_row("State Backend", p.state_backend or "(local default)")
   console.print()
   console.print(table)
   console.print()
