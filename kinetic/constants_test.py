@@ -46,12 +46,12 @@ class TestZoneToArLocation(parameterized.TestCase):
     ("us-central1-a", "us"),
     ("us-east1-b", "us"),
     ("us-west1-a", "us"),
-    ("europe-west1-b", "europe"),
-    ("europe-west4-b", "europe"),
+    ("europe-west1-b", "europe-west1"),
+    ("europe-west4-b", "europe-west4"),
     ("asia-east1-c", "asia"),
     ("asia-southeast1-a", "asia"),
-    ("me-west1-a", "me"),
-    ("southamerica-east1-b", "southamerica"),
+    ("me-west1-a", "me-west1"),
+    ("southamerica-east1-b", "southamerica-east1"),
   )
   def test_zone_to_ar_location(self, zone, expected_location):
     self.assertEqual(zone_to_ar_location(zone), expected_location)
@@ -78,6 +78,57 @@ class TestGetDefaultZone(parameterized.TestCase):
   )
   def test_default_constants(self, constant, expected_value):
     self.assertEqual(constant, expected_value)
+
+
+_ZONES = [
+  "africa-south1-a",
+  "asia-east1-b",
+  "asia-northeast1-b",
+  "asia-south1-c",
+  "asia-southeast1-b",
+  "australia-southeast1-b",
+  "europe-central2-a",
+  "europe-north1-a",
+  "europe-southwest1-a",
+  "europe-west1-b",
+  "me-central1-a",
+  "me-west1-a",
+  "northamerica-northeast1-a",
+  "northamerica-south1-a",
+  "southamerica-east1-b",
+  "southamerica-west1-a",
+  "us-central1-c",
+  "us-east1-b",
+  "us-south1-aus-west1-b",
+]
+
+_VALID_AR_LOCATIONS = {
+  "us",
+  "asia",
+  "europe-west1",
+  "australia-southeast1",
+  "southamerica-east1",
+  "africa-south1",
+  "europe-central2",
+  "europe-north1",
+  "europe-southwest1",
+  "me-central1",
+  "me-west1",
+  "northamerica-northeast1",
+  "northamerica-south1",
+  "southamerica-west1",
+}
+
+
+class TestAllZonesMapping(absltest.TestCase):
+  def test_all_zones_map_to_valid_ar_location(self):
+    for zone in _ZONES:
+      loc = zone_to_ar_location(zone)
+      self.assertIn(
+        loc,
+        _VALID_AR_LOCATIONS,
+        f"Zone {zone} mapped to invalid AR location {loc}",
+      )
 
 
 if __name__ == "__main__":
