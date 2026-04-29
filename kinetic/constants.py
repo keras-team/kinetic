@@ -27,11 +27,7 @@ def zone_to_ar_location(zone):
   """Convert a GCP zone to Artifact Registry multi-region or region."""
   region = zone_to_region(zone)
   prefix = region.split("-")[0]
-  if prefix == "us":
-    return "us"
-  if prefix == "asia":
-    return "asia"
-  return region
+  return prefix if prefix in ("us", "asia", "europe") else region
 
 
 def get_default_project() -> str | None:
