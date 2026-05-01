@@ -8,7 +8,7 @@ from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from kinetic.cli.infra.post_deploy import configure_kubectl
 from kinetic.cli.infra.state import apply_preview, apply_update, load_state
-from kinetic.cli.options import common_options
+from kinetic.cli.options import common_options, force_destroy_option
 from kinetic.cli.output import (
   banner,
   config_summary,
@@ -23,6 +23,7 @@ from kinetic.core.accelerators import generate_pool_name
 
 @click.command()
 @common_options
+@force_destroy_option
 @click.option(
   "--accelerator",
   default=None,
@@ -41,7 +42,16 @@ from kinetic.core.accelerators import generate_pool_name
   is_flag=True,
   help="Preview infrastructure changes without applying them",
 )
-def up(project, zone, accelerator, cluster_name, min_nodes, yes, preview):
+def up(
+  project,
+  zone,
+  accelerator,
+  cluster_name,
+  min_nodes,
+  yes,
+  preview,
+  force_destroy,
+):
   """Provision GCP infrastructure for kinetic."""
   banner("kinetic Setup")
 
@@ -75,10 +85,16 @@ def up(project, zone, accelerator, cluster_name, min_nodes, yes, preview):
     check_prerequisites=False,
   )
 
+  # Precedence: explicit CLI flag > existing stack state > default True.
+  resolved_force_destroy = (
+    force_destroy if force_destroy is not None else state.force_destroy
+  )
+
   config = InfraConfig(
     project=project,
     zone=zone,
     cluster_name=cluster_name,
+    force_destroy=resolved_force_destroy,
   )
 
   if state.node_pools:

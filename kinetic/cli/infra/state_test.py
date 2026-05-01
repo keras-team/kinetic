@@ -34,6 +34,9 @@ class LoadStateTest(absltest.TestCase):
     self.mock_get_pools = self.enterContext(
       mock.patch.object(state, "get_current_node_pools", return_value=[])
     )
+    self.mock_get_force_destroy = self.enterContext(
+      mock.patch.object(state, "get_current_force_destroy", return_value=True)
+    )
     self.mock_stack = _make_mock_stack()
     self.mock_get_stack.return_value = self.mock_stack
 
@@ -86,6 +89,22 @@ class LoadStateTest(absltest.TestCase):
 
     self.assertIsNotNone(result.stack)
     self.mock_get_pools.assert_called_once()
+
+  def test_loads_force_destroy_from_stack(self):
+    self.mock_get_force_destroy.return_value = False
+
+    result = state.load_state("proj", "us-central1-a", "cluster")
+
+    self.assertFalse(result.force_destroy)
+
+  def test_defaults_force_destroy_true_when_stack_missing(self):
+    self.mock_get_stack.side_effect = pulumi_errors.CommandError("not found")
+
+    result = state.load_state(
+      "proj", "us-central1-a", "cluster", allow_missing=True
+    )
+
+    self.assertTrue(result.force_destroy)
 
   def test_skips_prerequisites_when_requested(self):
     mock_check = self.enterContext(mock.patch.object(state, "check_all"))

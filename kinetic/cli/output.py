@@ -295,5 +295,12 @@ def config_summary(config):
         accel_strs.append(f"TPU ({accel.name}, {accel.topology})")
     table.add_row("Accelerators", ", ".join(accel_strs))
 
+  table.add_row(
+    "Force Destroy Buckets",
+    "yes"
+    if config.force_destroy
+    else "no (empty buckets manually before down)",
+  )
+
   console.print()
   console.print(table)

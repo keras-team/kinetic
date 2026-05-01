@@ -25,3 +25,7 @@ class InfraConfig:
   zone: str = DEFAULT_ZONE
   cluster_name: str = DEFAULT_CLUSTER_NAME
   node_pools: list[NodePoolConfig] = field(default_factory=list)
+  # When True, GCS buckets are created with force_destroy=True so that
+  # `kinetic down` can delete them even when non-empty. Set to False to
+  # require manually emptying the buckets before teardown.
+  force_destroy: bool = True

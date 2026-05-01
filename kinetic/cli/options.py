@@ -48,6 +48,27 @@ def cleanup_options(f):
   return f
 
 
+def force_destroy_option(f):
+  """--force-destroy/--no-force-destroy flag.
+
+  Default is None so the caller can distinguish "user did not pass a flag"
+  (preserve existing state) from an explicit True/False.
+  """
+  f = click.option(
+    "--force-destroy/--no-force-destroy",
+    "force_destroy",
+    default=None,
+    envvar="KINETIC_FORCE_DESTROY",
+    help=(
+      "Whether kinetic buckets get auto-emptied on teardown. "
+      "Use --no-force-destroy to require manually emptying buckets "
+      "before 'kinetic down'. Persisted across commands "
+      "[env: KINETIC_FORCE_DESTROY, default: force-destroy]"
+    ),
+  )(f)
+  return f
+
+
 def jobs_options(f):
   """Shared options for ``kinetic jobs`` subcommands.
 

@@ -14,7 +14,7 @@ from kinetic.core.accelerators import GpuConfig, TpuConfig
 _SENTINEL = object()
 
 
-def _make_state(node_pools=None, stack=_SENTINEL):
+def _make_state(node_pools=None, stack=_SENTINEL, force_destroy=True):
   """Create a StackState for testing."""
   if stack is _SENTINEL:
     stack = mock.MagicMock()
@@ -24,6 +24,7 @@ def _make_state(node_pools=None, stack=_SENTINEL):
     cluster_name="kinetic-cluster",
     node_pools=node_pools or [],
     stack=stack,
+    force_destroy=force_destroy,
   )
 
 
@@ -285,6 +286,50 @@ class PoolAddNoStackTest(absltest.TestCase):
 
     self.assertNotEqual(result.exit_code, 0)
     self.assertIn("No Pulumi stack found", result.output)
+
+
+class PoolForceDestroyPreservationTest(absltest.TestCase):
+  """Pool commands must pass the existing force_destroy through unchanged."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    self.mock_load = self.enterContext(
+      mock.patch("kinetic.cli.commands.pool.load_state")
+    )
+    self.mock_apply = self.enterContext(
+      mock.patch("kinetic.cli.commands.pool.apply_update", return_value=True)
+    )
+    self.enterContext(
+      mock.patch(
+        "kinetic.cli.commands.pool.generate_pool_name",
+        return_value="gpu-l4-abcd",
+      )
+    )
+
+  def test_add_preserves_no_force_destroy(self):
+    self.mock_load.return_value = _make_state(force_destroy=False)
+
+    result = self.runner.invoke(pool, _ADD_ARGS)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    config = self.mock_apply.call_args[0][0]
+    self.assertFalse(config.force_destroy)
+
+  def test_remove_preserves_no_force_destroy(self):
+    existing = NodePoolConfig(
+      "gpu-l4-abcd",
+      GpuConfig("l4", 1, "nvidia-l4", "g2-standard-4"),
+    )
+    self.mock_load.return_value = _make_state(
+      node_pools=[existing], force_destroy=False
+    )
+
+    result = self.runner.invoke(pool, _REMOVE_ARGS)
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    config = self.mock_apply.call_args[0][0]
+    self.assertFalse(config.force_destroy)
 
 
 class PoolRemoveNoStackTest(absltest.TestCase):

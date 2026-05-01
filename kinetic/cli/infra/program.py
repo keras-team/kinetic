@@ -111,6 +111,7 @@ def _create_buckets(
   region: str,
   ar_location: str,
   enabled_apis: list[gcp.projects.Service],
+  force_destroy: bool,
 ) -> tuple[gcp.storage.Bucket, gcp.storage.Bucket]:
   """Create Cloud Storage buckets for jobs and build artifacts."""
   api_deps = pulumi.ResourceOptions(depends_on=enabled_apis)
@@ -119,7 +120,7 @@ def _create_buckets(
     name=f"{project_id}-kn-{cluster_name}-jobs",
     location=region,
     project=project_id,
-    force_destroy=True,
+    force_destroy=force_destroy,
     uniform_bucket_level_access=True,
     lifecycle_rules=_BUCKET_LIFECYCLE_30D,
     opts=api_deps,
@@ -129,7 +130,7 @@ def _create_buckets(
     name=f"{project_id}-kn-{cluster_name}-builds",
     location=ar_location,
     project=project_id,
-    force_destroy=True,
+    force_destroy=force_destroy,
     uniform_bucket_level_access=True,
     lifecycle_rules=_BUCKET_LIFECYCLE_30D,
     opts=api_deps,
@@ -485,6 +486,7 @@ def _export_stack_outputs(
   ar_location: str,
   cluster_name: str,
   pool_entries: list[tuple[GpuConfig | TpuConfig, gcp.container.NodePool, int]],
+  force_destroy: bool,
 ) -> None:
   """Export all Pulumi stack outputs."""
   pulumi.export("project", project_id)
@@ -492,6 +494,7 @@ def _export_stack_outputs(
   pulumi.export("cluster_name", cluster.name)
   pulumi.export("cluster_endpoint", cluster.endpoint)
   pulumi.export("node_sa_email", node_sa.email)
+  pulumi.export("force_destroy", force_destroy)
   pulumi.export(
     "ar_registry",
     repo.name.apply(
@@ -569,6 +572,7 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       region,
       ar_location,
       enabled_apis,
+      config.force_destroy,
     )
 
     node_sa, _build_sa = _create_service_accounts(
@@ -613,6 +617,7 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       ar_location,
       cluster_name,
       pool_entries,
+      config.force_destroy,
     )
 
   return pulumi_program

@@ -98,6 +98,7 @@ def pool_add(
     zone=state.zone,
     cluster_name=state.cluster_name,
     node_pools=all_pools,
+    force_destroy=state.force_destroy,
   )
 
   if preview:
@@ -153,6 +154,7 @@ def pool_remove(project, zone, cluster_name, pool_name, yes, preview):
     zone=state.zone,
     cluster_name=state.cluster_name,
     node_pools=remaining,
+    force_destroy=state.force_destroy,
   )
 
   if preview:
