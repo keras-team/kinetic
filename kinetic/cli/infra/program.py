@@ -258,8 +258,7 @@ def _create_firewall_cleanup(
       "for fw in $(gcloud compute firewall-rules list "
       "--filter='network={0}' --format='value(name)' "
       "--project='{1}' 2>/dev/null); do "
-      'gcloud compute firewall-rules delete "$fw" --quiet '
-      "--project='{1}'; done",
+      "gcloud compute firewall-rules delete --quiet --project='{1}' -- \"$fw\"; done",
       network.self_link,
       project_id,
     ),

@@ -17,6 +17,9 @@ class TestPrompts(absltest.TestCase):
     args = mock_run.call_args[0][0]
     self.assertIn("--", args)
     self.assertIn("my-proj", args)
+    idx_delim = args.index("--")
+    idx_project = args.index("my-proj")
+    self.assertLess(idx_delim, idx_project)
 
   @mock.patch("kinetic.cli.prompts.subprocess.run")
   def test_create_project_args(self, mock_run):
@@ -26,6 +29,9 @@ class TestPrompts(absltest.TestCase):
     args = mock_run.call_args[0][0]
     self.assertIn("--", args)
     self.assertIn("my-proj", args)
+    idx_delim = args.index("--")
+    idx_project = args.index("my-proj")
+    self.assertLess(idx_delim, idx_project)
 
   @mock.patch("kinetic.cli.prompts.subprocess.run")
   @mock.patch("click.confirm", return_value=True)
@@ -52,6 +58,9 @@ class TestPrompts(absltest.TestCase):
     args = mock_run.call_args_list[1][0][0]
     self.assertIn("--", args)
     self.assertIn("my-proj", args)
+    idx_delim = args.index("--")
+    idx_project = args.index("my-proj")
+    self.assertLess(idx_delim, idx_project)
 
 
 if __name__ == "__main__":
