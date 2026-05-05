@@ -44,11 +44,7 @@ class TestPrompts(absltest.TestCase):
     mock_run.return_value.returncode = 0
     mock_run.return_value.stdout = json.dumps([mock_acct])
 
-    # We need to mock the second call as well.
-    # subprocess.run is called twice.
-    # Let's make side_effect or just check call_args_list.
-    # If we don't mock return value for second call, it might fail if it expects something.
-    # But _link_billing_account doesn't check output of second call, just returncode.
+    # _link_billing_account calls subprocess.run twice (list and link).
 
     prompts._link_billing_account("my-proj")
 
