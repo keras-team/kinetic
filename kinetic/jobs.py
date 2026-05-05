@@ -214,7 +214,9 @@ class JobHandle:
       try:
         os.remove(result_path)
       except OSError as e:
-        logging.warning("Failed to remove temporary result file %s: %s", result_path, e)
+        logging.warning(
+          "Failed to remove temporary result file %s: %s", result_path, e
+        )
 
   def _download_result_payload_with_backoff(
     self, deadline: float | None

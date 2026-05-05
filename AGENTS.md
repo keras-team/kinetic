@@ -217,7 +217,7 @@ Key behaviors:
 - **Patterns**: `@parameterized.named_parameters` for multi-case tests, mocked GCP/K8s APIs, `tempfile.TemporaryDirectory()` for file ops
 - **Integration tests**: `tests/integration/`
 - **E2E tests**: `tests/e2e/` (requires live GCP resources)
-- **Run tests**: Use pytest (e.g., `/opt/miniconda3/envs/kinetic-3.12/bin/python -m pytest`). Tests use `absl.testing` internally but should be run via pytest for better output.
+- **Run tests**: Use pytest (e.g., `python3 -m pytest`). Tests use `absl.testing` internally but should be run via pytest for better output.
 
 ### Container Caching
 

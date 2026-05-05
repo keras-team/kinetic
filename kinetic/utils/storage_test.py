@@ -125,7 +125,6 @@ class TestDownloadResult(_GcsTestBase):
       self.assertEqual(victim_file.read_text(), victim_content)
 
 
-
 class TestHandleStorage(_GcsTestBase):
   def test_upload_handle_writes_json_blob(self):
     mock_bucket = self.mock_gcs.bucket.return_value

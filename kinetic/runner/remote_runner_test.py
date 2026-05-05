@@ -219,11 +219,7 @@ class TestResolveDataRefs(absltest.TestCase):
       "mount_path": None,
     }
 
-    with mock.patch(
-      "kinetic.runner.remote_runner.DATA_DIR",
-      str(tmp / "data"),
-    ):
-      args, kwargs = resolve_data_refs((ref, 42), {}, mock_client)
+    args, kwargs = resolve_data_refs((ref, 42), {}, mock_client, str(tmp / "data"))
 
     self.assertIsInstance(args[0], str)
     self.assertEqual(args[1], 42)
@@ -242,11 +238,7 @@ class TestResolveDataRefs(absltest.TestCase):
       "mount_path": None,
     }
 
-    with mock.patch(
-      "kinetic.runner.remote_runner.DATA_DIR",
-      str(tmp / "data"),
-    ):
-      args, _ = resolve_data_refs(([ref, "other"],), {}, mock_client)
+    args, _ = resolve_data_refs(([ref, "other"],), {}, mock_client, str(tmp / "data"))
 
     self.assertIsInstance(args[0][0], str)
     self.assertEqual(args[0][1], "other")
@@ -265,17 +257,11 @@ class TestResolveDataRefs(absltest.TestCase):
       os.makedirs(target_dir, exist_ok=True)
       pathlib.Path(os.path.join(target_dir, "config.json")).write_text("{}")
 
-    with (
-      mock.patch(
-        "kinetic.runner.remote_runner.DATA_DIR",
-        str(tmp / "data"),
-      ),
-      mock.patch(
-        "kinetic.runner.remote_runner._download_data",
-        side_effect=fake_dl,
-      ),
+    with mock.patch(
+      "kinetic.runner.remote_runner._download_data",
+      side_effect=fake_dl,
     ):
-      args, _ = resolve_data_refs((ref,), {}, MagicMock())
+      args, _ = resolve_data_refs((ref,), {}, MagicMock(), str(tmp / "data"))
 
     self.assertTrue(args[0].endswith("config.json"))
 
@@ -292,17 +278,13 @@ class TestResolveDataRefs(absltest.TestCase):
     def fake_dl(r, target_dir, client):
       os.makedirs(target_dir, exist_ok=True)
 
-    with (
-      mock.patch(
-        "kinetic.runner.remote_runner.DATA_DIR",
-        str(tmp / "data"),
-      ),
-      mock.patch(
-        "kinetic.runner.remote_runner._download_data",
-        side_effect=fake_dl,
-      ) as mock_dl,
-    ):
-      args, kwargs = resolve_data_refs((ref, ref), {"d": ref}, MagicMock())
+    with mock.patch(
+      "kinetic.runner.remote_runner._download_data",
+      side_effect=fake_dl,
+    ) as mock_dl:
+      args, kwargs = resolve_data_refs(
+        (ref, ref), {"d": ref}, MagicMock(), str(tmp / "data")
+      )
 
     # Downloaded only once despite three references
     mock_dl.assert_called_once()
@@ -312,7 +294,9 @@ class TestResolveDataRefs(absltest.TestCase):
 
   def test_non_ref_dict_preserved(self):
     mock_client = MagicMock()
-    args, kwargs = resolve_data_refs(({"key": "value"},), {"x": 1}, mock_client)
+    args, kwargs = resolve_data_refs(
+      ({"key": "value"},), {"x": 1}, mock_client, "/tmp/data"
+    )
     self.assertEqual(args[0], {"key": "value"})
     self.assertEqual(kwargs["x"], 1)
 
@@ -330,11 +314,9 @@ class TestResolveDataRefs(absltest.TestCase):
       "mount_path": None,
     }
 
-    with mock.patch(
-      "kinetic.runner.remote_runner.DATA_DIR",
-      str(tmp / "data"),
-    ):
-      _, kwargs = resolve_data_refs((), {"data": ref, "lr": 0.01}, mock_client)
+    _, kwargs = resolve_data_refs(
+      (), {"data": ref, "lr": 0.01}, mock_client, str(tmp / "data")
+    )
 
     self.assertIsInstance(kwargs["data"], str)
     self.assertEqual(kwargs["lr"], 0.01)
@@ -354,7 +336,7 @@ class TestResolveDataRefs(absltest.TestCase):
       "fuse": True,
     }
 
-    args, _ = resolve_data_refs((ref,), {}, MagicMock())
+    args, _ = resolve_data_refs((ref,), {}, MagicMock(), "/tmp/data")
 
     self.assertTrue(args[0].endswith("config.json"))
     self.assertFalse(os.path.isdir(args[0]))
@@ -369,7 +351,7 @@ class TestResolveDataRefs(absltest.TestCase):
       "fuse": True,
     }
 
-    args, _ = resolve_data_refs((ref,), {}, MagicMock())
+    args, _ = resolve_data_refs((ref,), {}, MagicMock(), "/tmp/data")
 
     self.assertEqual(args[0], "/tmp/fuse-data/0")
 
@@ -382,7 +364,7 @@ class TestResolveDataRefs(absltest.TestCase):
       "mount_path": "/data/config",
     }
 
-    args, _ = resolve_data_refs((ref,), {}, MagicMock())
+    args, _ = resolve_data_refs((ref,), {}, MagicMock(), "/tmp/data")
 
     self.assertEqual(args[0], "/data/config")
 
@@ -745,7 +727,9 @@ class TestInstallRequirements(absltest.TestCase):
       ) as mock_run,
     ):
       mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
-      _install_requirements(mock_client, "gs://bucket/requirements.txt", str(tmp))
+      _install_requirements(
+        mock_client, "gs://bucket/requirements.txt", str(tmp)
+      )
 
     mock_run.assert_called_once()
     args = mock_run.call_args[0][0]
@@ -773,7 +757,9 @@ class TestInstallRequirements(absltest.TestCase):
         returncode=1, stderr="ERROR: package not found"
       )
       with self.assertRaisesRegex(RuntimeError, "Failed to install"):
-        _install_requirements(mock_client, "gs://bucket/requirements.txt", str(tmp))
+        _install_requirements(
+          mock_client, "gs://bucket/requirements.txt", str(tmp)
+        )
 
   def test_empty_requirements_skipped(self):
     mock_client = MagicMock()
@@ -793,7 +779,9 @@ class TestInstallRequirements(absltest.TestCase):
         "kinetic.runner.remote_runner.subprocess.run",
       ) as mock_run,
     ):
-      _install_requirements(mock_client, "gs://bucket/requirements.txt", str(tmp))
+      _install_requirements(
+        mock_client, "gs://bucket/requirements.txt", str(tmp)
+      )
 
     mock_run.assert_not_called()
 
