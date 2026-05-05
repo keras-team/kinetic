@@ -221,6 +221,23 @@ example of forwarding Kaggle credentials into the remote pod.
 {bdg-secondary}`LLM` &nbsp;
 {bdg-secondary}`TPU`
 :::
+
+:::{grid-item-card} Tunix SFT Example
+:link: https://github.com/keras-team/kinetic/blob/main/examples/tunix_sft.py
+:class-card: sd-shadow-sm
+:class-body: sd-fs-6
+:class-title: sd-fs-5
+
+SFT of Gemma 3 with LoRA/QLoRA on TPU v5litepod. Demonstrates how to
+run the Tunix SFT script on a remote cluster with environment variable
+capture for credentials.
+
++++
+
+{bdg-secondary}`LLM` &nbsp;
+{bdg-secondary}`TPU` &nbsp;
+{bdg-secondary}`LoRA`
+:::
 ::::
 
 ## Related pages
