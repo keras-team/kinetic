@@ -211,7 +211,9 @@ class TestEnsureKubeconfig(absltest.TestCase):
         f"{_MODULE}.subprocess.run",
       ) as mock_run,
     ):
-      credentials._configure_kubeconfig("my-cluster", "us-central1-a", "my-proj")
+      credentials._configure_kubeconfig(
+        "my-cluster", "us-central1-a", "my-proj"
+      )
       mock_run.assert_called_once()
       args = mock_run.call_args[0][0]
       self.assertIn("--", args)

@@ -1,9 +1,11 @@
 """Tests for kinetic.cli.infra.post_deploy."""
 
-import subprocess
 from unittest import mock
+
 from absl.testing import absltest
+
 from kinetic.cli.infra import post_deploy
+
 
 class TestPostDeploy(absltest.TestCase):
   @mock.patch("kinetic.cli.infra.post_deploy.subprocess.run")
@@ -18,6 +20,7 @@ class TestPostDeploy(absltest.TestCase):
     idx_cluster = args.index("my-cluster")
     self.assertLess(idx_get, idx_delim)
     self.assertLess(idx_delim, idx_cluster)
+
 
 if __name__ == "__main__":
   absltest.main()
