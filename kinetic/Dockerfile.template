@@ -12,7 +12,6 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.1 /uv /uvx /usr/local/bin/
 $requirements_copy
 # Install all Python dependencies in a single resolver pass
 $install_command
-RUN pip install --no-cache-dir --extra-index-url https://pypi.org/simple google-tunix
 
 # Set up workspace and copy remote runner script
 WORKDIR /app
