@@ -257,9 +257,9 @@ def _create_firewall_cleanup(
     delete=pulumi.Output.format(
       "for fw in $(gcloud compute firewall-rules list "
       "--filter='network={0}' --format='value(name)' "
-      "--project={1} 2>/dev/null); do "
+      "--project='{1}' 2>/dev/null); do "
       'gcloud compute firewall-rules delete "$fw" --quiet '
-      "--project={1}; done",
+      "--project='{1}'; done",
       network.self_link,
       project_id,
     ),

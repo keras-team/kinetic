@@ -44,7 +44,7 @@ def resolve_project(allow_create=True):
 def _project_exists(project_id):
   """Check if a GCP project exists and is accessible."""
   result = subprocess.run(
-    ["gcloud", "projects", "describe", project_id],
+    ["gcloud", "projects", "describe", "--", project_id],
     capture_output=True,
   )
   return result.returncode == 0
@@ -54,7 +54,7 @@ def _create_project(project_id):
   """Create a new GCP project."""
   click.echo(f"Creating project '{project_id}'...")
   result = subprocess.run(
-    ["gcloud", "projects", "create", project_id],
+    ["gcloud", "projects", "create", "--", project_id],
     capture_output=True,
     text=True,
   )
@@ -120,6 +120,7 @@ def _link_billing_account(project_id):
       "billing",
       "projects",
       "link",
+      "--",
       project_id,
       f"--billing-account={account_id}",
     ],
