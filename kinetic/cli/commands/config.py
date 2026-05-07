@@ -107,5 +107,8 @@ def show(ctx):
   console.print(
     "Precedence: CLI flag > KINETIC_* env var > active profile > default."
   )
+  console.print(
+    "  https://kinetic.readthedocs.io/en/latest/configuration.html#precedence"
+  )
   console.print("Manage profiles with 'kinetic profile create|ls|use|show|rm'.")
   console.print()

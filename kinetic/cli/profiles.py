@@ -18,8 +18,6 @@ Resolution order (handled by the CLI root group, not here):
   CLI flag  >  KINETIC_* env var  >  active profile field  >  built-in default
 """
 
-from __future__ import annotations
-
 import contextlib
 import json
 import os
