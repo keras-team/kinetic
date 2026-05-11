@@ -103,12 +103,14 @@ class InitCreatePathTest(absltest.TestCase):
     self.profiles_path = _isolate_profiles(self)
 
   def test_no_clusters_routes_to_create(self):
-    result = self.runner.invoke(init, [])
+    # --yes skips init's "Proceed to create?" confirmation; the test is
+    # asserting the routing decision, not the prompt itself.
+    result = self.runner.invoke(init, ["--yes"])
     self.assertEqual(result.exit_code, 0, msg=result.output)
     self.up_mock.assert_called_once()
 
   def test_name_flag_forwarded_to_up(self):
-    result = self.runner.invoke(init, ["--profile-name", "my-prof"])
+    result = self.runner.invoke(init, ["--yes", "--profile-name", "my-prof"])
     self.assertEqual(result.exit_code, 0, msg=result.output)
     _, kwargs = self.up_mock.call_args
     self.assertEqual(kwargs.get("profile_name"), "my-prof")
@@ -200,7 +202,7 @@ class InitCreatePathForwardingTest(absltest.TestCase):
       "KINETIC_NAMESPACE": "team-ns",
     }
     with mock.patch.dict("os.environ", env, clear=True):
-      result = self.runner.invoke(init, [])
+      result = self.runner.invoke(init, ["--yes"])
     self.assertEqual(result.exit_code, 0, msg=result.output)
     self.up_mock.assert_called_once()
     _, kwargs = self.up_mock.call_args
@@ -212,6 +214,7 @@ class InitCreatePathForwardingTest(absltest.TestCase):
     result = self.runner.invoke(
       init,
       [
+        "--yes",
         "--zone",
         "europe-west4-a",
         "--cluster",
@@ -314,6 +317,59 @@ class InitActivatesNewlySavedProfileTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 0, msg=result.output)
     data = json.loads(self.profiles_path.read_text())
     self.assertEqual(data["current"], "dev-tpu")
+
+
+class InitChoicePromptExplainerTest(absltest.TestCase):
+  """The prompt itself must explain the consequences of each choice so the
+  user can decide without leaving the terminal.
+  """
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    _patch_prereqs(self)
+    _patch_resolve_project(self)
+    _patch_kubectl(self)
+    _patch_load_state_zone(self, zone="us-west4-a")
+    self.up_mock = _patch_up(self)
+    self.profiles_path = _isolate_profiles(self)
+
+  def test_no_clusters_path_shows_create_explainer(self):
+    _patch_list_clusters(self, [])
+    result = self.runner.invoke(init, ["--yes"])
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("No existing Kinetic clusters", result.output)
+    self.assertIn("Creating a new cluster will:", result.output)
+    self.assertIn("GKE cluster", result.output)
+    self.assertIn("incur", result.output)
+    self.assertIn("kinetic down", result.output)
+
+  def test_no_clusters_prompt_can_be_declined(self):
+    _patch_list_clusters(self, [])
+    # No --yes, decline the confirmation.
+    result = self.runner.invoke(init, [], input="n\n")
+    self.assertNotEqual(result.exit_code, 0)
+    self.up_mock.assert_not_called()
+
+  def test_clusters_present_prompt_shows_both_choices(self):
+    _patch_list_clusters(self, ["dev-tpu", "team-x"])
+    # Two prompts on this path: join/create (default join), then cluster
+    # selection (default dev-tpu). Accept both defaults.
+    result = self.runner.invoke(init, [], input="\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    # Both option names + their consequences are surfaced.
+    self.assertIn("dev-tpu", result.output)
+    self.assertIn("team-x", result.output)
+    self.assertIn("join", result.output)
+    self.assertIn("create", result.output)
+    self.assertIn("Configure kubectl", result.output)
+    self.assertIn("Provision a NEW GKE cluster", result.output)
+
+  def test_clusters_present_user_picks_create(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    result = self.runner.invoke(init, [], input="create\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.up_mock.assert_called_once()
 
 
 if __name__ == "__main__":

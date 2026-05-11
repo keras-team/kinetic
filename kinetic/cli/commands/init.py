@@ -63,7 +63,8 @@ def init(ctx, project, zone, cluster_name, profile_name, namespace, yes):
   project = report["project"]
 
   # Phase 3: Pick + execute path.
-  if _choose_join_path(report):
+  path = _choose_path(report, yes=yes)
+  if path == "join":
     chosen_cluster, chosen_zone = _join_flow(
       project, report["local_clusters"], cluster_name
     )
@@ -161,17 +162,70 @@ def _ok(flag):
   return "[green]OK[/green]" if flag else "[red]missing[/red]"
 
 
-def _choose_join_path(report):
-  """Return True if the user should Join an existing cluster, False to Create."""
+def _choose_path(report, *, yes):
+  """Return 'join' or 'create'. Aborts cleanly if the user declines.
+
+  When no clusters exist, prints an explainer of what the Create path will
+  do and confirms (skippable via ``--yes``). When clusters exist, always
+  prompts join/create — the choice is too consequential to default through.
+  """
   clusters = report["local_clusters"]
   if not clusters:
-    return False
+    _explain_create("No existing Kinetic clusters were found in this project.")
+    if not yes:
+      click.confirm(
+        "\nProceed to create a new cluster?", default=True, abort=True
+      )
+    return "create"
+
+  _explain_join_or_create(clusters)
   choice = click.prompt(
-    "Found existing cluster(s). Join one, or create a new cluster?",
+    "\nWhat would you like to do?",
     type=click.Choice(["join", "create"], case_sensitive=False),
     default="join",
+    show_choices=True,
   )
-  return choice == "join"
+  return choice
+
+
+def _explain_create(opener):
+  """Print a uniform 'here's what creating a cluster does' explainer."""
+  console.print()
+  console.print(opener)
+  console.print()
+  console.print("[bold]Creating a new cluster will:[/bold]")
+  console.print(
+    "  • Provision a GKE cluster, Artifact Registry, and state bucket"
+  )
+  console.print("  • Save it as a profile and set the profile active")
+  console.print("  • Take roughly 5–10 minutes the first time")
+  console.print(
+    "  • [yellow]Create GCP resources that incur ongoing cost[/yellow]"
+  )
+  console.print(
+    "  • Run [bold]kinetic down[/bold] later to tear everything down"
+  )
+
+
+def _explain_join_or_create(clusters):
+  """Print the join/create explainer for the existing-clusters case."""
+  cluster_list = ", ".join(f"[bold]{c}[/bold]" for c in clusters)
+  console.print()
+  console.print(f"Found existing Kinetic cluster(s): {cluster_list}")
+  console.print()
+  console.print(
+    "  [bold green]join[/bold green]    Configure kubectl for an existing "
+    "cluster and save a profile."
+  )
+  console.print(
+    "           No GCP resources are created or modified; no added cost."
+  )
+  console.print()
+  console.print(
+    "  [bold yellow]create[/bold yellow]  Provision a NEW GKE cluster "
+    "alongside the existing one(s)."
+  )
+  console.print("           Creates additional GCP resources that incur cost.")
 
 
 def _join_flow(project, clusters, cluster_override):
