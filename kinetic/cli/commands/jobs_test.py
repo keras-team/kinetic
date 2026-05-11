@@ -347,12 +347,14 @@ class TestJobsLogs(absltest.TestCase):
 class TestMissingProject(absltest.TestCase):
   def test_status_requires_project(self):
     runner = CliRunner()
-    result = runner.invoke(jobs, ["status", "job-abc"])
+    with mock.patch.dict("os.environ", {}, clear=True):
+      result = runner.invoke(jobs, ["status", "job-abc"])
     self.assertNotEqual(result.exit_code, 0)
 
   def test_list_requires_project(self):
     runner = CliRunner()
-    result = runner.invoke(jobs, ["list"])
+    with mock.patch.dict("os.environ", {}, clear=True):
+      result = runner.invoke(jobs, ["list"])
     self.assertNotEqual(result.exit_code, 0)
 
 

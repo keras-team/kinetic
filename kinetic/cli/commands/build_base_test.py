@@ -131,10 +131,11 @@ class TestBuildBaseCommand(absltest.TestCase):
 
   def test_project_required_in_non_interactive_mode(self):
     """When --repo is given (non-interactive), --project must be set."""
-    result = self.runner.invoke(
-      build_base,
-      ["--repo", "r", "-y"],
-    )
+    with mock.patch.dict("os.environ", {}, clear=True):
+      result = self.runner.invoke(
+        build_base,
+        ["--repo", "r", "-y"],
+      )
     self.assertNotEqual(result.exit_code, 0)
     self.assertIn("--project", result.output)
 

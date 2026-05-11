@@ -79,12 +79,12 @@ class ProfileCreateTest(absltest.TestCase):
     env = _make_runner_env(tmp)
     # Order: project, zone (default accepted), cluster (default accepted),
     # namespace (default accepted).
-    result = runner.invoke(
-      profile_cmd,
-      ["create", "dev"],
-      input="my-proj\n\n\n\n",
-      env=env,
-    )
+    with mock.patch.dict("os.environ", env, clear=True):
+      result = runner.invoke(
+        profile_cmd,
+        ["create", "dev"],
+        input="my-proj\n\n\n\n",
+      )
     self.assertEqual(result.exit_code, 0, msg=result.output)
     data = json.loads((tmp / "profiles.json").read_text())
     self.assertEqual(data["profiles"]["dev"]["project"], "my-proj")

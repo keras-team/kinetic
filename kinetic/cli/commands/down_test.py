@@ -100,7 +100,8 @@ class DownCommandTest(absltest.TestCase):
     """When --project not given, resolve_project(allow_create=False) is called."""
     args = ["--zone", "us-central1-a", "--yes"]
 
-    result = self.runner.invoke(down, args)
+    with mock.patch.dict("os.environ", {}, clear=True):
+      result = self.runner.invoke(down, args)
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.mocks["resolve_project"].assert_called_once_with(allow_create=False)
