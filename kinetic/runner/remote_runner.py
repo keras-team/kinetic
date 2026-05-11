@@ -501,18 +501,27 @@ def _download_hf_data(uri: str, target_dir: str) -> None:
   logging.info("Downloading Hugging Face dataset from %s", uri)
 
   parsed = urllib.parse.urlparse(uri)
-  repo_id = parsed.netloc + parsed.path
+  repo_id = (parsed.netloc + parsed.path).strip("/")
   query = urllib.parse.parse_qs(parsed.query)
   split = query.get("split", [None])[0]
   config_name = query.get("config_name", [None])[0]
-
-  ds = datasets.load_dataset(
-    repo_id,
-    name=config_name,
-    split=split,
-    cache_dir=os.path.join(target_dir, "_hf_cache"),
+  revision = query.get("revision", [None])[0]
+  trust_remote_code = (
+    query.get("trust_remote_code", ["False"])[0].lower() == "true"
   )
-  ds.save_to_disk(target_dir)
+
+  # Use a temporary directory for the cache to avoid save_to_disk failing
+  # on a non-empty directory and to prevent doubling disk usage.
+  with tempfile.TemporaryDirectory(prefix="hf-cache-") as cache_dir:
+    ds = datasets.load_dataset(
+      repo_id,
+      name=config_name,
+      split=split,
+      revision=revision,
+      trust_remote_code=trust_remote_code,
+      cache_dir=cache_dir,
+    )
+    ds.save_to_disk(target_dir)
 
 
 def _download_data(
