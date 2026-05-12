@@ -22,9 +22,24 @@ class TestEnsureGcloud(absltest.TestCase):
 
 
 class TestEnsureGkeAuthPlugin(absltest.TestCase):
-  def test_missing_install_succeeds(self):
+  def test_missing_gcloud(self):
+    """When gcloud is missing, raising a RuntimeError."""
     with (
       mock.patch("shutil.which", return_value=None),
+      self.assertRaisesRegex(RuntimeError, "gcloud CLI not found"),
+    ):
+      credentials.ensure_gke_auth_plugin()
+
+  def test_missing_install_succeeds(self):
+    def mock_which(cmd):
+      if cmd == "gke-gcloud-auth-plugin":
+        return None
+      if cmd == "gcloud":
+        return "/usr/bin/gcloud"
+      return None
+
+    with (
+      mock.patch("shutil.which", side_effect=mock_which),
       mock.patch(f"{_MODULE}.subprocess.run") as mock_run,
     ):
       credentials.ensure_gke_auth_plugin()
@@ -34,8 +49,15 @@ class TestEnsureGkeAuthPlugin(absltest.TestCase):
       self.assertIn("--quiet", args)
 
   def test_missing_install_fails(self):
+    def mock_which(cmd):
+      if cmd == "gke-gcloud-auth-plugin":
+        return None
+      if cmd == "gcloud":
+        return "/usr/bin/gcloud"
+      return None
+
     with (
-      mock.patch("shutil.which", return_value=None),
+      mock.patch("shutil.which", side_effect=mock_which),
       mock.patch(
         f"{_MODULE}.subprocess.run",
         side_effect=subprocess.CalledProcessError(1, "gcloud"),
