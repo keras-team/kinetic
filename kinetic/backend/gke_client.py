@@ -62,6 +62,8 @@ def submit_k8s_job(
     requirements_uri=requirements_uri,
     fuse_volume_specs=fuse_volume_specs,
     debug=debug,
+    payload_sha256=payload_sha256,
+    context_sha256=context_sha256,
   )
 
   # Submit job

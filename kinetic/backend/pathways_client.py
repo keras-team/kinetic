@@ -71,6 +71,8 @@ def submit_pathways_job(
   requirements_uri=None,
   fuse_volume_specs=None,
   debug=False,
+  payload_sha256=None,
+  context_sha256=None,
 ):
   """Submit a LeaderWorkerSet to GKE cluster.
 
@@ -84,6 +86,8 @@ def submit_pathways_job(
       namespace: Kubernetes namespace (default: "default")
       requirements_uri: Optional GCS URI to requirements.txt for runtime
           install (prebuilt image mode).
+      payload_sha256: Optional SHA-256 hash of payload.pkl for verification.
+      context_sha256: Optional SHA-256 hash of context.zip for verification.
 
   Returns:
       dict: The created LeaderWorkerSet object
@@ -114,6 +118,8 @@ def submit_pathways_job(
     requirements_uri=requirements_uri,
     fuse_volume_specs=fuse_volume_specs,
     debug=debug,
+    payload_sha256=payload_sha256,
+    context_sha256=context_sha256,
   )
 
   custom_api = _custom_api()

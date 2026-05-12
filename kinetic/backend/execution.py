@@ -259,6 +259,8 @@ class PathwaysBackend(BaseK8sBackend):
       requirements_uri=requirements_uri,
       fuse_volume_specs=ctx.fuse_volume_specs,
       debug=ctx.debug,
+      payload_sha256=ctx.payload_sha256,
+      context_sha256=ctx.context_sha256,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
