@@ -6,6 +6,7 @@ backend implementations, reducing code duplication and improving maintainability
 
 import abc
 import concurrent.futures
+import hashlib
 import inspect
 import os
 import sys
@@ -74,6 +75,8 @@ class JobContext:
   context_path: Optional[str] = None
   requirements_path: Optional[str] = None  # requirements.txt or pyproject.toml
   image_uri: Optional[str] = None
+  payload_sha256: Optional[str] = None
+  context_sha256: Optional[str] = None
 
   def __post_init__(self):
     self.bucket_name = build_bucket_name(self.project, self.cluster_name)
@@ -198,6 +201,8 @@ class GKEBackend(BaseK8sBackend):
       requirements_uri=requirements_uri,
       fuse_volume_specs=ctx.fuse_volume_specs,
       debug=ctx.debug,
+      payload_sha256=ctx.payload_sha256,
+      context_sha256=ctx.context_sha256,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -254,6 +259,8 @@ class PathwaysBackend(BaseK8sBackend):
       requirements_uri=requirements_uri,
       fuse_volume_specs=ctx.fuse_volume_specs,
       debug=ctx.debug,
+      payload_sha256=ctx.payload_sha256,
+      context_sha256=ctx.context_sha256,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -449,6 +456,15 @@ def _process_data_args(
   return ref_map, fuse_specs
 
 
+def _file_sha256(path: str) -> str:
+  """Compute SHA-256 hash of a file."""
+  hasher = hashlib.sha256()
+  with open(path, "rb") as f:
+    for chunk in iter(lambda: f.read(65536), b""):
+      hasher.update(chunk)
+  return hasher.hexdigest()
+
+
 def _prepare_artifacts(ctx: JobContext, tmpdir: str) -> None:
   """Package function payload and working directory context."""
   logging.info("Packaging function and context...")
@@ -481,6 +497,7 @@ def _prepare_artifacts(ctx: JobContext, tmpdir: str) -> None:
     volumes=volume_refs or None,
     working_dir=ctx.working_dir,
   )
+  ctx.payload_sha256 = _file_sha256(ctx.payload_path)
   logging.info("Payload serialized to %s", ctx.payload_path)
 
   # Zip working directory (excluding Data paths)
@@ -488,6 +505,7 @@ def _prepare_artifacts(ctx: JobContext, tmpdir: str) -> None:
   packager.zip_working_dir(
     caller_path, ctx.context_path, exclude_paths=exclude_paths
   )
+  ctx.context_sha256 = _file_sha256(ctx.context_path)
   logging.info("Context packaged to %s", ctx.context_path)
 
   # Find requirements.txt or pyproject.toml

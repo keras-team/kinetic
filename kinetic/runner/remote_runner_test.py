@@ -1,5 +1,6 @@
 """Tests for kinetic.runner.remote_runner — helpers and execution."""
 
+import hashlib
 import os
 import pathlib
 import shutil
@@ -18,6 +19,7 @@ from kinetic.runner.remote_runner import (
   _download_from_gcs,
   _install_requirements,
   _upload_to_gcs,
+  _verify_sha256,
   _wait_for_leader_ready_sentinel,
   main,
   resolve_data_refs,
@@ -940,6 +942,155 @@ class TestLeaderReadySentinel(absltest.TestCase):
       self.assertRaisesRegex(RuntimeError, "Leader did not signal readiness"),
     ):
       _wait_for_leader_ready_sentinel()
+
+
+class TestVerifySha256(absltest.TestCase):
+  def test_hash_match(self):
+    tmp = _make_temp_path(self)
+    file_path = tmp / "test.pkl"
+    file_path.write_text("dummy data")
+    expected_hash = (
+      "797bb0abff798d7200af7685dca7901edffc52bf26500d5bd97282658ee24152"
+    )
+
+    # Should not raise
+    _verify_sha256(str(file_path), expected_hash, "test.pkl")
+
+  def test_hash_mismatch(self):
+    tmp = _make_temp_path(self)
+    file_path = tmp / "test.pkl"
+    file_path.write_text("dummy data")
+
+    with self.assertRaisesRegex(RuntimeError, "Security verification failed"):
+      _verify_sha256(str(file_path), "bad-hash", "test.pkl")
+
+
+class TestMainHashVerification(absltest.TestCase):
+  def setUp(self):
+    super().setUp()
+    original_path = sys.path[:]
+    self.addCleanup(setattr, sys, "path", original_path)
+
+  def test_hash_verification_success(self):
+    def add(a, b):
+      return a + b
+
+    tmp_path = _make_temp_path(self)
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    context_zip = src_dir / "context.zip"
+    with zipfile.ZipFile(context_zip, "w") as z:
+      z.writestr("dummy.py", "x = 1")
+
+    payload = {"func": add, "args": (2, 3), "kwargs": {}, "env_vars": {}}
+    payload_pkl = src_dir / "payload.pkl"
+    with open(payload_pkl, "wb") as f:
+      cloudpickle.dump(payload, f)
+
+    with open(payload_pkl, "rb") as f:
+      payload_sha = hashlib.sha256(f.read()).hexdigest()
+    with open(context_zip, "rb") as f:
+      context_sha = hashlib.sha256(f.read()).hexdigest()
+
+    mock_client = MagicMock()
+
+    def fake_download(client, gcs_path, local_path):
+      if "context.zip" in gcs_path:
+        shutil.copy(str(context_zip), local_path)
+      elif "payload.pkl" in gcs_path:
+        shutil.copy(str(payload_pkl), local_path)
+
+    with (
+      mock.patch(
+        "sys.argv",
+        [
+          "remote_runner.py",
+          "--context-gcs",
+          "gs://bucket/context.zip",
+          "--payload-gcs",
+          "gs://bucket/payload.pkl",
+          "--result-gcs",
+          "gs://bucket/result.pkl",
+          "--payload-sha256",
+          payload_sha,
+          "--context-sha256",
+          context_sha,
+        ],
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner._download_from_gcs",
+        side_effect=fake_download,
+      ),
+      mock.patch("kinetic.runner.remote_runner._upload_to_gcs"),
+      mock.patch(
+        "kinetic.runner.remote_runner.storage.Client",
+        return_value=mock_client,
+      ),
+      mock.patch("kinetic.runner.remote_runner._verify_sha256") as mock_verify,
+      self.assertRaises(SystemExit) as cm,
+    ):
+      main()
+
+    self.assertEqual(cm.exception.code, 0)
+    # Called twice: once for payload, once for context
+    self.assertEqual(mock_verify.call_count, 2)
+
+  def test_hash_verification_failure_aborts(self):
+    def add(a, b):
+      return a + b
+
+    tmp_path = _make_temp_path(self)
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    context_zip = src_dir / "context.zip"
+    with zipfile.ZipFile(context_zip, "w") as z:
+      z.writestr("dummy.py", "x = 1")
+
+    payload = {"func": add, "args": (2, 3), "kwargs": {}, "env_vars": {}}
+    payload_pkl = src_dir / "payload.pkl"
+    with open(payload_pkl, "wb") as f:
+      cloudpickle.dump(payload, f)
+
+    mock_client = MagicMock()
+
+    def fake_download(client, gcs_path, local_path):
+      if "context.zip" in gcs_path:
+        shutil.copy(str(context_zip), local_path)
+      elif "payload.pkl" in gcs_path:
+        shutil.copy(str(payload_pkl), local_path)
+
+    with (
+      mock.patch(
+        "sys.argv",
+        [
+          "remote_runner.py",
+          "--context-gcs",
+          "gs://bucket/context.zip",
+          "--payload-gcs",
+          "gs://bucket/payload.pkl",
+          "--result-gcs",
+          "gs://bucket/result.pkl",
+          "--payload-sha256",
+          "wrong-hash",
+        ],
+      ),
+      mock.patch(
+        "kinetic.runner.remote_runner._download_from_gcs",
+        side_effect=fake_download,
+      ),
+      mock.patch("kinetic.runner.remote_runner._upload_to_gcs"),
+      mock.patch(
+        "kinetic.runner.remote_runner.storage.Client",
+        return_value=mock_client,
+      ),
+      self.assertRaises(SystemExit) as cm,
+    ):
+      main()
+
+    # Should exit with 1 on verification failure
+    self.assertEqual(cm.exception.code, 1)
 
 
 if __name__ == "__main__":
