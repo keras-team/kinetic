@@ -43,6 +43,8 @@ def submit_k8s_job(
       namespace: Kubernetes namespace (default: "default")
       requirements_uri: Optional GCS URI to requirements.txt for runtime
           install (prebuilt image mode).
+      payload_sha256: Optional SHA-256 hash of payload.pkl for verification.
+      context_sha256: Optional SHA-256 hash of context.zip for verification.
 
   Returns:
       kubernetes.client.V1Job object
