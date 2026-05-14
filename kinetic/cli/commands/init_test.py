@@ -93,6 +93,8 @@ def _isolate_profiles(testcase):
 
 
 class InitCreatePathTest(absltest.TestCase):
+  """Create-path behaviors not already covered by the forwarding tests."""
+
   def setUp(self):
     super().setUp()
     self.runner = CliRunner()
@@ -101,13 +103,6 @@ class InitCreatePathTest(absltest.TestCase):
     _patch_list_clusters(self, [])
     self.up_mock = _patch_up(self)
     self.profiles_path = _isolate_profiles(self)
-
-  def test_no_clusters_routes_to_create(self):
-    # --yes skips init's "Proceed to create?" confirmation; the test is
-    # asserting the routing decision, not the prompt itself.
-    result = self.runner.invoke(init, ["--yes"])
-    self.assertEqual(result.exit_code, 0, msg=result.output)
-    self.up_mock.assert_called_once()
 
   def test_name_flag_forwarded_to_up(self):
     result = self.runner.invoke(init, ["--yes", "--profile-name", "my-prof"])
@@ -364,12 +359,6 @@ class InitChoicePromptExplainerTest(absltest.TestCase):
     self.assertIn("create", result.output)
     self.assertIn("Configure kubectl", result.output)
     self.assertIn("Provision a NEW GKE cluster", result.output)
-
-  def test_clusters_present_user_picks_create(self):
-    _patch_list_clusters(self, ["dev-tpu"])
-    result = self.runner.invoke(init, [], input="create\n")
-    self.assertEqual(result.exit_code, 0, msg=result.output)
-    self.up_mock.assert_called_once()
 
 
 if __name__ == "__main__":
