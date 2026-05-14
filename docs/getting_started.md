@@ -58,16 +58,13 @@ you down one of two paths:
   enable APIs, provision a GKE cluster with an accelerator node pool,
   and wire up Docker / `kubectl` access.
 
-Either way, `init` ends by saving a **profile** (a named bundle of
-project, zone, cluster, and namespace) and setting it as active. Every
-subsequent `kinetic` command picks that up automatically — no
-`export KINETIC_*` needed.
-
-To run `init` non-interactively, you can still pre-set the project:
-
-```bash
-kinetic init --project=my-project --yes
-```
+Either way, `init` ends by saving a **profile** and making it active.
+A profile is your saved infrastructure context like project, zone,
+cluster, and namespace - persisted at `~/.kinetic/profiles.json`. The
+active profile is what every `kinetic` command and every
+`@kinetic.run()` invocation targets, so you don't need to export env vars or pass `--project` / `--zone` / `--cluster` on
+the command line. Switch contexts with `kinetic profile use <profile-name>`, and
+see what's saved with `kinetic profile ls`.
 
 > **Cleanup reminder:** when you're done, run `kinetic down` to tear
 > down all resources and stop incurring costs. See the
@@ -102,7 +99,7 @@ python fashion_mnist.py
   cached image is reused; only your code changes get re-uploaded.
 - **Subsequent runs (changed dependencies):** ~5 minutes again,
   since a new hash forces a fresh build.
-:::
+  :::
 
 :::{tip}
 **Recommended defaults:**
@@ -115,7 +112,7 @@ python fashion_mnist.py
   minutes and you'd rather not block your local shell.
 - Write any artifacts you want to keep under `KINETIC_OUTPUT_DIR`,
   not under `/tmp`.
-:::
+  :::
 
 ## Next steps
 
