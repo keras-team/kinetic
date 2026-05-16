@@ -6,6 +6,7 @@ import subprocess
 
 import click
 
+from kinetic.cli.constants import DEFAULT_CLUSTER_NAME
 from kinetic.cli.output import success, warning
 from kinetic.core.accelerators import GPUS, TPUS, parse_accelerator
 
@@ -39,6 +40,22 @@ def resolve_project(allow_create=True):
   _create_project(project)
   _link_billing_account(project)
   return project
+
+
+def resolve_cluster_name(cluster_name):
+  """Return ``cluster_name``, prompting interactively if it is missing.
+
+  Click's ``--cluster`` / ``KINETIC_CLUSTER`` resolution has already run by
+  the time this is called, so a None here means the user supplied neither.
+  Silently substituting the default makes new users discover later that
+  they are sharing the global default name; prompt instead and let them
+  confirm or override.
+  """
+  if cluster_name:
+    return cluster_name
+  return click.prompt(
+    "GKE cluster name", default=DEFAULT_CLUSTER_NAME, type=str
+  )
 
 
 def _project_exists(project_id):

@@ -5,7 +5,7 @@ import subprocess
 import click
 
 from kinetic.cli.config import InfraConfig, NodePoolConfig
-from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
+from kinetic.cli.constants import DEFAULT_ZONE
 from kinetic.cli.infra.post_deploy import configure_kubectl
 from kinetic.cli.infra.state import apply_preview, apply_update, load_state
 from kinetic.cli.options import common_options, force_destroy_option
@@ -13,10 +13,16 @@ from kinetic.cli.output import (
   banner,
   config_summary,
   console,
+  success,
   warning,
 )
 from kinetic.cli.prerequisites_check import check_all
-from kinetic.cli.prompts import prompt_accelerator, resolve_project
+from kinetic.cli.profiles import Profile, set_current, upsert_profile
+from kinetic.cli.prompts import (
+  prompt_accelerator,
+  resolve_cluster_name,
+  resolve_project,
+)
 from kinetic.core import accelerators
 from kinetic.core.accelerators import generate_pool_name
 
@@ -36,6 +42,20 @@ from kinetic.core.accelerators import generate_pool_name
   type=int,
   help="Minimum node count for accelerator node pools (default: 0, scale-to-zero)",
 )
+@click.option(
+  "--profile-name",
+  "profile_name",
+  default=None,
+  help="Profile name to save (default: cluster name).",
+)
+@click.option(
+  "--namespace",
+  envvar="KINETIC_NAMESPACE",
+  default="default",
+  show_default=True,
+  help="Kubernetes namespace to record in the saved profile "
+  "[env: KINETIC_NAMESPACE]",
+)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option(
   "--preview",
@@ -48,6 +68,8 @@ def up(
   accelerator,
   cluster_name,
   min_nodes,
+  profile_name,
+  namespace,
   yes,
   preview,
   force_destroy,
@@ -61,7 +83,7 @@ def up(
   # Resolve configuration
   project = project or resolve_project()
   zone = zone or DEFAULT_ZONE
-  cluster_name = cluster_name or DEFAULT_CLUSTER_NAME
+  cluster_name = resolve_cluster_name(cluster_name)
 
   # Resolve accelerator (interactive if not provided)
   if accelerator and accelerator.strip().lower() == "cpu":
@@ -135,6 +157,24 @@ def up(
       f" --zone={zone} --project={project}"
     )
 
+  # Persist the provisioning target as a profile and set it active.
+  # Cluster/project/zone as just provisioned are authoritative, so an
+  # existing profile under the same name is overwritten.
+  saved_name = profile_name or cluster_name
+  upsert_profile(
+    Profile(
+      name=saved_name,
+      project=project,
+      zone=zone,
+      cluster=cluster_name,
+      namespace=namespace,
+    )
+  )
+  # upsert_profile only auto-activates when the store is empty. After `up`
+  # the just-provisioned cluster is unambiguously the one the user is
+  # working with, so force-activate it regardless of prior 'current'.
+  set_current(saved_name)
+
   # Final summary
   console.print()
   if not pulumi_ok:
@@ -147,10 +187,12 @@ def up(
     banner("Setup Complete")
 
   console.print()
-  console.print("Add these environment variables to your shell config:")
-  console.print(f"  export KINETIC_PROJECT={project}")
-  console.print(f"  export KINETIC_ZONE={zone}")
-  console.print(f"  export KINETIC_CLUSTER={cluster_name}")
+  success(f"Profile '{saved_name}' created and active.")
+  console.print()
+  console.print("Next steps:")
+  console.print("  [bold]kinetic status[/bold]       check cluster state")
+  console.print("  [bold]kinetic jobs list[/bold]    see running jobs")
+  console.print("  [bold]kinetic profile ls[/bold]   list saved profiles")
   console.print()
   console.print("View quotas:")
   console.print(

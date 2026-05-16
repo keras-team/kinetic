@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 import click
 import pulumi.automation as auto
+from google.cloud import storage
 
 from kinetic.cli.config import InfraConfig, NodePoolConfig
 from kinetic.cli.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
@@ -19,6 +20,7 @@ from kinetic.cli.infra.stack_manager import (
   get_current_node_pools,
   get_stack,
 )
+from kinetic.cli.infra.state_backend import state_backend_url
 from kinetic.cli.output import LiveOutputPanel, console, success, warning
 from kinetic.cli.prerequisites_check import check_all
 from kinetic.cli.prompts import resolve_project
@@ -181,6 +183,42 @@ def apply_preview(config):
   return False
 
 
+def list_clusters(project):
+  """Return names of Kinetic clusters known to ``project``'s state bucket.
+
+  Reads ``gs://{project}-kinetic-state/.pulumi/stacks/kinetic/`` and
+  returns the cluster portions of stack file names (``{project}-{cluster}``).
+  Sorted; empty list if the bucket is missing, unreachable, or has no
+  stacks. Surfaces clusters provisioned by any teammate, not just this
+  machine.
+  """
+  bucket_name = state_backend_url(project).removeprefix("gs://")
+  # Skip a bucket.exists() precheck: it requires storage.buckets.get on
+  # the bucket, which collaborators with only roles/storage.objectAdmin
+  # (the grant pattern in ensure_gcs_backend) do not have. list_blobs
+  # succeeds at object level and raises NotFound when the bucket is
+  # genuinely missing — both cases collapse to the same empty result.
+  try:
+    client = storage.Client(project=project)
+    blobs = client.list_blobs(bucket_name, prefix=".pulumi/stacks/kinetic/")
+    names = [b.name for b in blobs]
+  except Exception:  # noqa: BLE001 — discovery is best-effort
+    return []
+
+  prefix = f".pulumi/stacks/kinetic/{project}-"
+  suffix = ".json"
+  clusters = []
+  for name in names:
+    if not name.startswith(prefix) or not name.endswith(suffix):
+      continue
+    stem = name[len(prefix) : -len(suffix)]
+    # Skip Pulumi-internal backup variants like ".bak.json".
+    if not stem or stem.endswith(".bak"):
+      continue
+    clusters.append(stem)
+  return sorted(clusters)
+
+
 def apply_destroy(config):
   """Destroy all Pulumi-managed resources for the given config.
 
@@ -206,6 +244,14 @@ def apply_destroy(config):
     success(
       f"Infrastructure destroy complete. {result.summary.resource_changes}"
     )
+    # Remove the now-empty stack from the backend so list_clusters() does
+    # not keep offering this cluster as a Join target in `kinetic init`.
+    # Best-effort: destroy already succeeded, so a removal failure is not
+    # fatal — just leaves a harmless stub the user can clean up later.
+    try:
+      stack.workspace.remove_stack(stack.name)
+    except auto.errors.CommandError as e:
+      warning(f"Stack metadata removal failed (state may linger): {e}")
     return True
   warning("Infrastructure destroy encountered an issue.")
   return False

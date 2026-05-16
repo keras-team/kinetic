@@ -75,6 +75,19 @@ def get_current_force_destroy(stack) -> bool:
   return True
 
 
+def get_current_zone(stack) -> str | None:
+  """Read the GCP zone from stack outputs, or None if the output is missing.
+
+  Used to discover where an existing cluster lives when joining via
+  ``kinetic init`` — the user does not know (and should not have to know)
+  the zone for clusters provisioned by a teammate.
+  """
+  outputs = stack.outputs()
+  if "zone" in outputs and outputs["zone"].value:
+    return str(outputs["zone"].value)
+  return None
+
+
 def get_current_node_pools(stack) -> list[NodePoolConfig]:
   """Read the current node pool list from Pulumi stack exports.
 

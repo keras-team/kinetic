@@ -10,6 +10,9 @@ ahead to [Run your first job](#run-your-first-job).
 - [uv](https://docs.astral.sh/uv/getting-started/installation/), used
   for the install command below.
 - Google Cloud SDK (`gcloud`): [install guide](https://cloud.google.com/sdk/docs/install).
+- `kubectl`: [install guide](https://kubernetes.io/docs/tasks/tools/).
+  Kinetic auto-installs the `gke-gcloud-auth-plugin` for you on first
+  use, but `kubectl` itself must already be on your `PATH`.
 - A Google Cloud project with [billing enabled](https://docs.cloud.google.com/billing/docs/how-to/modify-project).
 
 Authenticate with Google Cloud once:
@@ -19,69 +22,51 @@ gcloud auth login
 gcloud auth application-default login
 ```
 
-Set your GCP project ID so Kinetic knows where to run jobs:
-
-```bash
-export KINETIC_PROJECT="your-project-id"
-```
-
-Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) so it
-persists. See [Configuration](configuration.md) for the full list of
-environment variables.
-
 ## Install
 
 ```bash
-uv pip install keras-kinetic
+uv pip install "keras-kinetic[cli]"
 ```
 
-This installs both the `@kinetic.run()` decorator and the `kinetic`
-CLI for managing infrastructure.
+The base `keras-kinetic` package installs the `@kinetic.run()`
+decorator. The `[cli]` extra adds the dependencies the `kinetic` CLI
+needs to provision and manage infrastructure (Pulumi and the GCP
+plugins). We recommend installing the `[cli]` extra even if you're only
+submitting jobs against an already-provisioned cluster — the CLI makes
+troubleshooting and job management much easier. Drop it only if you're
+sure you won't need CLI access.
 
 > **Note:** The [Pulumi](https://www.pulumi.com/) CLI (used for
 > infrastructure provisioning) is bundled and managed automatically.
 > It will be installed to `~/.kinetic/pulumi` on first use if not
 > already present.
 
-## Are you the first user, or joining a team?
-
-Two paths from here:
-
-- **Joining an existing Kinetic team.** Someone else has already run
-  `kinetic up`. Point your shell at the team's cluster and skip ahead
-  to [Run your first job](#run-your-first-job):
-
-  ```bash
-  export KINETIC_CLUSTER="cluster-name"
-  export KINETIC_ZONE="us-central1-a"  # if it differs from the default
-  ```
-
-- **First user in your project.** You need to provision a cluster once
-  before you can run anything. Continue with the next step.
-
-## Provision infrastructure (first user only)
-
-Skip this section if your team already runs a Kinetic cluster (the
-"joining a team" path above). Otherwise, run the one-time setup. It
-interactively prompts for your GCP project and accelerator type:
+## Set up your environment
 
 ```bash
-kinetic up
+kinetic init
 ```
 
-This:
+`kinetic init` checks your local tools, auth, and project, then routes
+you down one of two paths:
 
-- Enables required APIs (Cloud Build, Artifact Registry, Cloud
-  Storage, GKE).
-- Creates an Artifact Registry repository for container images.
-- Provisions a GKE cluster with an accelerator node pool.
-- Configures Docker authentication and `kubectl` access.
+- **Join** — if any Kinetic clusters already exist in this GCP project
+  (provisioned by you or a teammate), `init` lists them, lets you pick
+  one, and configures `kubectl` for it. Cluster discovery reads the
+  project's shared state bucket
+  (`gs://{project}-kinetic-state`), so collaborators with access to
+  the bucket all see the same set.
+- **Create** — if no clusters exist yet, `init` calls `kinetic up` to
+  enable APIs, provision a GKE cluster with an accelerator node pool,
+  and wire up Docker / `kubectl` access.
 
-You can also run non-interactively:
-
-```bash
-kinetic up --project=my-project --accelerator=t4 --yes
-```
+Either way, `init` ends by saving a **profile** and making it active.
+A profile is your saved infrastructure context like project, zone,
+cluster, and namespace - persisted at `~/.kinetic/profiles.json`. The
+active profile is what every `kinetic` command and every
+`@kinetic.run()` invocation targets, so you don't need to export env vars or pass `--project` / `--zone` / `--cluster` on
+the command line. Switch contexts with `kinetic profile use <profile-name>`, and
+see what's saved with `kinetic profile ls`.
 
 > **Cleanup reminder:** when you're done, run `kinetic down` to tear
 > down all resources and stop incurring costs. See the
@@ -116,7 +101,7 @@ python fashion_mnist.py
   cached image is reused; only your code changes get re-uploaded.
 - **Subsequent runs (changed dependencies):** ~5 minutes again,
   since a new hash forces a fresh build.
-:::
+  :::
 
 :::{tip}
 **Recommended defaults:**
@@ -129,7 +114,7 @@ python fashion_mnist.py
   minutes and you'd rather not block your local shell.
 - Write any artifacts you want to keep under `KINETIC_OUTPUT_DIR`,
   not under `/tmp`.
-:::
+  :::
 
 ## Next steps
 
