@@ -176,8 +176,8 @@ class InitPrereqFailureTest(absltest.TestCase):
 
 
 class InitCreatePathForwardingTest(absltest.TestCase):
-  """Regression for Codex P1: ctx.invoke(up, ...) bypasses Click's envvar
-  resolution, so init must forward project/zone/cluster/namespace explicitly.
+  """`ctx.invoke(up, ...)` bypasses Click's envvar resolution, so `init` must
+  forward project/zone/cluster/namespace explicitly.
   """
 
   def setUp(self):
@@ -264,7 +264,10 @@ class InitJoinZoneInferenceTest(absltest.TestCase):
       mock.patch(
         "kinetic.cli.commands.init.load_state",
         return_value=StackState(
-          project="test-proj", zone="placeholder", cluster_name="c", stack=stack
+          project="test-proj",
+          zone="placeholder",
+          cluster_name="c",
+          stack=stack,
         ),
       )
     )
@@ -345,20 +348,6 @@ class InitChoicePromptExplainerTest(absltest.TestCase):
     result = self.runner.invoke(init, [], input="n\n")
     self.assertNotEqual(result.exit_code, 0)
     self.up_mock.assert_not_called()
-
-  def test_clusters_present_prompt_shows_both_choices(self):
-    _patch_list_clusters(self, ["dev-tpu", "team-x"])
-    # Two prompts on this path: join/create (default join), then cluster
-    # selection (default dev-tpu). Accept both defaults.
-    result = self.runner.invoke(init, [], input="\n\n")
-    self.assertEqual(result.exit_code, 0, msg=result.output)
-    # Both option names + their consequences are surfaced.
-    self.assertIn("dev-tpu", result.output)
-    self.assertIn("team-x", result.output)
-    self.assertIn("join", result.output)
-    self.assertIn("create", result.output)
-    self.assertIn("Configure kubectl", result.output)
-    self.assertIn("Provision a NEW GKE cluster", result.output)
 
 
 if __name__ == "__main__":

@@ -30,9 +30,11 @@ uv pip install "keras-kinetic[cli]"
 
 The base `keras-kinetic` package installs the `@kinetic.run()`
 decorator. The `[cli]` extra adds the dependencies the `kinetic` CLI
-needs to provision and manage infrastructure (Click, Pulumi, the GCP
-plugins). Drop the `[cli]` extra only if you're running on a machine
-that just needs to submit jobs against an already-provisioned cluster.
+needs to provision and manage infrastructure (Pulumi and the GCP
+plugins). We recommend installing the `[cli]` extra even if you're only
+submitting jobs against an already-provisioned cluster — the CLI makes
+troubleshooting and job management much easier. Drop it only if you're
+sure you won't need CLI access.
 
 > **Note:** The [Pulumi](https://www.pulumi.com/) CLI (used for
 > infrastructure provisioning) is bundled and managed automatically.
