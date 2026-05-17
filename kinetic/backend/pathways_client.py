@@ -383,24 +383,28 @@ def get_job_status(job_name, namespace="default") -> JobStatus:
       )
     raise RuntimeError(f"Failed to read leader pod status: {e.reason}") from e
 
-  if pod.status.phase == "Succeeded":
+  # A leader Succeeded result must be downgraded to FAILED if any worker
+  # pod failed, otherwise async callers see the same false success that
+  # wait_for_job used to return.
+  def _succeeded_or_worker_failed() -> JobStatus:
+    if _failed_worker_pod_names(core_v1, job_name, namespace):
+      return JobStatus.FAILED
     return JobStatus.SUCCEEDED
+
+  if pod.status.phase == "Succeeded":
+    return _succeeded_or_worker_failed()
   if pod.status.phase == "Failed":
     return JobStatus.FAILED
   if pod.status.container_statuses:
     container_status = pod.status.container_statuses[0]
     if container_status.state.terminated:
-      return (
-        JobStatus.SUCCEEDED
-        if container_status.state.terminated.exit_code == 0
-        else JobStatus.FAILED
-      )
+      if container_status.state.terminated.exit_code == 0:
+        return _succeeded_or_worker_failed()
+      return JobStatus.FAILED
     if container_status.last_state.terminated:
-      return (
-        JobStatus.SUCCEEDED
-        if container_status.last_state.terminated.exit_code == 0
-        else JobStatus.FAILED
-      )
+      if container_status.last_state.terminated.exit_code == 0:
+        return _succeeded_or_worker_failed()
+      return JobStatus.FAILED
   if pod.status.phase == "Running":
     return JobStatus.RUNNING
   return JobStatus.PENDING

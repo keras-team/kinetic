@@ -716,10 +716,13 @@ class TestAsyncObservationHelpers(absltest.TestCase):
     self.mock_custom_api = self.enterContext(
       mock.patch(f"{_MODULE}._custom_api")
     ).return_value
+    # Default, no worker pods visible to the failure scan.
+    self.mock_core.list_namespaced_pod.return_value.items = []
 
-  def _make_pod(self, phase, exit_code=None):
+  def _make_pod(self, phase, exit_code=None, name="keras-pathways-job-1-0"):
     pod = MagicMock()
     pod.status.phase = phase
+    pod.metadata.name = name
     if exit_code is None:
       pod.status.container_statuses = None
     else:
@@ -728,6 +731,9 @@ class TestAsyncObservationHelpers(absltest.TestCase):
       container_status.last_state.terminated = None
       pod.status.container_statuses = [container_status]
     return pod
+
+  def _set_worker_pods(self, *pods):
+    self.mock_core.list_namespaced_pod.return_value.items = list(pods)
 
   def test_get_job_status_running(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod("Running")
@@ -808,6 +814,7 @@ class TestAsyncObservationHelpers(absltest.TestCase):
   def test_get_job_status_succeeded_from_last_state(self):
     pod = MagicMock()
     pod.status.phase = "Running"
+    pod.metadata.name = "keras-pathways-job-1-0"
     container_status = MagicMock()
     container_status.state.terminated = None
     container_status.last_state.terminated = MagicMock(exit_code=0)
@@ -817,6 +824,42 @@ class TestAsyncObservationHelpers(absltest.TestCase):
     status = get_job_status("keras-pathways-job-1")
 
     self.assertEqual(status, JobStatus.SUCCEEDED)
+
+  def test_get_job_status_failed_when_worker_failed_phase_succeeded(self):
+    """Regression for #239 in async path, leader Succeeded but worker failed."""
+    self.mock_core.read_namespaced_pod.return_value = self._make_pod(
+      "Succeeded"
+    )
+    leader = self._make_pod("Succeeded", name="keras-pathways-job-1-0")
+    worker = self._make_pod("Failed", name="keras-pathways-job-1-1")
+    self._set_worker_pods(leader, worker)
+
+    self.assertEqual(get_job_status("keras-pathways-job-1"), JobStatus.FAILED)
+
+  def test_get_job_status_failed_when_worker_failed_container_exit_zero(self):
+    """Container exit 0 must not mask a failed worker pod for async callers."""
+    self.mock_core.read_namespaced_pod.return_value = self._make_pod(
+      "Running", exit_code=0
+    )
+    worker = self._make_pod("Failed", name="keras-pathways-job-1-2")
+    self._set_worker_pods(worker)
+
+    self.assertEqual(get_job_status("keras-pathways-job-1"), JobStatus.FAILED)
+
+  def test_get_job_status_failed_when_worker_failed_last_state_exit_zero(self):
+    """Restarted leader exit 0 must not mask a failed worker pod."""
+    pod = MagicMock()
+    pod.status.phase = "Running"
+    pod.metadata.name = "keras-pathways-job-1-0"
+    container_status = MagicMock()
+    container_status.state.terminated = None
+    container_status.last_state.terminated = MagicMock(exit_code=0)
+    pod.status.container_statuses = [container_status]
+    self.mock_core.read_namespaced_pod.return_value = pod
+    worker = self._make_pod("Failed", name="keras-pathways-job-1-1")
+    self._set_worker_pods(worker)
+
+    self.assertEqual(get_job_status("keras-pathways-job-1"), JobStatus.FAILED)
 
   def test_get_job_status_api_error_raises(self):
     self.mock_core.read_namespaced_pod.side_effect = ApiException(
