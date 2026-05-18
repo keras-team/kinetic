@@ -90,6 +90,7 @@ class LiveOutputPanel:
     self._live = None
     self._start_time = None
     self._phrase_order = None
+    self._subtitle_override = None
 
   def __enter__(self):
     self._start_time = time.monotonic()
@@ -135,7 +136,23 @@ class LiveOutputPanel:
     if self._live:
       self._live.refresh()
 
+  def set_subtitle(self, text):
+    """Pin a custom subtitle, overriding the rotating tips.
+
+    Pass ``None`` to clear the override and return to default behaviour
+    (rotating tips if ``show_subtitle`` was set, otherwise no subtitle).
+    The override is shown even when ``show_subtitle=False``, so callers
+    can keep tips off while still surfacing transient status.
+    """
+    self._subtitle_override = text
+    if self._live:
+      self._live.refresh()
+
   def _make_subtitle(self):
+    if self._subtitle_override is not None:
+      return f"[italic]{self._subtitle_override}[/italic]"
+    if not self._show_subtitle:
+      return None
     if self._start_time is None or self._phrase_order is None:
       return None
     elapsed = time.monotonic() - self._start_time
@@ -158,9 +175,7 @@ class LiveOutputPanel:
     return Panel(
       content,
       title=self._title,
-      subtitle=self._make_subtitle()
-      if self._show_subtitle and not self._has_error
-      else None,
+      subtitle=self._make_subtitle() if not self._has_error else None,
       border_style=style,
     )
 
