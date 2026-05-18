@@ -92,9 +92,7 @@ def init(ctx, project, zone, cluster_name, profile_name, namespace, yes):
     set_current(saved)
     _print_join_ready_screen(saved)
   elif path == "troubleshoot":
-    _troubleshoot_flow(
-      project, report["local_clusters"], cluster_name, zone_override=zone
-    )
+    _troubleshoot_flow(project, cluster_name, zone_override=zone)
   else:
     # `up` handles provisioning AND profile save AND its own ready screen.
     # Forward all the user's resolved env/profile/flag values explicitly —
@@ -260,6 +258,10 @@ def _explain_troubleshoot():
   console.print(
     "               Read-only — no resources are created or modified."
   )
+  console.print(
+    "               [dim]Only joined clusters are selectable; join first "
+    "to diagnose a cluster.[/dim]"
+  )
 
 
 def _join_flow(project, clusters, cluster_override):
@@ -355,23 +357,24 @@ def _offer_troubleshoot_on_prereq_failure(
     )
   _troubleshoot_flow(
     report.get("project"),
-    report.get("local_clusters") or [],
     cluster_override,
     zone_override=zone,
   )
 
 
-def _troubleshoot_flow(
-  project, clusters, cluster_override, *, zone_override=None
-):
-  """Pick (or type) a cluster name and run diagnostics.
+def _troubleshoot_flow(project, cluster_override, *, zone_override=None):
+  """Pick a joined cluster name and run diagnostics.
 
-  Read-only — does not save a profile or modify kubectl. Exits non-zero
-  via Click if any diagnostic FAILed so scripted callers can detect it.
-  An explicit ``zone_override`` (typically from ``--zone`` / KINETIC_ZONE)
-  wins over the saved-profile lookup so users can override.
+  Restricted to clusters the user has already joined (saved as profiles)
+  — diagnosing a cluster you don't operate on is rarely what users want,
+  and joining is the natural prerequisite. Read-only: does not save a
+  profile or modify kubectl. Exits non-zero via Click if any diagnostic
+  FAILed so scripted callers can detect it. An explicit ``zone_override``
+  (typically from ``--zone`` / KINETIC_ZONE) wins over the saved-profile
+  lookup.
   """
-  cluster_name = _pick_cluster_for_troubleshoot(clusters, cluster_override)
+  joined = _joined_clusters_for_project(project)
+  cluster_name = _pick_cluster_for_troubleshoot(joined, cluster_override)
   zone = zone_override or _zone_from_saved_profiles(project, cluster_name)
   _print_troubleshoot_target(project, cluster_name, zone)
   ok = run_diagnostics(project=project, zone=zone, cluster_name=cluster_name)
@@ -379,15 +382,23 @@ def _troubleshoot_flow(
     raise click.exceptions.Exit(1)
 
 
-def _zone_from_saved_profiles(project, cluster_name):
-  """Return the saved zone for (project, cluster) from any profile, or None.
+def _joined_clusters_for_project(project):
+  """Return sorted cluster names from saved profiles matching ``project``.
 
-  Profiles persist the zone they were created with, so a joined or
-  created cluster always has a zone available without any network I/O.
-  Clusters not in any profile (e.g. a teammate's that hasn't been joined
-  yet) return None — the troubleshoot header surfaces this, and the user
-  can re-run 'kinetic init' to join, or pass --zone explicitly.
+  Empty when ``project`` is None or no profile matches. Used to gate the
+  troubleshoot picker so users only diagnose clusters they have joined.
   """
+  if not project:
+    return []
+  try:
+    _, profiles = list_profiles()
+  except ProfileError:
+    return []
+  return sorted({p.cluster for p in profiles if p.project == project})
+
+
+def _zone_from_saved_profiles(project, cluster_name):
+  """Return the saved zone for (project, cluster) from any profile, or None."""
   if not project or not cluster_name:
     return None
   try:
@@ -411,41 +422,50 @@ def _print_troubleshoot_target(project, cluster_name, zone):
   console.print(f"  Zone:     {zone or '[dim]default[/dim]'}")
 
 
-def _pick_cluster_for_troubleshoot(clusters, cluster_override):
-  """Return a cluster name to diagnose, or None for env-only checks.
+_JOIN_HINT = (
+  "Run 'kinetic init' and choose 'join' to add a cluster before "
+  "troubleshooting it."
+)
 
-  Honors ``cluster_override`` verbatim — power users targeting a cluster
-  not in ``clusters`` (e.g. broken Pulumi state bucket) need that.
+
+def _pick_cluster_for_troubleshoot(joined_clusters, cluster_override):
+  """Return a joined cluster name to diagnose, or None for env-only checks.
+
+  Only clusters present in saved profiles are selectable. When
+  ``cluster_override`` is given (``--cluster`` / KINETIC_CLUSTER) it must
+  be a joined cluster too — otherwise we error with a join-first hint
+  rather than silently targeting an unknown cluster.
   """
   if cluster_override:
+    if cluster_override not in joined_clusters:
+      raise click.ClickException(
+        f"Cluster '{cluster_override}' is not in your saved profiles. "
+        + _JOIN_HINT
+      )
     return cluster_override
 
-  if clusters:
-    options = clusters + ["other"]
+  if not joined_clusters:
     console.print()
-    console.print("Available clusters:")
-    for i, name in enumerate(clusters, 1):
-      console.print(f"  {i}) {name}")
-    console.print(f"  {len(clusters) + 1}) other (enter a different name)")
-    picked = click.prompt(
-      "\nSelect cluster to diagnose",
-      type=click.Choice(options, case_sensitive=False),
-      default=clusters[0],
+    console.print("[yellow]No joined clusters for this project.[/yellow]")
+    console.print(_JOIN_HINT)
+    console.print(
+      "[dim]Environment-only checks (local tools, auth, GCP project/APIs) "
+      "can still run without a cluster.[/dim]"
     )
-    if picked != "other":
-      return picked
-    # Fall through to free-form prompt below.
+    if not click.confirm("\nRun environment-only checks?", default=True):
+      raise click.ClickException(
+        "Join a cluster first, then re-run 'kinetic init' and pick "
+        "'troubleshoot'."
+      )
+    return None
 
   console.print()
-  if not clusters:
-    console.print("[yellow]No Kinetic clusters were detected.[/yellow]")
-  console.print(
-    "Enter a cluster name to diagnose (useful if Pulumi state is missing "
-    "or the cluster lives outside this project)."
+  console.print("Joined clusters:")
+  for i, name in enumerate(joined_clusters, 1):
+    console.print(f"  {i}) {name}")
+  console.print("\n[dim]Don't see your cluster? " + _JOIN_HINT + "[/dim]")
+  return click.prompt(
+    "\nSelect cluster to diagnose",
+    type=click.Choice(joined_clusters, case_sensitive=False),
+    default=joined_clusters[0],
   )
-  console.print(
-    "[dim]Leave blank to run environment-only checks "
-    "(local tools, auth, GCP project/APIs).[/dim]"
-  )
-  cluster_name = click.prompt("Cluster name", default="", show_default=False)
-  return cluster_name or None
