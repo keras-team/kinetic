@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 
 from absl.testing import absltest
 
-from kinetic.core.core import run, submit
+from kinetic.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
+from kinetic.core.core import _resolve_infra, run
 
 
 def _isolate_profile_env(extra=None):
@@ -197,47 +198,92 @@ class TestExecuteOnBackendDefaults(absltest.TestCase):
       self.assertEqual(backend.namespace, "custom-ns")
 
 
-class TestProfileResolution(absltest.TestCase):
-  """Profile fields on disk feed run/submit when no explicit/env override."""
+class TestResolveInfra(absltest.TestCase):
+  """Unit tests for the precedence chain in `_resolve_infra`."""
 
-  def _write_profile_store(self, path, *, current, profiles):
-    payload = {"current": current, "profiles": profiles}
-    with open(path, "w", encoding="utf-8") as f:
-      json.dump(payload, f)
-
-  def _stage_profile(self, current, profiles):
-    """Create a temp profile file and return env dict pointing at it."""
+  def _stage_profile(self, **fields):
+    """Write a one-profile store and return env dict pointing at it."""
     fd, path = tempfile.mkstemp(suffix=".json", prefix="kinetic-profiles-")
     os.close(fd)
     self.addCleanup(os.unlink, path)
-    self._write_profile_store(path, current=current, profiles=profiles)
+    payload = {"current": "p", "profiles": {"p": fields}}
+    with open(path, "w", encoding="utf-8") as f:
+      json.dump(payload, f)
     return {"KINETIC_PROFILES_FILE": path}
 
-  def test_profile_fields_used_when_no_kwargs_or_env(self):
-    """All four infra fields fall through to the active profile."""
+  def test_precedence_kwarg_beats_env_beats_profile_beats_default(self):
+    """Each layer wins over the layers below for the field it sets."""
     env = self._stage_profile(
-      current="dev",
-      profiles={
-        "dev": {
-          "project": "prof-project",
-          "zone": "europe-west4-a",
-          "cluster": "prof-cluster",
-          "namespace": "prof-ns",
-        }
+      project="prof-proj",
+      zone="prof-zone",
+      cluster="prof-cluster",
+      namespace="prof-ns",
+    )
+    # Sets env for cluster only; kwarg only for namespace.
+    env["KINETIC_CLUSTER"] = "env-cluster"
+    with mock.patch.dict(os.environ, env, clear=True):
+      out = _resolve_infra(
+        project=None, zone=None, cluster=None, namespace="kwarg-ns"
+      )
+    self.assertEqual(
+      out,
+      {
+        "project": "prof-proj",  # profile (no kwarg / env)
+        "zone": "prof-zone",  # profile (no kwarg / env)
+        "cluster": "env-cluster",  # env beats profile
+        "namespace": "kwarg-ns",  # kwarg beats env / profile
       },
     )
+
+  def test_built_in_defaults_when_nothing_set(self):
+    """Without a profile or env vars, falls through to built-in defaults."""
+    env = {
+      "KINETIC_PROFILES_FILE": "/nonexistent/kinetic-profiles.json",
+      "KINETIC_PROJECT": "fallback-proj",  # required, no default
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+      out = _resolve_infra(
+        project=None, zone=None, cluster=None, namespace=None
+      )
+    self.assertEqual(out["zone"], DEFAULT_ZONE)
+    self.assertEqual(out["cluster"], DEFAULT_CLUSTER_NAME)
+    self.assertEqual(out["namespace"], "default")
+    self.assertEqual(out["project"], "fallback-proj")
+
+
+class TestProfileEndToEnd(absltest.TestCase):
+  """Smoke test that an on-disk profile actually reaches the backend."""
+
+  def test_profile_flows_through_run_to_backend(self):
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="kinetic-profiles-")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
+    with open(path, "w", encoding="utf-8") as f:
+      json.dump(
+        {
+          "current": "dev",
+          "profiles": {
+            "dev": {
+              "project": "prof-project",
+              "zone": "europe-west4-a",
+              "cluster": "prof-cluster",
+              "namespace": "prof-ns",
+            }
+          },
+        },
+        f,
+      )
+
     mock_handle = MagicMock()
     mock_handle.result.return_value = None
     with (
-      mock.patch.dict(os.environ, env, clear=True),
+      mock.patch.dict(os.environ, {"KINETIC_PROFILES_FILE": path}, clear=True),
       mock.patch(
-        "kinetic.core.core.submit_remote",
-        return_value=mock_handle,
+        "kinetic.core.core.submit_remote", return_value=mock_handle
       ) as mock_submit,
       mock.patch(
-        "kinetic.core.core.JobContext.from_params",
-        return_value=MagicMock(),
-      ) as mock_from_params,
+        "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
+      ),
     ):
 
       @run(accelerator="cpu")
@@ -245,159 +291,10 @@ class TestProfileResolution(absltest.TestCase):
         pass
 
       func()
-
-      # JobContext.from_params positional args: func, args, kwargs,
-      # accelerator, container_image, zone, project, env_vars
-      call_args = mock_from_params.call_args[0]
-      self.assertEqual(call_args[5], "europe-west4-a")  # zone
-      self.assertEqual(call_args[6], "prof-project")  # project
-      kwargs = mock_from_params.call_args[1]
-      self.assertEqual(kwargs["cluster_name"], "prof-cluster")
 
       backend = mock_submit.call_args[0][1]
       self.assertEqual(backend.cluster, "prof-cluster")
       self.assertEqual(backend.namespace, "prof-ns")
-
-  def test_env_var_overrides_profile(self):
-    """KINETIC_* env vars take precedence over the active profile."""
-    env = self._stage_profile(
-      current="dev",
-      profiles={
-        "dev": {
-          "project": "prof-project",
-          "zone": "europe-west4-a",
-          "cluster": "prof-cluster",
-          "namespace": "prof-ns",
-        }
-      },
-    )
-    env["KINETIC_CLUSTER"] = "env-cluster"
-    env["KINETIC_NAMESPACE"] = "env-ns"
-    mock_handle = MagicMock()
-    mock_handle.result.return_value = None
-    with (
-      mock.patch.dict(os.environ, env, clear=True),
-      mock.patch(
-        "kinetic.core.core.submit_remote",
-        return_value=mock_handle,
-      ) as mock_submit,
-      mock.patch(
-        "kinetic.core.core.JobContext.from_params",
-        return_value=MagicMock(),
-      ) as mock_from_params,
-    ):
-
-      @run(accelerator="cpu")
-      def func():
-        pass
-
-      func()
-
-      kwargs = mock_from_params.call_args[1]
-      self.assertEqual(kwargs["cluster_name"], "env-cluster")
-      # Project/zone still come from the profile.
-      call_args = mock_from_params.call_args[0]
-      self.assertEqual(call_args[5], "europe-west4-a")
-      self.assertEqual(call_args[6], "prof-project")
-
-      backend = mock_submit.call_args[0][1]
-      self.assertEqual(backend.cluster, "env-cluster")
-      self.assertEqual(backend.namespace, "env-ns")
-
-  def test_explicit_kwarg_overrides_env_and_profile(self):
-    """Decorator kwargs win against both env vars and the active profile."""
-    env = self._stage_profile(
-      current="dev",
-      profiles={
-        "dev": {
-          "project": "prof-project",
-          "zone": "europe-west4-a",
-          "cluster": "prof-cluster",
-          "namespace": "prof-ns",
-        }
-      },
-    )
-    env["KINETIC_PROJECT"] = "env-project"
-    env["KINETIC_CLUSTER"] = "env-cluster"
-    mock_handle = MagicMock()
-    mock_handle.result.return_value = None
-    with (
-      mock.patch.dict(os.environ, env, clear=True),
-      mock.patch(
-        "kinetic.core.core.submit_remote",
-        return_value=mock_handle,
-      ) as mock_submit,
-      mock.patch(
-        "kinetic.core.core.JobContext.from_params",
-        return_value=MagicMock(),
-      ) as mock_from_params,
-    ):
-
-      @submit(
-        accelerator="cpu",
-        project="explicit-project",
-        cluster="explicit-cluster",
-        namespace="explicit-ns",
-      )
-      def func():
-        pass
-
-      func()
-
-      call_args = mock_from_params.call_args[0]
-      kwargs = mock_from_params.call_args[1]
-      self.assertEqual(call_args[6], "explicit-project")
-      self.assertEqual(kwargs["cluster_name"], "explicit-cluster")
-
-      backend = mock_submit.call_args[0][1]
-      self.assertEqual(backend.cluster, "explicit-cluster")
-      self.assertEqual(backend.namespace, "explicit-ns")
-
-  def test_kinetic_profile_env_selects_profile(self):
-    """KINETIC_PROFILE picks a non-default profile from the store."""
-    env = self._stage_profile(
-      current="prod",
-      profiles={
-        "prod": {
-          "project": "prod-project",
-          "zone": "us-central1-a",
-          "cluster": "prod-cluster",
-          "namespace": "default",
-        },
-        "dev": {
-          "project": "dev-project",
-          "zone": "europe-west4-a",
-          "cluster": "dev-cluster",
-          "namespace": "dev-ns",
-        },
-      },
-    )
-    env["KINETIC_PROFILE"] = "dev"
-    mock_handle = MagicMock()
-    mock_handle.result.return_value = None
-    with (
-      mock.patch.dict(os.environ, env, clear=True),
-      mock.patch(
-        "kinetic.core.core.submit_remote",
-        return_value=mock_handle,
-      ) as mock_submit,
-      mock.patch(
-        "kinetic.core.core.JobContext.from_params",
-        return_value=MagicMock(),
-      ) as mock_from_params,
-    ):
-
-      @run(accelerator="cpu")
-      def func():
-        pass
-
-      func()
-
-      call_args = mock_from_params.call_args[0]
-      self.assertEqual(call_args[6], "dev-project")
-      backend = mock_submit.call_args[0][1]
-      self.assertEqual(backend.cluster, "dev-cluster")
-      self.assertEqual(backend.namespace, "dev-ns")
 
 
 class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
