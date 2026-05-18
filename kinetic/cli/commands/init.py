@@ -390,7 +390,7 @@ def _zone_from_saved_profiles(project, cluster_name):
 
 
 def _print_troubleshoot_target(project, cluster_name, zone):
-  """Show which stack is being diagnosed and how to redirect."""
+  """Show which stack is being diagnosed."""
   console.print()
   console.print("[bold]Troubleshooting target[/bold]")
   console.print(f"  Project:  {project or '[dim]not set[/dim]'}")
@@ -398,12 +398,6 @@ def _print_troubleshoot_target(project, cluster_name, zone):
     f"  Cluster:  {cluster_name or '[dim]none (env-only checks)[/dim]'}"
   )
   console.print(f"  Zone:     {zone or '[dim]default[/dim]'}")
-  console.print()
-  console.print(
-    "[dim]To troubleshoot a different cluster, re-run 'kinetic init' and "
-    "join that cluster, or run 'kinetic profile set <name>' to switch the "
-    "active profile first.[/dim]"
-  )
 
 
 def _pick_cluster_for_troubleshoot(clusters, cluster_override):

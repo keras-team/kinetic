@@ -503,9 +503,8 @@ class InitTroubleshootPathTest(absltest.TestCase):
     _, kwargs = self.diag_mock.call_args
     self.assertIsNone(kwargs.get("zone"))
 
-  def test_troubleshoot_prints_target_and_redirect_hint(self):
-    """The header tells the user exactly what's being diagnosed and how to
-    point troubleshoot at a different stack."""
+  def test_troubleshoot_prints_target_header(self):
+    """The header tells the user exactly what's being diagnosed."""
     _patch_list_clusters(self, ["dev-tpu"])
     self.profiles_path.parent.mkdir(parents=True, exist_ok=True)
     self.profiles_path.write_text(
@@ -529,8 +528,6 @@ class InitTroubleshootPathTest(absltest.TestCase):
     self.assertIn("test-proj", result.output)
     self.assertIn("dev-tpu", result.output)
     self.assertIn("us-west4-a", result.output)
-    self.assertIn("kinetic init", result.output)
-    self.assertIn("kinetic profile set", result.output)
 
 
 if __name__ == "__main__":
