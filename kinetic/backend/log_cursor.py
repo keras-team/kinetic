@@ -131,17 +131,17 @@ class LogCursor:
     try:
       self._path.parent.mkdir(parents=True, exist_ok=True)
       tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-      tmp.write_text(
-        json.dumps(
+      # Open with 0600 from the start so there's no window where the tmp
+      # file exists with umask-derived perms before being tightened.
+      fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+      with os.fdopen(fd, "w") as f:
+        json.dump(
           {
             "last_ts": self._last_ts,
             "recent_hashes": list(self._recent_hashes),
-          }
+          },
+          f,
         )
-      )
-      # 0600 since the cursor lives under ~/.kinetic/ alongside other
-      # per-user state. Set on the temp file so the rename is atomic.
-      os.chmod(tmp, 0o600)
       os.replace(tmp, self._path)
       self._dirty = False
     except OSError:
