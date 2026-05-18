@@ -127,6 +127,27 @@ class SetCurrentTest(absltest.TestCase):
       profiles.set_current("nope")
 
 
+class ClearCurrentTest(absltest.TestCase):
+  def test_clear_returns_previous_and_nulls_pointer(self):
+    tmp = _tmp(self)
+    with _patched_path(tmp):
+      profiles.upsert_profile(profiles.Profile("a", "p", "z", "c"))
+      previous = profiles.clear_current()
+      current, loaded = profiles.load_store()
+    self.assertEqual(previous, "a")
+    self.assertIsNone(current)
+    # Profile itself is preserved.
+    self.assertIn("a", loaded)
+
+  def test_clear_when_no_current_is_noop(self):
+    tmp = _tmp(self)
+    with _patched_path(tmp):
+      previous = profiles.clear_current()
+      current, _ = profiles.load_store()
+    self.assertIsNone(previous)
+    self.assertIsNone(current)
+
+
 class RemoveProfileTest(absltest.TestCase):
   def test_remove_clears_current(self):
     tmp = _tmp(self)

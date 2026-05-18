@@ -196,6 +196,18 @@ def set_current(name):
   _save_store(name, profiles)
 
 
+def clear_current():
+  """Clear the active-profile pointer. Saved profiles are preserved.
+
+  Returns the previously-active profile name, or None if none was set.
+  """
+  current, profiles = load_store()
+  if current is None:
+    return None
+  _save_store(None, profiles)
+  return current
+
+
 def remove_profile(name):
   """Delete a profile. Raises if it does not exist.
 
