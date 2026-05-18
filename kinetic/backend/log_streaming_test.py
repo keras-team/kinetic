@@ -167,6 +167,37 @@ class TestStreamPodLogs(absltest.TestCase):
     )
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
+    cursor = LogCursor(path=None)
+    with mock.patch(
+      "kinetic.backend.log_streaming.LiveOutputPanel"
+    ) as mock_panel_cls:
+      mock_panel = MagicMock()
+      mock_panel_cls.return_value.__enter__.return_value = mock_panel
+      mock_panel_cls.return_value.__exit__.return_value = False
+      _stream_pod_logs(
+        mock_core,
+        "pod-1",
+        "default",
+        cursor=cursor,
+        stop_event=threading.Event(),
+      )
+
+    emitted = [c.args[0] for c in mock_panel.on_output.call_args_list]
+    self.assertEqual(emitted, ["3/10"])
+    # Regression: \r stripping must not lose the timestamp prefix, so dedup
+    # still records the cursor.
+    self.assertEqual(cursor.since_time, "2024-01-01T12:00:00.000Z")
+
+  def test_handles_multibyte_utf8_split_across_chunks(self):
+    mock_core = MagicMock()
+    # "héllo" → "h" + 0xc3 0xa9 + "llo" — break the 2-byte é across chunks.
+    encoded = "2024-01-01T12:00:00.000Z héllo\n".encode("utf-8")
+    split = encoded.index(b"\xa9")  # split right after the first é byte
+    mock_core.read_namespaced_pod_log.return_value = _make_resp(
+      [encoded[:split], encoded[split:]]
+    )
+    mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
+
     with mock.patch(
       "kinetic.backend.log_streaming.LiveOutputPanel"
     ) as mock_panel_cls:
@@ -178,7 +209,7 @@ class TestStreamPodLogs(absltest.TestCase):
       )
 
     emitted = [c.args[0] for c in mock_panel.on_output.call_args_list]
-    self.assertEqual(emitted, ["3/10"])
+    self.assertEqual(emitted, ["héllo"])
 
   def test_releases_conn_on_api_exception(self):
     mock_core = MagicMock()
@@ -452,6 +483,25 @@ class TestLogCursor(absltest.TestCase):
   def test_safe_name_sanitizes(self):
     p = cursor_path_for(Path("/tmp/streams"), "job/with:slashes", "pod-1")
     self.assertEqual(p, Path("/tmp/streams/job_with_slashes/pod-1.json"))
+
+  def test_safe_name_strips_dots_to_prevent_traversal(self):
+    p = cursor_path_for(Path("/tmp/streams"), "..", "pod-1")
+    self.assertEqual(p, Path("/tmp/streams/__/pod-1.json"))
+
+  def test_clear_timestamp_resets_and_marks_dirty(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      path = Path(tmp) / "c.json"
+      cursor = LogCursor(path=path, write_interval_s=0)
+      cursor.record("2024-01-01T12:00:00.000Z", "h")
+      cursor.flush()
+      self.assertEqual(cursor.since_time, "2024-01-01T12:00:00.000Z")
+
+      cursor.clear_timestamp()
+      self.assertIsNone(cursor.since_time)
+      # A subsequent flush should persist the cleared state.
+      cursor.flush()
+      data = json.loads(path.read_text())
+      self.assertIsNone(data["last_ts"])
 
 
 if __name__ == "__main__":

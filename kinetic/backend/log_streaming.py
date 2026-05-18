@@ -13,6 +13,7 @@ timestamp, and dedupes the second-granular overlap. With
 invocation pick up where the previous one left off.
 """
 
+import codecs
 import contextlib
 import hashlib
 import http.client
@@ -115,6 +116,10 @@ def _process_line(line: str, panel, cursor: LogCursor, dedup: bool) -> None:
     ts, content = _parse_timestamped_line(line)
   else:
     ts, content = None, line
+  # Strip carriage-return prefixes (progress bars) from the content only, so
+  # the timestamp prefix stays intact for dedup hashing.
+  if "\r" in content:
+    content = content.rsplit("\r", 1)[-1]
   if ts is not None:
     line_hash = hashlib.sha1(f"{ts}\t{content}".encode("utf-8")).hexdigest()
     if cursor.is_duplicate(line_hash):
@@ -132,21 +137,19 @@ def _consume_stream(
 ) -> None:
   """Drain one open log stream into the panel, raising on transport error."""
   panel.set_subtitle(None)  # we're connected, clear any reconnect notice
+  # Use an incremental decoder so multi-byte UTF-8 sequences that straddle
+  # chunk boundaries are buffered instead of getting replaced with U+FFFD.
+  decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
   buffer = ""
   for chunk in resp.stream(decode_content=True):
     if stop_event.is_set():
       return
-    buffer += chunk.decode("utf-8", errors="replace")
+    buffer += decoder.decode(chunk)
     while "\n" in buffer:
       line, buffer = buffer.split("\n", 1)
-      if "\r" in line:
-        line = line.rsplit("\r", 1)[-1]
       _process_line(line, panel, cursor, dedup)
-  if buffer.strip():
-    line = buffer
-    if "\r" in line:
-      line = line.rsplit("\r", 1)[-1]
-    _process_line(line, panel, cursor, dedup)
+  if buffer:
+    _process_line(buffer, panel, cursor, dedup)
 
 
 def _open_log_stream(
@@ -222,7 +225,7 @@ def _stream_pod_logs(
           break  # pod is gone
         if e.status == 410:
           # since_time too old, reset and retry without it
-          cursor._last_ts = None
+          cursor.clear_timestamp()
           transient = True
         elif e.status in (401, 403):
           refreshed = _refresh_k8s_client()

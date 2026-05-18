@@ -39,8 +39,9 @@ def clear_job_cursors(cursor_dir: Path | None, job_id: str) -> None:
 
 
 def _safe_name(name: str) -> str:
-  # k8s names are already restrictive, but be defensive against unusual job IDs.
-  return "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
+  # Drop dots so a malicious job id like ".." cannot escape the streams dir.
+  # k8s names are restricted to DNS-1123 (no dots), so this is collision-safe.
+  return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
 
 class LogCursor:
@@ -67,6 +68,11 @@ class LogCursor:
   @property
   def since_time(self) -> str | None:
     return self._last_ts
+
+  def clear_timestamp(self) -> None:
+    """Forget the last-seen timestamp, e.g. after a 410 Gone from the API."""
+    self._last_ts = None
+    self._dirty = True
 
   def load(self) -> None:
     """Best-effort read from disk. Missing or corrupt files reset to empty."""
