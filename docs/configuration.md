@@ -102,7 +102,7 @@ the resolved value of the most common variables (project, zone,
 cluster, namespace, output dir, and the per-project Pulumi state
 bucket) and where each came from (env var,
 [profile](guides/profiles.md), or default). Run it before reaching
-for `kinetic doctor`. Variables that aren't shown there
+for `kinetic init`'s troubleshoot path. Variables that aren't shown there
 (`KINETIC_BASE_IMAGE_REPO`, `KINETIC_RESERVATION`, `KINETIC_LOG_LEVEL`,
 `KINETIC_DEBUG_WAIT_TIMEOUT`) can be inspected with `env | grep
 KINETIC_`.

@@ -84,12 +84,51 @@ def _patch_up(testcase):
   return up_mock
 
 
+def _patch_run_diagnostics(testcase, returns=True):
+  """Stub run_diagnostics so init's troubleshoot path doesn't shell out
+  to gcloud/kubectl/the GCP SDKs. Returns the mock for assertions."""
+  m = mock.MagicMock(return_value=returns)
+  testcase.enterContext(
+    mock.patch("kinetic.cli.commands.init.run_diagnostics", m)
+  )
+  return m
+
+
 def _isolate_profiles(testcase):
   path = str(_tmp(testcase) / "profiles.json")
   testcase.enterContext(
     mock.patch.dict("os.environ", {"KINETIC_PROFILES_FILE": path})
   )
   return Path(path)
+
+
+def _seed_profiles(
+  profiles_path, clusters, *, project="test-proj", zone="us-west4-a"
+):
+  """Write a profiles.json containing one profile per cluster name.
+
+  Each profile's ``cluster`` field equals its name; the profile name is
+  the same as the cluster so the troubleshoot picker shows them. Used by
+  tests that exercise the join-first model — only clusters with a saved
+  profile are picker-selectable.
+  """
+  profiles_path.parent.mkdir(parents=True, exist_ok=True)
+  profiles_path.write_text(
+    json.dumps(
+      {
+        "current": None,
+        "profiles": {
+          c: {
+            "project": project,
+            "zone": zone,
+            "cluster": c,
+            "namespace": "default",
+          }
+          for c in clusters
+        },
+      }
+    )
+  )
 
 
 class InitCreatePathTest(absltest.TestCase):
@@ -159,20 +198,50 @@ class InitJoinPathTest(absltest.TestCase):
 
 
 class InitPrereqFailureTest(absltest.TestCase):
+  """When prereqs are missing, init should offer to run troubleshoot
+  rather than the old 'go run kinetic doctor' hint (which referenced a
+  command that no longer exists)."""
+
   def setUp(self):
     super().setUp()
     self.runner = CliRunner()
     _patch_prereqs(self, all_ok=False)
     _patch_list_clusters(self, [])
     self.up_mock = _patch_up(self)
+    self.diag_mock = _patch_run_diagnostics(self)
     self.profiles_path = _isolate_profiles(self)
 
-  def test_missing_prereq_exits_with_doctor_hint(self):
-    result = self.runner.invoke(init, [])
-    self.assertNotEqual(result.exit_code, 0)
-    self.assertIn("kinetic doctor", result.output)
-    # No invocation of `up` when prereqs fail.
+  def test_missing_prereq_offers_troubleshoot(self):
+    # Accept the "Run troubleshoot now?" confirm, then leave the
+    # cluster-name prompt blank (env-only checks).
+    result = self.runner.invoke(init, [], input="y\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.diag_mock.assert_called_once()
     self.up_mock.assert_not_called()
+
+  def test_missing_prereq_declined_exits_cleanly(self):
+    # Decline the troubleshoot confirm — should exit non-zero with no
+    # diagnostics or `up` invocation.
+    result = self.runner.invoke(init, [], input="n\n")
+    self.assertNotEqual(result.exit_code, 0)
+    self.diag_mock.assert_not_called()
+    self.up_mock.assert_not_called()
+
+  def test_missing_prereq_with_yes_runs_troubleshoot_automatically(self):
+    # --yes opts into troubleshoot without prompting for confirmation.
+    result = self.runner.invoke(init, ["--yes"], input="\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.diag_mock.assert_called_once()
+
+  def test_missing_prereq_path_honors_zone_override(self):
+    """`--zone` provided to init must reach diagnostics even when the
+    troubleshoot path is entered via the prereq-failure branch."""
+    result = self.runner.invoke(
+      init, ["--yes", "--zone", "asia-east1-a"], input="\n"
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("zone"), "asia-east1-a")
 
 
 class InitCreatePathForwardingTest(absltest.TestCase):
@@ -330,6 +399,7 @@ class InitChoicePromptExplainerTest(absltest.TestCase):
     _patch_kubectl(self)
     _patch_load_state_zone(self, zone="us-west4-a")
     self.up_mock = _patch_up(self)
+    self.diag_mock = _patch_run_diagnostics(self)
     self.profiles_path = _isolate_profiles(self)
 
   def test_no_clusters_path_shows_create_explainer(self):
@@ -342,12 +412,159 @@ class InitChoicePromptExplainerTest(absltest.TestCase):
     self.assertIn("incur", result.output)
     self.assertIn("kinetic down", result.output)
 
-  def test_no_clusters_prompt_can_be_declined(self):
+  def test_no_clusters_path_shows_troubleshoot_option(self):
+    """When no clusters exist, the prompt must still offer troubleshoot
+    so the user can investigate (vs. only being able to create)."""
     _patch_list_clusters(self, [])
-    # No --yes, decline the confirmation.
-    result = self.runner.invoke(init, [], input="n\n")
-    self.assertNotEqual(result.exit_code, 0)
+    # Pick 'troubleshoot' at the prompt, then leave the cluster-name
+    # prompt blank to run env-only checks.
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("troubleshoot", result.output)
+    self.diag_mock.assert_called_once()
     self.up_mock.assert_not_called()
+
+
+class InitTroubleshootPathTest(absltest.TestCase):
+  """Tests for the troubleshoot path added to init when doctor was rolled in."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    _patch_prereqs(self)
+    _patch_resolve_project(self)
+    _patch_load_state_zone(self, zone="us-west4-a")
+    self.up_mock = _patch_up(self)
+    self.diag_mock = _patch_run_diagnostics(self)
+    self.profiles_path = _isolate_profiles(self)
+
+  def test_troubleshoot_with_single_joined_cluster_picks_it(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    _seed_profiles(self.profiles_path, ["dev-tpu"])
+    # Path choice: 'troubleshoot'; cluster picker default = the only cluster.
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "dev-tpu")
+    self.assertEqual(kwargs.get("project"), "test-proj")
+
+  def test_troubleshoot_with_multiple_joined_clusters_user_picks(self):
+    _patch_list_clusters(self, ["alpha", "beta", "gamma"])
+    _seed_profiles(self.profiles_path, ["alpha", "beta", "gamma"])
+    # Path choice: 'troubleshoot'; pick 'beta' from the picker.
+    result = self.runner.invoke(init, [], input="troubleshoot\nbeta\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "beta")
+
+  def test_troubleshoot_picker_only_shows_joined_clusters(self):
+    """Clusters in the GCS bucket but not in saved profiles are not
+    selectable — the join-first model requires explicit join."""
+    # GCS bucket has three clusters; the user has only joined 'alpha'.
+    _patch_list_clusters(self, ["alpha", "beta", "gamma"])
+    _seed_profiles(self.profiles_path, ["alpha"])
+    # Picker only offers 'alpha'; default-accept it.
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "alpha")
+    # 'beta'/'gamma' should not have been offered.
+    self.assertNotIn(
+      "beta",
+      result.output.split("Select cluster")[0].split("Joined clusters:")[1]
+      if "Joined clusters:" in result.output
+      else "",
+    )
+
+  def test_troubleshoot_with_no_joined_clusters_offers_env_only(self):
+    """No profiles → tell the user to join first, but allow env-only
+    checks as a fallback after a confirmation prompt."""
+    _patch_list_clusters(self, [])
+    # Accept the "Run environment-only checks?" confirmation.
+    result = self.runner.invoke(init, [], input="troubleshoot\ny\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("No joined clusters", result.output)
+    self.assertIn("kinetic init", result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertIsNone(kwargs.get("cluster_name"))
+
+  def test_troubleshoot_with_no_joined_clusters_declined_exits(self):
+    """Declining env-only checks exits cleanly with a join-first message."""
+    _patch_list_clusters(self, [])
+    result = self.runner.invoke(init, [], input="troubleshoot\nn\n")
+    self.assertNotEqual(result.exit_code, 0)
+    self.diag_mock.assert_not_called()
+
+  def test_troubleshoot_does_not_save_profile(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    _seed_profiles(self.profiles_path, ["dev-tpu"])
+    pre_contents = self.profiles_path.read_text()
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    # Troubleshoot is read-only — profile store unchanged from seed.
+    self.assertEqual(self.profiles_path.read_text(), pre_contents)
+
+  def test_troubleshoot_returns_nonzero_when_diagnostics_fail(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    _seed_profiles(self.profiles_path, ["dev-tpu"])
+    self.diag_mock.return_value = False
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertNotEqual(result.exit_code, 0)
+
+  def test_cluster_override_must_be_joined(self):
+    """--cluster pointing at an unjoined cluster errors with a join hint
+    rather than silently targeting an unknown cluster."""
+    _patch_list_clusters(self, ["alpha", "beta"])
+    _seed_profiles(self.profiles_path, ["alpha"])
+    result = self.runner.invoke(
+      init, ["--cluster", "secret-cluster"], input="troubleshoot\n"
+    )
+    self.assertNotEqual(result.exit_code, 0)
+    self.assertIn("not in your saved profiles", result.output)
+    self.assertIn("kinetic init", result.output)
+    self.diag_mock.assert_not_called()
+
+  def test_cluster_override_when_joined_is_used(self):
+    """--cluster naming a joined cluster skips the picker."""
+    _patch_list_clusters(self, ["alpha", "beta"])
+    _seed_profiles(self.profiles_path, ["alpha", "beta"])
+    result = self.runner.invoke(
+      init, ["--cluster", "beta"], input="troubleshoot\n"
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "beta")
+
+  def test_troubleshoot_pulls_zone_from_saved_profile(self):
+    """The zone in run_diagnostics comes from the joined cluster's profile."""
+    _patch_list_clusters(self, ["dev-tpu"])
+    _seed_profiles(self.profiles_path, ["dev-tpu"], zone="europe-west4-c")
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("zone"), "europe-west4-c")
+
+  def test_troubleshoot_zone_flag_overrides_saved_profile(self):
+    """An explicit --zone wins over the saved-profile zone lookup."""
+    _patch_list_clusters(self, ["dev-tpu"])
+    _seed_profiles(self.profiles_path, ["dev-tpu"], zone="europe-west4-c")
+    result = self.runner.invoke(
+      init, ["--zone", "asia-east1-a"], input="troubleshoot\n\n"
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("zone"), "asia-east1-a")
+
+  def test_troubleshoot_prints_target_header(self):
+    """The header tells the user exactly what's being diagnosed."""
+    _patch_list_clusters(self, ["dev-tpu"])
+    _seed_profiles(self.profiles_path, ["dev-tpu"], zone="us-west4-a")
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("Troubleshooting target", result.output)
+    self.assertIn("test-proj", result.output)
+    self.assertIn("dev-tpu", result.output)
+    self.assertIn("us-west4-a", result.output)
 
 
 if __name__ == "__main__":

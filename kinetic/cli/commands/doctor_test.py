@@ -6,6 +6,7 @@ import subprocess
 from types import SimpleNamespace
 from unittest import mock
 
+import click
 import google.auth.exceptions
 from absl.testing import absltest
 from click.testing import CliRunner
@@ -14,10 +15,22 @@ from google.api_core import exceptions as google_exceptions
 from kinetic.cli.commands.doctor import (
   CheckResult,
   CheckStatus,
-  doctor,
+  run_diagnostics,
 )
+from kinetic.cli.options import common_options
 
 _MODULE = "kinetic.cli.commands.doctor"
+
+
+@click.command()
+@common_options
+def _diagnose_cli(project, zone, cluster_name):
+  """Test-only Click wrapper. Lets these tests keep using CliRunner to
+  assert on exit codes and captured output without rewriting every case."""
+  ok = run_diagnostics(project=project, zone=zone, cluster_name=cluster_name)
+  if not ok:
+    raise click.exceptions.Exit(1)
+
 
 # Shared CLI args.
 _CLI_ARGS = [
@@ -454,7 +467,7 @@ class DoctorAllPassTest(absltest.TestCase):
         CheckStatus.PASS,
         "gke_test-project_us-central2-b_test-cluster",
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("All checks passed", result.output)
@@ -478,7 +491,7 @@ class DoctorGcloudMissingTest(absltest.TestCase):
         side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
       ),
     ):
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("FAIL", result.output)
@@ -500,7 +513,7 @@ class DoctorKubectlMissingTest(absltest.TestCase):
         stack,
         which_fn=_mock_which({"gcloud", "gke-gcloud-auth-plugin"}),
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("FAIL", result.output)
@@ -527,7 +540,7 @@ class DoctorAdcNotConfiguredTest(absltest.TestCase):
         side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
       ),
     ):
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("FAIL", result.output)
@@ -553,7 +566,7 @@ class DoctorProjectNotSetTest(absltest.TestCase):
     ):
       # Invoke without --project flag.
       result = self.runner.invoke(
-        doctor,
+        _diagnose_cli,
         [
           "--zone",
           "us-central2-b",
@@ -578,7 +591,7 @@ class DoctorBillingNotEnabledTest(absltest.TestCase):
   def test_billing_disabled(self):
     with contextlib.ExitStack() as stack:
       _enter_patches(stack, sdk_overrides={"billing_ok": False})
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("Billing", result.output)
@@ -605,7 +618,7 @@ class DoctorApiNotEnabledTest(absltest.TestCase):
       mock_kube.return_value = CheckResult(
         "kubeconfig context", CheckStatus.PASS, "ok"
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
     self.assertIn("cloudbuild.googleapis.com", result.output)
@@ -646,7 +659,7 @@ class DoctorResourceNotFoundTest(absltest.TestCase):
           mock_kube.return_value = CheckResult(
             "kubeconfig context", CheckStatus.PASS, "ok"
           )
-          result = self.runner.invoke(doctor, _CLI_ARGS)
+          result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
         self.assertEqual(result.exit_code, 1, result.output)
         self.assertIn(
@@ -668,7 +681,7 @@ class DoctorNoPulumiStateTest(absltest.TestCase):
       mock_kube.return_value = CheckResult(
         "kubeconfig context", CheckStatus.PASS, "ok"
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("WARN", result.output)
@@ -683,7 +696,7 @@ class DoctorNoPulumiStateTest(absltest.TestCase):
       mock_kube.return_value = CheckResult(
         "kubeconfig context", CheckStatus.PASS, "ok"
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertIn("Available:", result.output)
     self.assertIn("other-project-other-cluster", result.output)
@@ -703,7 +716,7 @@ class DoctorGkeClusterNotRunningTest(absltest.TestCase):
       mock_kube.return_value = CheckResult(
         "kubeconfig context", CheckStatus.PASS, "ok"
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     # PROVISIONING is WARN, not FAIL.
     self.assertEqual(result.exit_code, 0, result.output)
@@ -731,7 +744,7 @@ class DoctorNodePoolUnhealthyTest(absltest.TestCase):
       mock_kube.return_value = CheckResult(
         "kubeconfig context", CheckStatus.PASS, "ok"
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertIn("gpu-pool", result.output)
     self.assertIn("ERROR", result.output)
@@ -753,7 +766,7 @@ class DoctorKubeconfigMismatchTest(absltest.TestCase):
         "Active: 'gke_other' (expected: 'gke_test-project_us-central2-b_test-cluster')",
         "Run: gcloud container clusters get-credentials ...",
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     # WARN, not FAIL.
     self.assertEqual(result.exit_code, 0, result.output)
@@ -773,12 +786,47 @@ class DoctorLwsMissingTest(absltest.TestCase):
       mock_kube.return_value = CheckResult(
         "kubeconfig context", CheckStatus.PASS, "ok"
       )
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     # LWS missing is WARN, so exit 0.
     self.assertEqual(result.exit_code, 0, result.output)
     self.assertIn("LWS CRD", result.output)
     self.assertIn("WARN", result.output)
+
+
+class DoctorEnvOnlyTest(absltest.TestCase):
+  """`cluster_name=None` is the 'environment-only' mode used by init's
+  troubleshoot path when the user leaves the cluster prompt blank.
+
+  Regression: previously ``run_diagnostics`` quietly defaulted
+  cluster_name to ``get_default_cluster_name()``, so the cluster-specific
+  groups silently targeted the *default* cluster instead of skipping.
+  """
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+
+  def test_cluster_specific_groups_skip_when_no_cluster_name(self):
+    with contextlib.ExitStack() as stack:
+      _enter_patches(stack)
+      # Drop the default project/cluster so nothing leaks in from env.
+      stack.enter_context(
+        mock.patch(f"{_MODULE}.get_default_project", return_value=None)
+      )
+      result = self.runner.invoke(_diagnose_cli, [])
+
+    self.assertEqual(result.exit_code, 0, result.output)
+    # The cluster-name row is explicitly "not set", not a default value.
+    self.assertIn("Cluster name", result.output)
+    self.assertIn("environment-only", result.output)
+    # The cluster-specific groups all SKIP — no PASS/FAIL/WARN results
+    # for resources / infra / kubernetes that would imply we targeted
+    # the default cluster.
+    self.assertIn("SKIP", result.output)
+    # Sanity: env-only mode should not surface FAILs (otherwise the
+    # caller would treat empty cluster as broken).
+    self.assertNotIn("FAIL", result.output)
 
 
 class DoctorExitCodeTest(absltest.TestCase):
@@ -797,7 +845,7 @@ class DoctorExitCodeTest(absltest.TestCase):
         side_effect=google.auth.exceptions.DefaultCredentialsError("none"),
       ),
     ):
-      result = self.runner.invoke(doctor, _CLI_ARGS)
+      result = self.runner.invoke(_diagnose_cli, _CLI_ARGS)
 
     self.assertEqual(result.exit_code, 1, result.output)
 
@@ -812,7 +860,7 @@ class DoctorExitCodeTest(absltest.TestCase):
       mock.patch(f"{_MODULE}.get_default_project", return_value=None),
     ):
       result = self.runner.invoke(
-        doctor,
+        _diagnose_cli,
         [
           "--zone",
           "us-central2-b",

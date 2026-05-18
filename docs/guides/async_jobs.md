@@ -84,7 +84,8 @@ What each state means and what to do:
 - **PENDING** — Kubernetes has accepted the job but no pod is running yet.
   The cluster autoscaler may be provisioning a node; on a fresh accelerator
   pool this can take 2–5 minutes. *What to do:* wait. If it's stuck for
-  much longer, check `kinetic doctor` and your accelerator quota.
+  much longer, run `kinetic init` and choose `troubleshoot`, and check
+  your accelerator quota.
 - **RUNNING** — your function is executing inside the pod. Use
   `job.tail()` or `kinetic jobs logs --follow` to watch progress. *What to
   do:* nothing, unless you want to monitor.

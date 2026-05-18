@@ -11,6 +11,7 @@ import subprocess
 import click
 from rich.table import Table
 
+from kinetic.cli.commands.doctor import run_diagnostics
 from kinetic.cli.commands.up import up
 from kinetic.cli.infra.post_deploy import configure_kubectl
 from kinetic.cli.infra.stack_manager import get_current_zone
@@ -23,7 +24,13 @@ from kinetic.cli.prerequisites_check import (
   check_gke_auth_plugin,
   check_kubectl,
 )
-from kinetic.cli.profiles import Profile, set_current, upsert_profile
+from kinetic.cli.profiles import (
+  Profile,
+  ProfileError,
+  list_profiles,
+  set_current,
+  upsert_profile,
+)
 from kinetic.cli.prompts import resolve_project
 
 
@@ -53,12 +60,14 @@ def init(ctx, project, zone, cluster_name, profile_name, namespace, yes):
   report = _detect(project_hint=project)
   _print_detect_report(report)
 
-  # Phase 2: Gate on prereqs.
+  # Phase 2: If prereqs are missing, join/create can't proceed. Offer
+  # troubleshoot — it can run even when gcloud/auth are missing and is
+  # the most useful next step.
   if not report["prereqs_ok"]:
-    raise click.ClickException(
-      "Fix the issues above, then re-run 'kinetic init'. "
-      "Run 'kinetic doctor' for detailed remediation."
+    _offer_troubleshoot_on_prereq_failure(
+      report, cluster_name, zone=zone, yes=yes
     )
+    return
 
   project = report["project"]
 
@@ -82,6 +91,8 @@ def init(ctx, project, zone, cluster_name, profile_name, namespace, yes):
     # activate so subsequent commands actually resolve to the new profile.
     set_current(saved)
     _print_join_ready_screen(saved)
+  elif path == "troubleshoot":
+    _troubleshoot_flow(project, cluster_name, zone_override=zone)
   else:
     # `up` handles provisioning AND profile save AND its own ready screen.
     # Forward all the user's resolved env/profile/flag values explicitly —
@@ -163,25 +174,32 @@ def _ok(flag):
 
 
 def _choose_path(report, *, yes):
-  """Return 'join' or 'create'. Aborts cleanly if the user declines.
+  """Return 'join', 'create', or 'troubleshoot'.
 
-  When no clusters exist, prints an explainer of what the Create path will
-  do and confirms (skippable via ``--yes``). When clusters exist, always
-  prompts join/create — the choice is too consequential to default through.
+  When clusters exist, prompt the full three-way choice — the consequences
+  differ enough that we never default through. When no clusters exist,
+  prompt between create and troubleshoot (join isn't available). ``--yes``
+  preserves the legacy "no prompts, just create" behavior for scripted use.
   """
   clusters = report["local_clusters"]
   if not clusters:
     _explain_create("No existing Kinetic clusters were found in this project.")
-    if not yes:
-      click.confirm(
-        "\nProceed to create a new cluster?", default=True, abort=True
-      )
-    return "create"
+    _explain_troubleshoot()
+    if yes:
+      return "create"
+    choice = click.prompt(
+      "\nWhat would you like to do?",
+      type=click.Choice(["create", "troubleshoot"], case_sensitive=False),
+      default="create",
+      show_choices=True,
+    )
+    return choice
 
   _explain_join_or_create(clusters)
+  _explain_troubleshoot()
   choice = click.prompt(
     "\nWhat would you like to do?",
-    type=click.Choice(["join", "create"], case_sensitive=False),
+    type=click.Choice(["join", "create", "troubleshoot"], case_sensitive=False),
     default="join",
     show_choices=True,
   )
@@ -214,18 +232,36 @@ def _explain_join_or_create(clusters):
   console.print(f"Found existing Kinetic cluster(s): {cluster_list}")
   console.print()
   console.print(
-    "  [bold green]join[/bold green]    Configure kubectl for an existing "
-    "cluster and save a profile."
+    "  [bold green]join[/bold green]         Configure kubectl for an "
+    "existing cluster and save a profile."
   )
   console.print(
-    "           No GCP resources are created or modified; no added cost."
+    "               No GCP resources are created or modified; no added cost."
   )
   console.print()
   console.print(
-    "  [bold yellow]create[/bold yellow]  Provision a NEW GKE cluster "
+    "  [bold yellow]create[/bold yellow]       Provision a NEW GKE cluster "
     "alongside the existing one(s)."
   )
-  console.print("           Creates additional GCP resources that incur cost.")
+  console.print(
+    "               Creates additional GCP resources that incur cost."
+  )
+
+
+def _explain_troubleshoot():
+  """Print the troubleshoot option explainer."""
+  console.print()
+  console.print(
+    "  [bold cyan]troubleshoot[/bold cyan] Diagnose environment, GCP, and "
+    "cluster health."
+  )
+  console.print(
+    "               Read-only — no resources are created or modified."
+  )
+  console.print(
+    "               [dim]Only joined clusters are selectable; join first "
+    "to diagnose a cluster.[/dim]"
+  )
 
 
 def _join_flow(project, clusters, cluster_override):
@@ -299,3 +335,137 @@ def _print_join_ready_screen(profile_name):
   console.print("  [bold]kinetic jobs list[/bold]    see running jobs")
   console.print("  [bold]kinetic profile ls[/bold]   list saved profiles")
   console.print()
+
+
+def _offer_troubleshoot_on_prereq_failure(
+  report, cluster_override, *, zone=None, yes
+):
+  """Handle the prereq-failure branch: offer troubleshoot or exit.
+
+  join/create both require working gcloud + kubectl + auth, so when prereqs
+  are missing the only useful next step is to investigate. ``--yes`` opts
+  into running troubleshoot non-interactively.
+  """
+  console.print()
+  warning(
+    "Some prerequisites are missing. 'join' and 'create' require them, "
+    "but 'troubleshoot' can still investigate."
+  )
+  if not yes and not click.confirm("\nRun troubleshoot now?", default=True):
+    raise click.ClickException(
+      "Fix the issues above, then re-run 'kinetic init'."
+    )
+  _troubleshoot_flow(
+    report.get("project"),
+    cluster_override,
+    zone_override=zone,
+  )
+
+
+def _troubleshoot_flow(project, cluster_override, *, zone_override=None):
+  """Pick a joined cluster name and run diagnostics.
+
+  Restricted to clusters the user has already joined (saved as profiles)
+  — diagnosing a cluster you don't operate on is rarely what users want,
+  and joining is the natural prerequisite. Read-only: does not save a
+  profile or modify kubectl. Exits non-zero via Click if any diagnostic
+  FAILed so scripted callers can detect it. An explicit ``zone_override``
+  (typically from ``--zone`` / KINETIC_ZONE) wins over the saved-profile
+  lookup.
+  """
+  joined = _joined_clusters_for_project(project)
+  cluster_name = _pick_cluster_for_troubleshoot(joined, cluster_override)
+  zone = zone_override or _zone_from_saved_profiles(project, cluster_name)
+  _print_troubleshoot_target(project, cluster_name, zone)
+  ok = run_diagnostics(project=project, zone=zone, cluster_name=cluster_name)
+  if not ok:
+    raise click.exceptions.Exit(1)
+
+
+def _joined_clusters_for_project(project):
+  """Return sorted cluster names from saved profiles matching ``project``.
+
+  Empty when ``project`` is None or no profile matches. Used to gate the
+  troubleshoot picker so users only diagnose clusters they have joined.
+  """
+  if not project:
+    return []
+  try:
+    _, profiles = list_profiles()
+  except ProfileError:
+    return []
+  return sorted({p.cluster for p in profiles if p.project == project})
+
+
+def _zone_from_saved_profiles(project, cluster_name):
+  """Return the saved zone for (project, cluster) from any profile, or None."""
+  if not project or not cluster_name:
+    return None
+  try:
+    _, profiles = list_profiles()
+  except ProfileError:
+    return None
+  for p in profiles:
+    if p.project == project and p.cluster == cluster_name:
+      return p.zone
+  return None
+
+
+def _print_troubleshoot_target(project, cluster_name, zone):
+  """Show which stack is being diagnosed."""
+  console.print()
+  console.print("[bold]Troubleshooting target[/bold]")
+  console.print(f"  Project:  {project or '[dim]not set[/dim]'}")
+  console.print(
+    f"  Cluster:  {cluster_name or '[dim]none (env-only checks)[/dim]'}"
+  )
+  console.print(f"  Zone:     {zone or '[dim]default[/dim]'}")
+
+
+_JOIN_HINT = (
+  "Run 'kinetic init' and choose 'join' to add a cluster before "
+  "troubleshooting it."
+)
+
+
+def _pick_cluster_for_troubleshoot(joined_clusters, cluster_override):
+  """Return a joined cluster name to diagnose, or None for env-only checks.
+
+  Only clusters present in saved profiles are selectable. When
+  ``cluster_override`` is given (``--cluster`` / KINETIC_CLUSTER) it must
+  be a joined cluster too — otherwise we error with a join-first hint
+  rather than silently targeting an unknown cluster.
+  """
+  if cluster_override:
+    if cluster_override not in joined_clusters:
+      raise click.ClickException(
+        f"Cluster '{cluster_override}' is not in your saved profiles. "
+        + _JOIN_HINT
+      )
+    return cluster_override
+
+  if not joined_clusters:
+    console.print()
+    console.print("[yellow]No joined clusters for this project.[/yellow]")
+    console.print(_JOIN_HINT)
+    console.print(
+      "[dim]Environment-only checks (local tools, auth, GCP project/APIs) "
+      "can still run without a cluster.[/dim]"
+    )
+    if not click.confirm("\nRun environment-only checks?", default=True):
+      raise click.ClickException(
+        "Join a cluster first, then re-run 'kinetic init' and pick "
+        "'troubleshoot'."
+      )
+    return None
+
+  console.print()
+  console.print("Joined clusters:")
+  for i, name in enumerate(joined_clusters, 1):
+    console.print(f"  {i}) {name}")
+  console.print("\n[dim]Don't see your cluster? " + _JOIN_HINT + "[/dim]")
+  return click.prompt(
+    "\nSelect cluster to diagnose",
+    type=click.Choice(joined_clusters, case_sensitive=False),
+    default=joined_clusters[0],
+  )
