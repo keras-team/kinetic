@@ -329,6 +329,7 @@ def _create_gke_cluster(
       workload_metadata_config=gcp.container.ClusterNodeConfigWorkloadMetadataConfigArgs(
         mode="GKE_METADATA",
       ),
+      labels={RESOURCE_NAME_PREFIX: "true"},
     ),
     workload_identity_config=gcp.container.ClusterWorkloadIdentityConfigArgs(
       workload_pool=f"{project_id}.svc.id.goog",
@@ -347,6 +348,7 @@ def _create_gke_cluster(
         enabled=True,
       ),
     ),
+    resource_labels={RESOURCE_NAME_PREFIX: "true"},
     cluster_autoscaling=gcp.container.ClusterClusterAutoscalingArgs(
       enabled=True,
       autoscaling_profile="OPTIMIZE_UTILIZATION",
