@@ -1,14 +1,18 @@
-"""kinetic doctor command — diagnose environment and infrastructure health."""
+"""Diagnostic checks used by ``kinetic init``'s troubleshoot path.
+
+Exposes :func:`run_diagnostics`, which inspects the local environment,
+GCP project, and Kubernetes cluster and prints a categorized report with
+fix hints. Used to be the ``kinetic doctor`` CLI command; rolled into
+``init`` so users have a single onboarding entry point.
+"""
 
 import json
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from enum import Enum
 
-import click
 import google.auth
 import google.auth.compute_engine
 import google.auth.exceptions
@@ -37,8 +41,7 @@ from kinetic.cli.constants import (
   REQUIRED_APIS,
 )
 from kinetic.cli.infra.state_backend import state_backend_url
-from kinetic.cli.options import common_options
-from kinetic.cli.output import LiveOutputPanel, banner, console
+from kinetic.cli.output import LiveOutputPanel, console
 from kinetic.constants import (
   get_default_cluster_name,
   get_default_project,
@@ -1552,7 +1555,7 @@ def _print_results(groups):
 
 
 # ---------------------------------------------------------------------------
-# CLI command
+# Public entry point
 # ---------------------------------------------------------------------------
 
 
@@ -1563,16 +1566,19 @@ def _emit_progress(panel, section, results):
     panel.on_output(f"  {_PROGRESS_ICON[r.status]} {r.name}")
 
 
-@click.command()
-@common_options
-def doctor(project, zone, cluster_name):
-  """Check environment, credentials, and infrastructure health."""
-  banner("kinetic Doctor")
+def run_diagnostics(project=None, zone=None, cluster_name=None):
+  """Run all diagnostic check groups and render results.
 
-  # Resolve values without prompting.
+  Returns True iff no FAIL results were produced. Intended to be called
+  from ``kinetic init``'s troubleshoot path; safe to invoke even when
+  prereqs are missing (the relevant groups SKIP cleanly).
+  """
   project = project or get_default_project()
   zone = zone or get_default_zone()
   cluster_name = cluster_name or get_default_cluster_name()
+
+  console.print()
+  console.print("[bold]Troubleshooting diagnostics[/bold]")
 
   groups = []
 
@@ -1651,5 +1657,4 @@ def doctor(project, zone, cluster_name):
   _print_results(groups)
 
   all_results = [r for _, checks in groups for r in checks]
-  if any(r.status == CheckStatus.FAIL for r in all_results):
-    sys.exit(1)
+  return not any(r.status == CheckStatus.FAIL for r in all_results)

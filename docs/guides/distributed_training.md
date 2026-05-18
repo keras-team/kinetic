@@ -99,8 +99,8 @@ ones, with what to actually do:
 - **Slow startup (5–10 minutes for the first multi-host run).** A fresh
   TPU multi-host slice has to provision multiple VMs and boot Pathways.
   This is expected; don't kill the job thinking it's stuck. If startup
-  consistently exceeds 10 minutes, check `kinetic doctor` and your TPU
-  quota.
+  consistently exceeds 10 minutes, run `kinetic init` and choose
+  `troubleshoot`, and check your TPU quota.
 - **Topology mismatch.** Your code's expected device count doesn't
   match `jax.device_count()` on the slice. Symptom: shape errors deep
   in `pmap` or sharding. *Fix:* compute mesh shapes from

@@ -84,6 +84,16 @@ def _patch_up(testcase):
   return up_mock
 
 
+def _patch_run_diagnostics(testcase, returns=True):
+  """Stub run_diagnostics so init's troubleshoot path doesn't shell out
+  to gcloud/kubectl/the GCP SDKs. Returns the mock for assertions."""
+  m = mock.MagicMock(return_value=returns)
+  testcase.enterContext(
+    mock.patch("kinetic.cli.commands.init.run_diagnostics", m)
+  )
+  return m
+
+
 def _isolate_profiles(testcase):
   path = str(_tmp(testcase) / "profiles.json")
   testcase.enterContext(
@@ -159,20 +169,40 @@ class InitJoinPathTest(absltest.TestCase):
 
 
 class InitPrereqFailureTest(absltest.TestCase):
+  """When prereqs are missing, init should offer to run troubleshoot
+  rather than the old 'go run kinetic doctor' hint (which referenced a
+  command that no longer exists)."""
+
   def setUp(self):
     super().setUp()
     self.runner = CliRunner()
     _patch_prereqs(self, all_ok=False)
     _patch_list_clusters(self, [])
     self.up_mock = _patch_up(self)
+    self.diag_mock = _patch_run_diagnostics(self)
     self.profiles_path = _isolate_profiles(self)
 
-  def test_missing_prereq_exits_with_doctor_hint(self):
-    result = self.runner.invoke(init, [])
-    self.assertNotEqual(result.exit_code, 0)
-    self.assertIn("kinetic doctor", result.output)
-    # No invocation of `up` when prereqs fail.
+  def test_missing_prereq_offers_troubleshoot(self):
+    # Accept the "Run troubleshoot now?" confirm, then leave the
+    # cluster-name prompt blank (env-only checks).
+    result = self.runner.invoke(init, [], input="y\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.diag_mock.assert_called_once()
     self.up_mock.assert_not_called()
+
+  def test_missing_prereq_declined_exits_cleanly(self):
+    # Decline the troubleshoot confirm — should exit non-zero with no
+    # diagnostics or `up` invocation.
+    result = self.runner.invoke(init, [], input="n\n")
+    self.assertNotEqual(result.exit_code, 0)
+    self.diag_mock.assert_not_called()
+    self.up_mock.assert_not_called()
+
+  def test_missing_prereq_with_yes_runs_troubleshoot_automatically(self):
+    # --yes opts into troubleshoot without prompting for confirmation.
+    result = self.runner.invoke(init, ["--yes"], input="\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.diag_mock.assert_called_once()
 
 
 class InitCreatePathForwardingTest(absltest.TestCase):
@@ -330,6 +360,7 @@ class InitChoicePromptExplainerTest(absltest.TestCase):
     _patch_kubectl(self)
     _patch_load_state_zone(self, zone="us-west4-a")
     self.up_mock = _patch_up(self)
+    self.diag_mock = _patch_run_diagnostics(self)
     self.profiles_path = _isolate_profiles(self)
 
   def test_no_clusters_path_shows_create_explainer(self):
@@ -342,12 +373,100 @@ class InitChoicePromptExplainerTest(absltest.TestCase):
     self.assertIn("incur", result.output)
     self.assertIn("kinetic down", result.output)
 
-  def test_no_clusters_prompt_can_be_declined(self):
+  def test_no_clusters_path_shows_troubleshoot_option(self):
+    """When no clusters exist, the prompt must still offer troubleshoot
+    so the user can investigate (vs. only being able to create)."""
     _patch_list_clusters(self, [])
-    # No --yes, decline the confirmation.
-    result = self.runner.invoke(init, [], input="n\n")
-    self.assertNotEqual(result.exit_code, 0)
+    # Pick 'troubleshoot' at the prompt, then leave the cluster-name
+    # prompt blank to run env-only checks.
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("troubleshoot", result.output)
+    self.diag_mock.assert_called_once()
     self.up_mock.assert_not_called()
+
+
+class InitTroubleshootPathTest(absltest.TestCase):
+  """Tests for the troubleshoot path added to init when doctor was rolled in."""
+
+  def setUp(self):
+    super().setUp()
+    self.runner = CliRunner()
+    _patch_prereqs(self)
+    _patch_resolve_project(self)
+    _patch_load_state_zone(self, zone="us-west4-a")
+    self.up_mock = _patch_up(self)
+    self.diag_mock = _patch_run_diagnostics(self)
+    self.profiles_path = _isolate_profiles(self)
+
+  def test_troubleshoot_with_single_cluster_picks_it(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    # Path choice: 'troubleshoot'; cluster picker default = the only cluster.
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "dev-tpu")
+    self.assertEqual(kwargs.get("project"), "test-proj")
+
+  def test_troubleshoot_with_multiple_clusters_user_picks(self):
+    _patch_list_clusters(self, ["alpha", "beta", "gamma"])
+    # Path choice: 'troubleshoot'; pick 'beta' from the picker.
+    result = self.runner.invoke(init, [], input="troubleshoot\nbeta\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "beta")
+
+  def test_troubleshoot_with_other_falls_through_to_free_form(self):
+    """Picking 'other' at the cluster picker lets the user type a name
+    that isn't in list_clusters (e.g. their state bucket is missing)."""
+    _patch_list_clusters(self, ["alpha"])
+    result = self.runner.invoke(
+      init, [], input="troubleshoot\nother\nstrayed\n"
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "strayed")
+
+  def test_troubleshoot_with_empty_list_prompts_free_form(self):
+    _patch_list_clusters(self, [])
+    result = self.runner.invoke(init, [], input="troubleshoot\nmy-cluster\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "my-cluster")
+
+  def test_troubleshoot_with_empty_list_and_blank_input_runs_env_only(self):
+    _patch_list_clusters(self, [])
+    # Blank cluster name → run_diagnostics gets cluster_name=None so its
+    # cluster-specific groups SKIP.
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertIsNone(kwargs.get("cluster_name"))
+
+  def test_troubleshoot_does_not_save_profile(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    # profiles.json should not exist (or be empty) — troubleshoot is read-only.
+    self.assertFalse(self.profiles_path.exists())
+
+  def test_troubleshoot_returns_nonzero_when_diagnostics_fail(self):
+    _patch_list_clusters(self, ["dev-tpu"])
+    self.diag_mock.return_value = False
+    result = self.runner.invoke(init, [], input="troubleshoot\n\n")
+    self.assertNotEqual(result.exit_code, 0)
+
+  def test_cluster_override_used_verbatim_even_if_not_in_list(self):
+    """When --cluster is passed, troubleshoot honors it directly without
+    asking the user — covers the power-user case where Pulumi state is
+    broken but they know the cluster name."""
+    _patch_list_clusters(self, ["alpha", "beta"])
+    result = self.runner.invoke(
+      init, ["--cluster", "secret-cluster"], input="troubleshoot\n"
+    )
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    _, kwargs = self.diag_mock.call_args
+    self.assertEqual(kwargs.get("cluster_name"), "secret-cluster")
 
 
 if __name__ == "__main__":
