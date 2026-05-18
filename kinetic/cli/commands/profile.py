@@ -1,5 +1,7 @@
 """kinetic profile commands — manage named infrastructure-target profiles."""
 
+import os
+
 import click
 from rich.table import Table
 
@@ -8,6 +10,7 @@ from kinetic.cli.output import banner, console, error, success, warning
 from kinetic.cli.profiles import (
   Profile,
   ProfileError,
+  clear_current,
   get_profile,
   list_profiles,
   load_store,
@@ -166,6 +169,29 @@ def profile_use(name):
   # Echo what resolves now so the user sees the effect immediately.
   p = get_profile(name)
   _print_profile(p)
+
+
+@profile.command("unset")
+def profile_unset():
+  """Clear the active profile pointer. Saved profiles are preserved."""
+  try:
+    previous = clear_current()
+  except ProfileError as e:
+    raise click.ClickException(str(e)) from e
+
+  if previous is None:
+    console.print("No active profile to unset.")
+  else:
+    success(f"Cleared active profile (was '{previous}').")
+
+  # KINETIC_PROFILE still wins over the stored pointer, so warn if it would
+  # mask the unset.
+  env_profile = os.environ.get("KINETIC_PROFILE")
+  if env_profile:
+    warning(
+      f"KINETIC_PROFILE={env_profile!r} is set; unset it in your shell to "
+      "fully clear the active profile."
+    )
 
 
 @profile.command("show")
