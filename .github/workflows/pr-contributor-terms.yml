@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   verify:
-    if: github.repository == 'keras-team/keras'
+    if: github.repository == 'keras-team/kinetic'
     runs-on: 'ubuntu-latest'
     steps:
       - name: 'Verify contributor agreement'
@@ -28,12 +28,19 @@ jobs:
               pull_number: context.payload.pull_request.number,
             });
 
+            const association = pr.author_association;
+            const bypassAssociations = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            if (bypassAssociations.includes(association)) {
+              core.info(`Bypassing contributor agreement check for repository member (association: ${association}).`);
+              return;
+            }
+
             const body = pr.body || '';
 
             const requiredTerms = [
               'I am a human, and not a bot.',
               'I will be responsible for responding to review comments in a timely manner.',
-              'I will work with the maintainers to push this PR forward until submission.'
+              'I will work with the maintainers to push this PR forward until submission.',
               'I will test the changes on my cloud setup and provide proof of successful validation.'
             ];
 
