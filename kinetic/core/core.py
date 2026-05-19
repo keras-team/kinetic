@@ -12,12 +12,7 @@ from kinetic.backend.execution import (
   PathwaysBackend,
   submit_remote,
 )
-from kinetic.cli.profiles import resolve_active
-from kinetic.constants import (
-  DEFAULT_CLUSTER_NAME,
-  DEFAULT_ZONE,
-  get_required_project,
-)
+from kinetic.cli.profiles import resolve_infra
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
@@ -78,41 +73,6 @@ def _require_interactive_terminal():
       "call handle.debug_attach() from an interactive session, or set "
       "KINETIC_NO_TTY_DEBUG=1 to override."
     )
-
-
-def _resolve_infra(*, project, zone, cluster, namespace):
-  """Resolve infra fields from kwargs, env vars, the active profile, and defaults.
-
-  Precedence per field: explicit kwarg > KINETIC_* env var > active profile
-  field > built-in default. Matches the CLI's `default_map` wiring in
-  `kinetic.cli.main` so the Python API and `kinetic` CLI behave the same.
-  """
-  profile = resolve_active()
-
-  def pick(explicit, env_var, profile_attr, default):
-    if explicit is not None:
-      return explicit
-    env_val = os.environ.get(env_var)
-    if env_val:
-      return env_val
-    if profile is not None:
-      return getattr(profile, profile_attr)
-    return default
-
-  resolved_project = pick(project, "KINETIC_PROJECT", "project", None)
-  if not resolved_project:
-    # Honor the legacy GOOGLE_CLOUD_PROJECT fallback only when no profile and
-    # no explicit value supplied a project.
-    resolved_project = get_required_project()
-
-  return {
-    "project": resolved_project,
-    "zone": pick(zone, "KINETIC_ZONE", "zone", DEFAULT_ZONE),
-    "cluster": pick(
-      cluster, "KINETIC_CLUSTER", "cluster", DEFAULT_CLUSTER_NAME
-    ),
-    "namespace": pick(namespace, "KINETIC_NAMESPACE", "namespace", "default"),
-  }
 
 
 def _resolve_backend_name(accelerator, backend, spot=False):
@@ -176,7 +136,7 @@ def _make_decorator(
           "Use 'gke', 'pathways', or None for auto-detection"
         )
 
-      infra = _resolve_infra(
+      infra = resolve_infra(
         project=project, zone=zone, cluster=cluster, namespace=namespace
       )
 

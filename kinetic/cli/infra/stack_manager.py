@@ -9,6 +9,7 @@ from kinetic.cli.infra.state_backend import (
   ensure_gcs_backend,
   state_backend_url,
 )
+from kinetic.cli.output import loading
 from kinetic.core import accelerators
 
 
@@ -25,39 +26,40 @@ def get_stack(program_fn, config):
   Returns:
       A pulumi.automation.Stack instance.
   """
-  ensure_gcs_backend(config.project)
+  with loading("Connecting to Pulumi state backend (GCS)…"):
+    ensure_gcs_backend(config.project)
 
-  # Auto-install the Pulumi CLI if not already present.
-  try:
-    pulumi_cmd = auto.PulumiCommand(root=PULUMI_ROOT)
-  except Exception:  # noqa: BLE001
-    click.echo("Pulumi CLI not found. Installing...")
-    pulumi_cmd = auto.PulumiCommand.install(root=PULUMI_ROOT)
+    # Auto-install the Pulumi CLI if not already present.
+    try:
+      pulumi_cmd = auto.PulumiCommand(root=PULUMI_ROOT)
+    except Exception:  # noqa: BLE001
+      click.echo("Pulumi CLI not found. Installing...")
+      pulumi_cmd = auto.PulumiCommand.install(root=PULUMI_ROOT)
 
-  # Each (project, cluster) pair gets its own stack, so multiple clusters
-  # within the same GCP project are fully independent.
-  stack_name = f"{config.project}-{config.cluster_name}"
+    # Each (project, cluster) pair gets its own stack, so multiple clusters
+    # within the same GCP project are fully independent.
+    stack_name = f"{config.project}-{config.cluster_name}"
 
-  project_settings = auto.ProjectSettings(
-    name=RESOURCE_NAME_PREFIX,
-    runtime="python",
-    backend=auto.ProjectBackend(url=state_backend_url(config.project)),
-  )
+    project_settings = auto.ProjectSettings(
+      name=RESOURCE_NAME_PREFIX,
+      runtime="python",
+      backend=auto.ProjectBackend(url=state_backend_url(config.project)),
+    )
 
-  stack = auto.create_or_select_stack(
-    stack_name=stack_name,
-    project_name=RESOURCE_NAME_PREFIX,
-    program=program_fn,
-    opts=auto.LocalWorkspaceOptions(
-      project_settings=project_settings,
-      env_vars={"PULUMI_CONFIG_PASSPHRASE": ""},
-      pulumi_command=pulumi_cmd,
-    ),
-  )
+    stack = auto.create_or_select_stack(
+      stack_name=stack_name,
+      project_name=RESOURCE_NAME_PREFIX,
+      program=program_fn,
+      opts=auto.LocalWorkspaceOptions(
+        project_settings=project_settings,
+        env_vars={"PULUMI_CONFIG_PASSPHRASE": ""},
+        pulumi_command=pulumi_cmd,
+      ),
+    )
 
-  # Set GCP provider configuration on the stack
-  stack.set_config("gcp:project", auto.ConfigValue(value=config.project))
-  stack.set_config("gcp:zone", auto.ConfigValue(value=config.zone))
+    # Set GCP provider configuration on the stack
+    stack.set_config("gcp:project", auto.ConfigValue(value=config.project))
+    stack.set_config("gcp:zone", auto.ConfigValue(value=config.zone))
 
   return stack
 

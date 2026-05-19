@@ -21,13 +21,8 @@ from kubernetes import client
 
 from kinetic.backend import gke_client, pathways_client
 from kinetic.backend.log_streaming import LogStreamer
-from kinetic.constants import (
-  build_bucket_name,
-  get_default_cluster_name,
-  get_default_namespace,
-  get_default_zone,
-  get_required_project,
-)
+from kinetic.cli.profiles import resolve_infra
+from kinetic.constants import build_bucket_name
 from kinetic.credentials import ensure_credentials
 from kinetic.debug import (
   DEBUGPY_PORT,
@@ -496,19 +491,20 @@ def attach(
 
   Args:
     job_id: The job identifier (e.g. `"job-a1b2c3d4"`).
-    project: GCP project (uses default when *None*).
-    cluster: GKE cluster name (uses default when *None*).
+    project: GCP project. Falls back to KINETIC_PROJECT, then the active
+      profile's project, then GOOGLE_CLOUD_PROJECT.
+    cluster: GKE cluster name. Falls back to KINETIC_CLUSTER, then the
+      active profile's cluster, then the built-in default.
 
   Returns:
     A hydrated `JobHandle` ready for `status()`, `result()`, etc.
   """
-  project = get_required_project(project)
-  cluster_name = cluster or get_default_cluster_name()
-  bucket_name = build_bucket_name(project, cluster_name)
+  infra = resolve_infra(project=project, cluster=cluster)
+  bucket_name = build_bucket_name(infra["project"], infra["cluster"])
   payload = storage.download_handle(
     bucket_name,
     job_id,
-    project=project,
+    project=infra["project"],
   )
   return JobHandle.from_dict(payload)
 
@@ -525,26 +521,28 @@ def list_jobs(
   carry the `app=kinetic` / `app=kinetic-pathways` labels, then
   downloads each job's `handle.json` from GCS.  Jobs whose
   `handle.json` is missing are skipped with a warning.
+
+  Each field falls back through KINETIC_* env vars, the active profile,
+  and finally the built-in defaults — matching `kinetic.run`/`submit`.
   """
-  project = get_required_project(project)
-  zone = zone or get_default_zone()
-  cluster_name = cluster or get_default_cluster_name()
-  namespace = get_default_namespace(namespace)
-  bucket_name = build_bucket_name(project, cluster_name)
+  infra = resolve_infra(
+    project=project, zone=zone, cluster=cluster, namespace=namespace
+  )
+  bucket_name = build_bucket_name(infra["project"], infra["cluster"])
 
   ensure_credentials(
-    project=project,
-    zone=zone,
-    cluster=cluster_name,
+    project=infra["project"],
+    zone=infra["zone"],
+    cluster=infra["cluster"],
   )
 
   discovered: list[dict[str, str]] = []
   try:
-    discovered.extend(gke_client.list_jobs(namespace=namespace))
+    discovered.extend(gke_client.list_jobs(namespace=infra["namespace"]))
   except Exception:
     logging.warning("Failed to list GKE jobs")
   try:
-    discovered.extend(pathways_client.list_jobs(namespace=namespace))
+    discovered.extend(pathways_client.list_jobs(namespace=infra["namespace"]))
   except Exception:
     logging.warning("Failed to list Pathways jobs")
 
@@ -555,7 +553,7 @@ def list_jobs(
       payload = storage.download_handle(
         bucket_name,
         job_id,
-        project=project,
+        project=infra["project"],
       )
       handles.append(JobHandle.from_dict(payload))
     except (ValueError, TypeError, KeyError, google_exceptions.NotFound):

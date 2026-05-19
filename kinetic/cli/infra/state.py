@@ -21,7 +21,13 @@ from kinetic.cli.infra.stack_manager import (
   get_stack,
 )
 from kinetic.cli.infra.state_backend import state_backend_url
-from kinetic.cli.output import LiveOutputPanel, console, success, warning
+from kinetic.cli.output import (
+  LiveOutputPanel,
+  console,
+  loading,
+  success,
+  warning,
+)
 from kinetic.cli.prerequisites_check import check_all
 from kinetic.cli.prompts import resolve_project
 
@@ -199,9 +205,10 @@ def list_clusters(project):
   # succeeds at object level and raises NotFound when the bucket is
   # genuinely missing — both cases collapse to the same empty result.
   try:
-    client = storage.Client(project=project)
-    blobs = client.list_blobs(bucket_name, prefix=".pulumi/stacks/kinetic/")
-    names = [b.name for b in blobs]
+    with loading("Discovering Kinetic clusters in this project…"):
+      client = storage.Client(project=project)
+      blobs = client.list_blobs(bucket_name, prefix=".pulumi/stacks/kinetic/")
+      names = [b.name for b in blobs]
   except Exception:  # noqa: BLE001 — discovery is best-effort
     return []
 

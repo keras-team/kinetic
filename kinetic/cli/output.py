@@ -2,6 +2,7 @@
 
 import random
 import time
+from contextlib import contextmanager
 
 from rich.console import Console
 from rich.live import Live
@@ -12,6 +13,22 @@ from rich.text import Text
 from kinetic.core.accelerators import GpuConfig, TpuConfig
 
 console = Console()
+
+
+@contextmanager
+def loading(message):
+  """Show a transient spinner during a quiet network call.
+
+  Use for operations that block without streaming output — e.g. Pulumi
+  state reads from the GCS backend — so the CLI is not silent before the
+  next ``LiveOutputPanel`` opens. No-ops in non-interactive terminals.
+  """
+  if not console.is_terminal:
+    yield
+    return
+  with console.status(f"[blue]{message}[/blue]", spinner="dots"):
+    yield
+
 
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 

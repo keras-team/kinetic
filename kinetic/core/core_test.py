@@ -8,8 +8,9 @@ from unittest.mock import MagicMock
 
 from absl.testing import absltest
 
+from kinetic.cli.profiles import resolve_infra
 from kinetic.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
-from kinetic.core.core import _resolve_infra, run
+from kinetic.core.core import run
 
 
 def _isolate_profile_env(extra=None):
@@ -199,7 +200,7 @@ class TestExecuteOnBackendDefaults(absltest.TestCase):
 
 
 class TestResolveInfra(absltest.TestCase):
-  """Unit tests for the precedence chain in `_resolve_infra`."""
+  """Unit tests for the precedence chain in `resolve_infra`."""
 
   def _stage_profile(self, **fields):
     """Write a one-profile store and return env dict pointing at it."""
@@ -222,7 +223,7 @@ class TestResolveInfra(absltest.TestCase):
     # Sets env for cluster only; kwarg only for namespace.
     env["KINETIC_CLUSTER"] = "env-cluster"
     with mock.patch.dict(os.environ, env, clear=True):
-      out = _resolve_infra(
+      out = resolve_infra(
         project=None, zone=None, cluster=None, namespace="kwarg-ns"
       )
     self.assertEqual(
@@ -242,9 +243,7 @@ class TestResolveInfra(absltest.TestCase):
       "KINETIC_PROJECT": "fallback-proj",  # required, no default
     }
     with mock.patch.dict(os.environ, env, clear=True):
-      out = _resolve_infra(
-        project=None, zone=None, cluster=None, namespace=None
-      )
+      out = resolve_infra(project=None, zone=None, cluster=None, namespace=None)
     self.assertEqual(out["zone"], DEFAULT_ZONE)
     self.assertEqual(out["cluster"], DEFAULT_CLUSTER_NAME)
     self.assertEqual(out["namespace"], "default")
