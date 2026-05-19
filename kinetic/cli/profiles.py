@@ -27,6 +27,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from kinetic.cli.constants import PROFILES_FILE
+from kinetic.constants import (
+  DEFAULT_CLUSTER_NAME,
+  DEFAULT_ZONE,
+  get_required_project,
+)
 
 _PROFILE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}$")
 
@@ -243,3 +248,45 @@ def resolve_active(explicit_name=None):
   if current is None:
     return None
   return profiles.get(current)
+
+
+def resolve_infra(
+  *,
+  project: str | None = None,
+  zone: str | None = None,
+  cluster: str | None = None,
+  namespace: str | None = None,
+) -> dict:
+  """Resolve infra fields from kwargs, env vars, the active profile, and defaults.
+
+  Precedence per field: explicit kwarg > KINETIC_* env var > active profile
+  field > built-in default. Shared by the Python API (run, submit, attach,
+  list_jobs, attach_batch, map) so they all see the same resolution chain
+  the CLI uses.
+  """
+  profile = resolve_active()
+
+  def pick(explicit, env_var, profile_attr, default):
+    if explicit is not None:
+      return explicit
+    env_val = os.environ.get(env_var)
+    if env_val:
+      return env_val
+    if profile is not None:
+      return getattr(profile, profile_attr)
+    return default
+
+  resolved_project = pick(project, "KINETIC_PROJECT", "project", None)
+  if not resolved_project:
+    # Honor the legacy GOOGLE_CLOUD_PROJECT fallback only when no profile and
+    # no explicit value supplied a project.
+    resolved_project = get_required_project()
+
+  return {
+    "project": resolved_project,
+    "zone": pick(zone, "KINETIC_ZONE", "zone", DEFAULT_ZONE),
+    "cluster": pick(
+      cluster, "KINETIC_CLUSTER", "cluster", DEFAULT_CLUSTER_NAME
+    ),
+    "namespace": pick(namespace, "KINETIC_NAMESPACE", "namespace", "default"),
+  }
