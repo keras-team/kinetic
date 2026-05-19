@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   verify:
-    if: github.repository == 'keras-team/keras'
+    if: github.repository == 'keras-team/kinetic'
     runs-on: 'ubuntu-latest'
     steps:
       - name: 'Verify contributor agreement'
