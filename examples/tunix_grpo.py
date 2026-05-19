@@ -5,37 +5,30 @@ Adapted for local execution and launched on remote TPU via Kinetic.
 Based on: https://tunix.readthedocs.io/en/latest/_collections/examples/grpo_gemma.html
 """
 
-import csv
-import functools
 import json
 import logging
 import os
 import re
-import shutil
-from flax import nnx
+
 import grain
 import jax
-import jax.numpy as jnp
 import optax
-from orbax import checkpoint as ocp
-from pathlib import Path
 import qwix
 import tensorflow_datasets as tfds
-from tqdm.auto import tqdm
-from tunix.generate import sampler as sampler_lib
+from dotenv import load_dotenv
+from flax import nnx
+from huggingface_hub import snapshot_download
+from orbax import checkpoint as ocp
 from tunix.generate import tokenizer_adapter as tokenizer_lib
 from tunix.models.gemma3 import model as gemma_lib
 from tunix.models.gemma3 import params_safetensors as params_safetensors_lib
-from tunix.models.gemma3 import params as gemma_params
 from tunix.rl import rl_cluster as rl_cluster_lib
 from tunix.rl.grpo.grpo_learner import GRPOConfig, GRPOLearner
 from tunix.rl.rollout import base_rollout
 from tunix.sft import metrics_logger
-from huggingface_hub import snapshot_download
 
 import kinetic
 import kinetic.credentials
-from dotenv import load_dotenv
 
 load_dotenv()
 # Disable credential check for mock run if needed, but let's assume it works
@@ -59,9 +52,7 @@ ALPHA = 64.0
 
 # ====== Sharding ======
 NUM_TPUS = len(jax.devices())
-if NUM_TPUS == 8:
-  MESH_COUNTS = (1, 4)
-elif NUM_TPUS == 4:
+if NUM_TPUS == 8 or NUM_TPUS == 4:
   MESH_COUNTS = (1, 4)
 elif NUM_TPUS == 1:
   MESH_COUNTS = (1, 1)
@@ -122,7 +113,6 @@ def extract_hash_answer(text: str) -> str | None:
 def get_dataset(data_dir, split="train") -> grain.MapDataset:
   os.makedirs(data_dir, exist_ok=True)
   # Default to TFDS
-  import tensorflow_datasets.text.gsm8k
 
   data = tfds.data_source(
     "gsm8k",
@@ -135,15 +125,19 @@ def get_dataset(data_dir, split="train") -> grain.MapDataset:
   def _as_text(v):
     return v if isinstance(v, str) else v.decode("utf-8")
 
-  dataset = grain.MapDataset.source(data).shuffle(seed=42).map(
-    lambda x: {
-      "prompts": TEMPLATE.format(
-        system_prompt=SYSTEM_PROMPT,
-        question=_as_text(x["question"]),
-      ),
-      "question": _as_text(x["question"]),
-      "answer": extract_hash_answer(_as_text(x["answer"])),
-    }
+  dataset = (
+    grain.MapDataset.source(data)
+    .shuffle(seed=42)
+    .map(
+      lambda x: {
+        "prompts": TEMPLATE.format(
+          system_prompt=SYSTEM_PROMPT,
+          question=_as_text(x["question"]),
+        ),
+        "question": _as_text(x["question"]),
+        "answer": extract_hash_answer(_as_text(x["answer"])),
+      }
+    )
   )
   return dataset
 
@@ -187,10 +181,10 @@ def check_answer(prompts, completions, answer, **kwargs):
     for r in responses
   ]
   scores = []
-  assert len(extracted_responses) == len(
-    answer
-  ), f"{extracted_responses} and {answer} have mismatching length"
-  for guess, true_answer in zip(extracted_responses, answer):
+  assert len(extracted_responses) == len(answer), (
+    f"{extracted_responses} and {answer} have mismatching length"
+  )
+  for guess, true_answer in zip(extracted_responses, answer, strict=False):
     score = 0
     if guess is None:
       scores.append(0)
@@ -208,7 +202,7 @@ def check_answer(prompts, completions, answer, **kwargs):
           score += 0.25
         else:
           score -= 1.0
-      except:
+      except Exception:
         score -= 0.5
     scores.append(score)
   return scores
@@ -226,7 +220,7 @@ def check_numbers(prompts, completions, answer, **kwargs):
     for r in responses
   ]
   scores = []
-  for guess, true_answer in zip(extracted_responses, answer):
+  for guess, true_answer in zip(extracted_responses, answer, strict=False):
     if guess is None:
       scores.append(0)
       continue
@@ -234,7 +228,7 @@ def check_numbers(prompts, completions, answer, **kwargs):
       true_answer = float(true_answer.strip())
       guess = float(guess.strip())
       scores.append(1.5 if guess == true_answer else 0.0)
-    except:
+    except Exception:
       scores.append(0)
       continue
   return scores
@@ -250,7 +244,9 @@ def get_lora_model(base_model, mesh):
     alpha=ALPHA,
   )
   model_input = base_model.get_model_input()
-  lora_model = qwix.apply_lora_to_model(base_model, lora_provider, **model_input)
+  lora_model = qwix.apply_lora_to_model(
+    base_model, lora_provider, **model_input
+  )
   with mesh:
     state = nnx.state(lora_model)
     pspecs = nnx.get_partition_spec(state)
@@ -262,9 +258,21 @@ def get_lora_model(base_model, mesh):
 @kinetic.run(
   accelerator="v5e-1",
   container_image="prebuilt",
-  capture_env_vars=["KAGGLE_USERNAME", "KAGGLE_KEY", "HF_TOKEN", "WANDB_MODE", "PYTHONUNBUFFERED", "JAX_LOG_COMPILES"],
+  capture_env_vars=[
+    "KAGGLE_USERNAME",
+    "KAGGLE_KEY",
+    "HF_TOKEN",
+    "WANDB_MODE",
+    "PYTHONUNBUFFERED",
+    "JAX_LOG_COMPILES",
+  ],
 )
 def run_grpo():
+  logging.basicConfig(level=logging.DEBUG)
+  from absl import logging as absl_logging
+
+  absl_logging.set_verbosity(absl_logging.DEBUG)
+  logging.getLogger().setLevel(logging.DEBUG)
   # Download model
   ignore_patterns = ["*.pth"]
   print(f"Downloading {MODEL_ID} from Hugging Face...")
@@ -387,9 +395,21 @@ def run_grpo():
   )
 
   print("Starting GRPO training...")
-  grpo_trainer.train(train_dataset, val_dataset)
+  print(f"NUM_ITERATIONS: {NUM_ITERATIONS}")
+  print(f"NUM_GENERATIONS: {NUM_GENERATIONS}")
+  print(f"BETA: {BETA}")
+  print(f"EPSILON: {EPSILON}")
+  print(f"MAX_STEPS: {MAX_STEPS}")
+  print(f"TRAIN_MICRO_BATCH_SIZE: {TRAIN_MICRO_BATCH_SIZE}")
+  print(
+    "Calling grpo_trainer.train()... This might take a while due to JAX compilation."
+  )
+  metrics = grpo_trainer.train(train_dataset, val_dataset)
   print("GRPO training completed.")
+  print(f"Final metrics: {metrics}")
+  return metrics
 
 
 if __name__ == "__main__":
-  run_grpo()
+  result = run_grpo()
+  print(f"Job execution result: {result}")
