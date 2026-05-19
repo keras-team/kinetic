@@ -1,14 +1,18 @@
-"""kinetic doctor command — diagnose environment and infrastructure health."""
+"""Diagnostic checks used by `kinetic init`'s troubleshoot path.
+
+Exposes :func:`run_diagnostics`, which inspects the local environment,
+GCP project, and Kubernetes cluster and prints a categorized report with
+fix hints. Used to be the `kinetic doctor` CLI command; rolled into
+`init` so users have a single onboarding entry point.
+"""
 
 import json
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from enum import Enum
 
-import click
 import google.auth
 import google.auth.compute_engine
 import google.auth.exceptions
@@ -37,10 +41,8 @@ from kinetic.cli.constants import (
   REQUIRED_APIS,
 )
 from kinetic.cli.infra.state_backend import state_backend_url
-from kinetic.cli.options import common_options
-from kinetic.cli.output import LiveOutputPanel, banner, console
+from kinetic.cli.output import LiveOutputPanel, console
 from kinetic.constants import (
-  get_default_cluster_name,
   get_default_project,
   get_default_zone,
   zone_to_ar_location,
@@ -283,20 +285,29 @@ def _check_config(project, zone, cluster_name):
     CheckResult("Zone", CheckStatus.PASS, f"{zone} ({zone_source})")
   )
 
-  env_cluster = os.environ.get("KINETIC_CLUSTER")
-  if env_cluster and cluster_name == env_cluster:
-    cluster_source = "KINETIC_CLUSTER"
-  elif cluster_name == DEFAULT_CLUSTER_NAME:
-    cluster_source = "default"
-  else:
-    cluster_source = "flag"
-  results.append(
-    CheckResult(
-      "Cluster name",
-      CheckStatus.PASS,
-      f"{cluster_name} ({cluster_source})",
+  if cluster_name:
+    env_cluster = os.environ.get("KINETIC_CLUSTER")
+    if env_cluster and cluster_name == env_cluster:
+      cluster_source = "KINETIC_CLUSTER"
+    elif cluster_name == DEFAULT_CLUSTER_NAME:
+      cluster_source = "default"
+    else:
+      cluster_source = "flag"
+    results.append(
+      CheckResult(
+        "Cluster name",
+        CheckStatus.PASS,
+        f"{cluster_name} ({cluster_source})",
+      )
     )
-  )
+  else:
+    results.append(
+      CheckResult(
+        "Cluster name",
+        CheckStatus.SKIP,
+        "Not set (environment-only checks)",
+      )
+    )
 
   return results
 
@@ -598,19 +609,24 @@ def _check_cloud_nat(project, cluster_name, zone):
 
 def _check_gcp_resources(has_project_access, project, zone, cluster_name):
   """Check GCP resources created by kinetic up."""
+  resource_names = [
+    "Node service account",
+    "Build service account",
+    "Artifact Registry",
+    "Jobs bucket",
+    "Builds bucket",
+    "VPC network",
+    "Cloud NAT",
+  ]
   if not has_project_access:
     skip = "Skipped (requires: GCP project access)"
     return [
-      CheckResult(name, CheckStatus.SKIP, skip)
-      for name in [
-        "Node service account",
-        "Build service account",
-        "Artifact Registry",
-        "Jobs bucket",
-        "Builds bucket",
-        "VPC network",
-        "Cloud NAT",
-      ]
+      CheckResult(name, CheckStatus.SKIP, skip) for name in resource_names
+    ]
+  if not cluster_name:
+    skip = "Skipped (requires: cluster name)"
+    return [
+      CheckResult(name, CheckStatus.SKIP, skip) for name in resource_names
     ]
 
   ar_location = zone_to_ar_location(zone)
@@ -736,10 +752,9 @@ def _check_infra(has_project_access, project, zone, cluster_name):
   """Run infrastructure checks."""
   results = []
 
-  # Pulumi state can always be checked (filesystem only).
-  if project:
-    results.append(_check_pulumi_state(project, cluster_name))
-  else:
+  # Pulumi state can always be checked (filesystem only), but only if
+  # the caller specified which stack to look for.
+  if not project:
     results.append(
       CheckResult(
         "Pulumi state",
@@ -747,6 +762,16 @@ def _check_infra(has_project_access, project, zone, cluster_name):
         "Skipped (requires: Project ID)",
       )
     )
+  elif not cluster_name:
+    results.append(
+      CheckResult(
+        "Pulumi state",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster name)",
+      )
+    )
+  else:
+    results.append(_check_pulumi_state(project, cluster_name))
 
   if not has_project_access:
     results.append(
@@ -754,6 +779,15 @@ def _check_infra(has_project_access, project, zone, cluster_name):
         "GKE cluster",
         CheckStatus.SKIP,
         "Skipped (requires: GCP project access)",
+      )
+    )
+    return results
+  if not cluster_name:
+    results.append(
+      CheckResult(
+        "GKE cluster",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster name)",
       )
     )
     return results
@@ -1333,6 +1367,14 @@ def _check_kubernetes(
         "Skipped (requires: Project ID)",
       )
     )
+  elif not cluster_name:
+    results.append(
+      CheckResult(
+        "kubeconfig context",
+        CheckStatus.SKIP,
+        "Skipped (requires: cluster name)",
+      )
+    )
   elif not has_kubectl:
     results.append(
       CheckResult(
@@ -1473,7 +1515,7 @@ def _print_results(groups):
   """Render grouped results table and fix hints.
 
   Args:
-      groups: List of ``(section_name, [CheckResult, ...])`` tuples.
+      groups: List of `(section_name, [CheckResult, ...])` tuples.
   """
   all_results = [r for _, checks in groups for r in checks]
 
@@ -1552,7 +1594,7 @@ def _print_results(groups):
 
 
 # ---------------------------------------------------------------------------
-# CLI command
+# Public entry point
 # ---------------------------------------------------------------------------
 
 
@@ -1563,16 +1605,23 @@ def _emit_progress(panel, section, results):
     panel.on_output(f"  {_PROGRESS_ICON[r.status]} {r.name}")
 
 
-@click.command()
-@common_options
-def doctor(project, zone, cluster_name):
-  """Check environment, credentials, and infrastructure health."""
-  banner("kinetic Doctor")
+def run_diagnostics(project=None, zone=None, cluster_name=None):
+  """Run all diagnostic check groups and render results.
 
-  # Resolve values without prompting.
+  Returns True iff no FAIL results were produced. Intended to be called
+  from `kinetic init`'s troubleshoot path; safe to invoke even when
+  prereqs are missing (the relevant groups SKIP cleanly).
+
+  ``cluster_name=None`` is the "environment-only checks" mode: cluster-
+  specific groups (GCP resources, infrastructure, Kubernetes) all SKIP,
+  so don't fall back to the default cluster name here — that would
+  silently target the wrong cluster.
+  """
   project = project or get_default_project()
   zone = zone or get_default_zone()
-  cluster_name = cluster_name or get_default_cluster_name()
+
+  console.print()
+  console.print("[bold]Troubleshooting diagnostics[/bold]")
 
   groups = []
 
@@ -1651,5 +1700,4 @@ def doctor(project, zone, cluster_name):
   _print_results(groups)
 
   all_results = [r for _, checks in groups for r in checks]
-  if any(r.status == CheckStatus.FAIL for r in all_results):
-    sys.exit(1)
+  return not any(r.status == CheckStatus.FAIL for r in all_results)

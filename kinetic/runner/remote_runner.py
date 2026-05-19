@@ -5,7 +5,9 @@ This script runs on the remote TPU/GPU and executes the user's function.
 Artifacts are downloaded from and uploaded to Cloud Storage (GCS).
 """
 
+import argparse
 import atexit
+import hashlib
 import os
 import pickle
 import shutil
@@ -36,22 +38,58 @@ _LEADER_READY_SENTINEL = ".leader_ready"
 _WORKER_WAIT_BUFFER_SECONDS = 60
 
 
+def _verify_sha256(path, expected_hash, name):
+  """Verify the SHA-256 hash of a downloaded file."""
+  hasher = hashlib.sha256()
+  with open(path, "rb") as f:
+    for chunk in iter(lambda: f.read(65536), b""):
+      hasher.update(chunk)
+  actual_hash = hasher.hexdigest()
+  if actual_hash != expected_hash:
+    raise RuntimeError(
+      f"Security verification failed: {name} SHA-256 hash mismatch. "
+      f"Expected {expected_hash}, got {actual_hash}. "
+      f"The file may have been tampered with."
+    )
+
+
 def main():
   """Main entry point for remote execution.
 
   Usage: python remote_runner.py <context_gcs> <payload_gcs> <result_gcs> [requirements_gcs]
   """
-  if len(sys.argv) < 4:
-    logging.error(
-      "Usage: remote_runner.py <context_gcs> <payload_gcs> <result_gcs>"
-      " [requirements_gcs]"
-    )
-    sys.exit(1)
+  parser = argparse.ArgumentParser(description="Kinetic remote runner.")
+  parser.add_argument("positional", nargs="*", help="Legacy positional args")
+  parser.add_argument("--context-gcs", help="GCS URI for context.zip")
+  parser.add_argument("--payload-gcs", help="GCS URI for payload.pkl")
+  parser.add_argument("--result-gcs", help="GCS URI for result.pkl")
+  parser.add_argument("--requirements-gcs", help="GCS URI for requirements.txt")
+  parser.add_argument(
+    "--payload-sha256", help="Expected SHA-256 hash of payload"
+  )
+  parser.add_argument(
+    "--context-sha256", help="Expected SHA-256 hash of context"
+  )
 
-  context_gcs = sys.argv[1]
-  payload_gcs = sys.argv[2]
-  result_gcs = sys.argv[3]
-  requirements_gcs = sys.argv[4] if len(sys.argv) > 4 else None
+  args_parsed, _ = parser.parse_known_args()
+
+  # Fallback to positional arguments for backward compatibility
+  if args_parsed.positional and len(args_parsed.positional) >= 3:
+    context_gcs = args_parsed.positional[0]
+    payload_gcs = args_parsed.positional[1]
+    result_gcs = args_parsed.positional[2]
+    requirements_gcs = (
+      args_parsed.positional[3] if len(args_parsed.positional) > 3 else None
+    )
+  else:
+    context_gcs = args_parsed.context_gcs
+    payload_gcs = args_parsed.payload_gcs
+    result_gcs = args_parsed.result_gcs
+    requirements_gcs = args_parsed.requirements_gcs
+
+  if not (context_gcs and payload_gcs and result_gcs):
+    logging.error("Missing required arguments for artifacts.")
+    sys.exit(1)
 
   logging.info("Starting remote execution")
 
@@ -73,6 +111,14 @@ def main():
     logging.info("Downloading artifacts...")
     _download_from_gcs(storage_client, context_gcs, context_path)
     _download_from_gcs(storage_client, payload_gcs, payload_path)
+
+    if args_parsed.payload_sha256:
+      logging.info("Verifying payload SHA-256...")
+      _verify_sha256(payload_path, args_parsed.payload_sha256, "payload.pkl")
+
+    if args_parsed.context_sha256:
+      logging.info("Verifying context SHA-256...")
+      _verify_sha256(context_path, args_parsed.context_sha256, "context.zip")
 
     # Install user requirements at startup (prebuilt image mode)
     if requirements_gcs:

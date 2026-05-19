@@ -182,5 +182,53 @@ class TestForceDestroy(parameterized.TestCase):
     self.assertFalse(exported["force_destroy"])
 
 
+class TestClusterResourceLabels(absltest.TestCase):
+  """The GKE cluster must carry a kinetic resource label.
+
+  GCP resource labels are how operators identify which clusters in a
+  project were provisioned by kinetic versus by other tools.
+  """
+
+  def test_cluster_has_kinetic_resource_label(self):
+    config = _make_config()
+
+    with (
+      mock.patch.object(program, "pulumi"),
+      mock.patch.object(program, "command"),
+      mock.patch.object(program, "gcp") as gcp_mock,
+      mock.patch.object(program, "k8s"),
+    ):
+      program.create_program(config)()
+
+    cluster_call = gcp_mock.container.Cluster.call_args
+    self.assertIsNotNone(cluster_call)
+    self.assertEqual(
+      cluster_call.kwargs["resource_labels"],
+      {program.RESOURCE_NAME_PREFIX: "true"},
+    )
+
+  def test_default_node_pool_has_kinetic_label(self):
+    """The default GKE node pool must carry the same label as accelerator pools."""
+    config = _make_config()
+
+    with (
+      mock.patch.object(program, "pulumi"),
+      mock.patch.object(program, "command"),
+      mock.patch.object(program, "gcp") as gcp_mock,
+      mock.patch.object(program, "k8s"),
+    ):
+      program.create_program(config)()
+
+    cluster_call = gcp_mock.container.Cluster.call_args
+    node_config_call = gcp_mock.container.ClusterNodeConfigArgs.call_args_list[
+      -1
+    ]
+    self.assertIsNotNone(cluster_call)
+    self.assertEqual(
+      node_config_call.kwargs["labels"],
+      {program.RESOURCE_NAME_PREFIX: "true"},
+    )
+
+
 if __name__ == "__main__":
   absltest.main()

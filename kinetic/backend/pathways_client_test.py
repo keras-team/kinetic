@@ -124,8 +124,11 @@ class TestCreateLwsSpec(absltest.TestCase):
     self.assertEqual(
       container["args"],
       [
+        "--context-gcs",
         "gs://bkt/j1/context.zip",
+        "--payload-gcs",
         "gs://bkt/j1/payload.pkl",
+        "--result-gcs",
         "gs://bkt/j1/result.pkl",
       ],
     )

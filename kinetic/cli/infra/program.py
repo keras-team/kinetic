@@ -169,6 +169,14 @@ def _bind_sa_iam(
       role="roles/storage.objectAdmin",
       member=sa.email.apply(lambda e: f"serviceAccount:{e}"),
     )
+    # Orbax/TensorStore writes to GCS call storage.buckets.get for bucket
+    # metadata; objectAdmin alone doesn't grant it.
+    gcp.storage.BucketIAMMember(
+      f"{sa_prefix}-storage-{bucket_name}-bucket-reader",
+      bucket=bucket.name,
+      role="roles/storage.legacyBucketReader",
+      member=sa.email.apply(lambda e: f"serviceAccount:{e}"),
+    )
   gcp.artifactregistry.RepositoryIamMember(
     f"{sa_prefix}-ar-{ar_role.rsplit('.', 1)[-1]}",
     repository=repo.name,
@@ -329,6 +337,7 @@ def _create_gke_cluster(
       workload_metadata_config=gcp.container.ClusterNodeConfigWorkloadMetadataConfigArgs(
         mode="GKE_METADATA",
       ),
+      labels={RESOURCE_NAME_PREFIX: "true"},
     ),
     workload_identity_config=gcp.container.ClusterWorkloadIdentityConfigArgs(
       workload_pool=f"{project_id}.svc.id.goog",
@@ -347,6 +356,7 @@ def _create_gke_cluster(
         enabled=True,
       ),
     ),
+    resource_labels={RESOURCE_NAME_PREFIX: "true"},
     cluster_autoscaling=gcp.container.ClusterClusterAutoscalingArgs(
       enabled=True,
       autoscaling_profile="OPTIMIZE_UTILIZATION",

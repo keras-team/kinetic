@@ -164,6 +164,58 @@ class ProfileUseTest(absltest.TestCase):
     self.assertIn("does not exist", result.output)
 
 
+class ProfileUnsetTest(absltest.TestCase):
+  def _create(self, runner, env, name):
+    runner.invoke(
+      profile_cmd,
+      [
+        "create",
+        name,
+        "--project",
+        "p",
+        "--zone",
+        "z",
+        "--cluster",
+        "c",
+        "--namespace",
+        "n",
+      ],
+      env=env,
+    )
+
+  def test_unset_clears_active(self):
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    self._create(runner, env, "dev")
+    result = runner.invoke(profile_cmd, ["unset"], env=env)
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("dev", result.output)
+    data = json.loads((tmp / "profiles.json").read_text())
+    self.assertIsNone(data["current"])
+    # Saved profile is preserved.
+    self.assertIn("dev", data["profiles"])
+
+  def test_unset_when_no_active(self):
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    result = runner.invoke(profile_cmd, ["unset"], env=env)
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("No active profile", result.output)
+
+  def test_unset_warns_when_env_var_set(self):
+    runner = CliRunner()
+    tmp = _tmp(self)
+    env = _make_runner_env(tmp)
+    self._create(runner, env, "dev")
+    env_with_override = dict(env)
+    env_with_override["KINETIC_PROFILE"] = "dev"
+    result = runner.invoke(profile_cmd, ["unset"], env=env_with_override)
+    self.assertEqual(result.exit_code, 0, msg=result.output)
+    self.assertIn("KINETIC_PROFILE", result.output)
+
+
 class ProfileShowTest(absltest.TestCase):
   def test_show_active(self):
     runner = CliRunner()

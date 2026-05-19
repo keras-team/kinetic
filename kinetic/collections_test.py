@@ -1,5 +1,8 @@
 """Tests for kinetic.collections — async collection orchestration."""
 
+import json
+import os
+import tempfile
 import threading
 from unittest import mock
 
@@ -840,6 +843,16 @@ class TestAttachBatch(absltest.TestCase):
       "group_index": 0,
     }
 
+  def _stage_profile(self, **fields):
+    """Write a one-profile store and return env dict pointing at it."""
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="kinetic-profiles-")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
+    payload = {"current": "p", "profiles": {"p": fields}}
+    with open(path, "w", encoding="utf-8") as f:
+      json.dump(payload, f)
+    return {"KINETIC_PROFILES_FILE": path}
+
   def test_downloads_manifest_and_handles(self):
     manifest = self._make_manifest(2)
 
@@ -862,6 +875,36 @@ class TestAttachBatch(absltest.TestCase):
     self.assertEqual(handle.name, "test-batch")
     self.assertEqual(len(handle.jobs), 2)
     self.assertTrue(handle._submission_complete.is_set())
+
+  def test_attach_batch_falls_back_to_on_disk_profile(self):
+    """attach_batch() reads the active profile when no env vars / kwargs set."""
+    env = self._stage_profile(
+      project="prof-proj",
+      zone="prof-zone",
+      cluster="prof-cluster",
+      namespace="prof-ns",
+    )
+    manifest = self._make_manifest(1)
+
+    with (
+      mock.patch.dict(os.environ, env, clear=True),
+      mock.patch(
+        "kinetic.collections.storage.download_manifest",
+        return_value=manifest,
+      ) as mock_download_manifest,
+      mock.patch(
+        "kinetic.collections.storage.download_handle",
+        return_value=self._make_handle_payload("job-0"),
+      ),
+    ):
+      handle = attach_batch("grp-abc12345")
+
+    self.assertEqual(handle.group_id, "grp-abc12345")
+    mock_download_manifest.assert_called_once_with(
+      "prof-proj-kn-prof-cluster-jobs",
+      "grp-abc12345",
+      project="prof-proj",
+    )
 
   def test_missing_child_handle_preserves_index(self):
     """Missing handle.json should leave a None at the correct index."""

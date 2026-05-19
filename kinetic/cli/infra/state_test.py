@@ -243,6 +243,103 @@ class ApplyDestroyTest(absltest.TestCase):
 
     self.mock_create.assert_called_once_with(config)
 
+  def test_removes_stack_after_successful_destroy(self):
+    """Regression for Codex P2: stack file must be removed from the backend
+    so list_clusters() doesn't keep offering destroyed clusters as join targets.
+    """
+    config = mock.MagicMock()
+    result = state.apply_destroy(config)
+    self.assertTrue(result)
+    self.mock_stack.workspace.remove_stack.assert_called_once_with(
+      self.mock_stack.name
+    )
+
+  def test_does_not_remove_stack_when_destroy_fails(self):
+    self.mock_stack.destroy.side_effect = pulumi_errors.CommandError("failed")
+    config = mock.MagicMock()
+    result = state.apply_destroy(config)
+    self.assertFalse(result)
+    self.mock_stack.workspace.remove_stack.assert_not_called()
+
+  def test_remove_stack_failure_does_not_fail_destroy(self):
+    """If destroy succeeded, a backend-side cleanup glitch shouldn't surface
+    as a failure — the user's resources are gone, that's what matters.
+    """
+    self.mock_stack.workspace.remove_stack.side_effect = (
+      pulumi_errors.CommandError("backend glitch")
+    )
+    config = mock.MagicMock()
+    result = state.apply_destroy(config)
+    self.assertTrue(result)
+
+
+class ListClustersTest(absltest.TestCase):
+  """Regression for Codex P2: list_clusters must work for collaborators
+  with only object-level (not bucket-level) IAM on the state bucket.
+  """
+
+  def setUp(self):
+    super().setUp()
+    self.mock_client_cls = self.enterContext(
+      mock.patch("kinetic.cli.infra.state.storage.Client")
+    )
+    self.mock_client = self.mock_client_cls.return_value
+
+  def _set_blob_names(self, names):
+    blobs = []
+    for n in names:
+      # MagicMock's `name` constructor kwarg is special, so set the
+      # attribute after construction.
+      blob = mock.MagicMock()
+      blob.name = n
+      blobs.append(blob)
+    self.mock_client.list_blobs.return_value = blobs
+
+  def test_does_not_call_bucket_exists(self):
+    """The bucket.exists() precheck required storage.buckets.get IAM that
+    object-only collaborators don't have. Confirm we skip it entirely.
+    """
+    self._set_blob_names(
+      [
+        ".pulumi/stacks/kinetic/my-proj-dev-tpu.json",
+        ".pulumi/stacks/kinetic/my-proj-team-x.json",
+      ]
+    )
+    clusters = state.list_clusters("my-proj")
+    self.assertEqual(clusters, ["dev-tpu", "team-x"])
+    self.mock_client.bucket.assert_not_called()
+
+  def test_uses_list_blobs_with_kinetic_prefix(self):
+    self._set_blob_names([])
+    state.list_clusters("my-proj")
+    self.mock_client.list_blobs.assert_called_once_with(
+      "my-proj-kinetic-state", prefix=".pulumi/stacks/kinetic/"
+    )
+
+  def test_returns_empty_when_list_blobs_raises(self):
+    """Missing bucket, Forbidden, etc. all collapse to []."""
+    self.mock_client.list_blobs.side_effect = Exception("any cloud error")
+    self.assertEqual(state.list_clusters("my-proj"), [])
+
+  def test_skips_pulumi_backup_files(self):
+    self._set_blob_names(
+      [
+        ".pulumi/stacks/kinetic/my-proj-good.json",
+        ".pulumi/stacks/kinetic/my-proj-stale.bak.json",
+      ]
+    )
+    self.assertEqual(state.list_clusters("my-proj"), ["good"])
+
+  def test_filters_by_project_prefix(self):
+    """A bucket may contain stacks from other projects; list only ours."""
+    self._set_blob_names(
+      [
+        ".pulumi/stacks/kinetic/my-proj-mine.json",
+        ".pulumi/stacks/kinetic/other-proj-theirs.json",
+      ]
+    )
+    self.assertEqual(state.list_clusters("my-proj"), ["mine"])
+
 
 if __name__ == "__main__":
   absltest.main()

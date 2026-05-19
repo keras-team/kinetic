@@ -258,9 +258,12 @@ class TestPrepareArtifactsFuse(absltest.TestCase):
       volumes=volumes,
     )
 
+  @mock.patch(
+    "kinetic.backend.execution._file_sha256", return_value="dummy_hash"
+  )
   @mock.patch("kinetic.backend.execution.storage.upload_data")
   @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
-  def test_fuse_volume_creates_fuse_spec(self, _zip, mock_upload):
+  def test_fuse_volume_creates_fuse_spec(self, _zip, mock_upload, _hash):
     mock_upload.return_value = "gs://bucket/hash/"
     tmp = _make_temp_path(self)
     data_dir = tmp / "dataset"
@@ -277,10 +280,15 @@ class TestPrepareArtifactsFuse(absltest.TestCase):
     self.assertEqual(spec["mount_path"], "/data")
     self.assertTrue(spec["is_dir"])
     self.assertTrue(spec["read_only"])
+    self.assertEqual(ctx.payload_sha256, "dummy_hash")
+    self.assertEqual(ctx.context_sha256, "dummy_hash")
 
+  @mock.patch(
+    "kinetic.backend.execution._file_sha256", return_value="dummy_hash"
+  )
   @mock.patch("kinetic.backend.execution.storage.upload_data")
   @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
-  def test_non_fuse_volume_no_fuse_specs(self, _zip, mock_upload):
+  def test_non_fuse_volume_no_fuse_specs(self, _zip, mock_upload, _hash):
     mock_upload.return_value = "gs://bucket/hash/"
     tmp = _make_temp_path(self)
     data_dir = tmp / "dataset"
@@ -292,9 +300,12 @@ class TestPrepareArtifactsFuse(absltest.TestCase):
 
     self.assertIsNone(ctx.fuse_volume_specs)
 
+  @mock.patch(
+    "kinetic.backend.execution._file_sha256", return_value="dummy_hash"
+  )
   @mock.patch("kinetic.backend.execution.storage.upload_data")
   @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
-  def test_fuse_data_arg_creates_auto_mount(self, _zip, mock_upload):
+  def test_fuse_data_arg_creates_auto_mount(self, _zip, mock_upload, _hash):
     mock_upload.return_value = "gs://bucket/hash/"
     tmp = _make_temp_path(self)
 
@@ -309,9 +320,12 @@ class TestPrepareArtifactsFuse(absltest.TestCase):
     self.assertTrue(spec["is_dir"])
     self.assertTrue(spec["read_only"])
 
+  @mock.patch(
+    "kinetic.backend.execution._file_sha256", return_value="dummy_hash"
+  )
   @mock.patch("kinetic.backend.execution.storage.upload_data")
   @mock.patch("kinetic.backend.execution.packager.zip_working_dir")
-  def test_mixed_fuse_and_non_fuse_volumes(self, _zip, mock_upload):
+  def test_mixed_fuse_and_non_fuse_volumes(self, _zip, mock_upload, _hash):
     mock_upload.return_value = "gs://bucket/hash/"
     tmp = _make_temp_path(self)
     data_dir = tmp / "dataset"

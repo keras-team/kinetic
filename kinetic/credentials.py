@@ -100,6 +100,12 @@ def ensure_gke_auth_plugin() -> None:
   if shutil.which("gke-gcloud-auth-plugin"):
     return
 
+  if not shutil.which("gcloud"):
+    raise RuntimeError(
+      "gcloud CLI not found. "
+      "Cannot install gke-gcloud-auth-plugin automatically."
+    )
+
   logging.info("gke-gcloud-auth-plugin not found. Installing...")
   try:
     subprocess.run(

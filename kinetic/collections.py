@@ -17,16 +17,13 @@ from typing import Any, Iterator
 from absl import logging
 from google.api_core import exceptions as google_exceptions
 
+from kinetic.cli.profiles import resolve_infra
 from kinetic.collections_helpers import (
   append_child_to_manifest,
   build_initial_manifest,
   call_with_input,
 )
-from kinetic.constants import (
-  build_bucket_name,
-  get_default_cluster_name,
-  get_required_project,
-)
+from kinetic.constants import build_bucket_name
 from kinetic.job_status import JobStatus
 from kinetic.jobs import _TERMINAL_STATUSES, JobHandle
 from kinetic.utils import storage
@@ -39,10 +36,13 @@ _MANIFEST_POLL_INTERVAL = 10.0
 def _resolve_bucket(
   project: str | None, cluster: str | None
 ) -> tuple[str, str]:
-  """Return `(resolved_project, bucket_name)`."""
-  resolved_project = get_required_project(project)
-  resolved_cluster = cluster or get_default_cluster_name()
-  return resolved_project, build_bucket_name(resolved_project, resolved_cluster)
+  """Return `(resolved_project, bucket_name)`.
+
+  Resolution follows the standard chain: explicit kwarg > KINETIC_* env var
+  > active profile field > built-in default.
+  """
+  infra = resolve_infra(project=project, cluster=cluster)
+  return infra["project"], build_bucket_name(infra["project"], infra["cluster"])
 
 
 class BatchError(Exception):
@@ -752,8 +752,10 @@ def map(
     cancel_running_on_fail: Cancel running siblings on failure.
     name: Human-readable collection name.
     tags: Arbitrary key-value metadata.
-    project: GCP project (uses default when *None*).
-    cluster: GKE cluster name (uses default when *None*).
+    project: GCP project. Falls back to KINETIC_PROJECT, then the active
+      profile's project, then GOOGLE_CLOUD_PROJECT.
+    cluster: GKE cluster name. Falls back to KINETIC_CLUSTER, then the
+      active profile's cluster, then the built-in default.
 
   Returns:
     A `BatchHandle` for observing, collecting, and cleaning up
@@ -869,8 +871,10 @@ def attach_batch(
 
   Args:
     group_id: The collection identifier (e.g. `"grp-a1b2c3d4"`).
-    project: GCP project (uses default when *None*).
-    cluster: GKE cluster name (uses default when *None*).
+    project: GCP project. Falls back to KINETIC_PROJECT, then the active
+      profile's project, then GOOGLE_CLOUD_PROJECT.
+    cluster: GKE cluster name. Falls back to KINETIC_CLUSTER, then the
+      active profile's cluster, then the built-in default.
     poll_interval: Seconds between manifest polls when the batch
       is partially submitted.
     poll_timeout: Maximum seconds to poll for remaining children.

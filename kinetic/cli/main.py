@@ -5,8 +5,8 @@ import click
 from kinetic.cli.commands.accelerators import accelerators
 from kinetic.cli.commands.build_base import build_base
 from kinetic.cli.commands.config import config
-from kinetic.cli.commands.doctor import doctor
 from kinetic.cli.commands.down import down
+from kinetic.cli.commands.init import init
 from kinetic.cli.commands.jobs import jobs
 from kinetic.cli.commands.pool import pool
 from kinetic.cli.commands.profile import profile
@@ -52,11 +52,14 @@ def cli(ctx, profile_name):
   # without re-resolving.
   ctx.obj["active_profile"] = active
 
-  # The 'profile' command group must not have profile defaults injected
-  # into its own options — we don't want 'profile create' to auto-fill
-  # from the currently-active profile. Skip default_map, but keep the
-  # resolved selection on ctx.obj above.
-  if ctx.invoked_subcommand == "profile":
+  # Skip default_map for commands where profile defaults would be wrong:
+  # - 'profile' manages profiles, so 'profile create' must not auto-fill
+  #   from the currently-active one.
+  # - 'init' is for onboarding/joining/creating clusters; pre-filling
+  #   cluster/zone/etc. from an existing profile blocks users from
+  #   targeting a different cluster without first deleting their profile.
+  # The resolved selection stays on ctx.obj above either way.
+  if ctx.invoked_subcommand in ("profile", "init"):
     return
 
   if active is None:
@@ -88,12 +91,12 @@ def _spread_defaults(group, defaults):
 
 
 cli.add_command(accelerators)
+cli.add_command(init)
 cli.add_command(up)
 cli.add_command(down)
 cli.add_command(status)
 cli.add_command(config)
 cli.add_command(pool)
 cli.add_command(jobs)
-cli.add_command(doctor)
 cli.add_command(build_base)
 cli.add_command(profile)

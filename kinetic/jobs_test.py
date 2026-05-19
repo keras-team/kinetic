@@ -1,5 +1,8 @@
 """Tests for kinetic.jobs — async job handles and observation API."""
 
+import json
+import os
+import tempfile
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -167,6 +170,89 @@ class TestAttachAndListJobs(absltest.TestCase):
 
     self.assertEqual(len(handles), 1)
     self.assertEqual(handles[0].job_id, "job-1")
+
+  def _stage_profile(self, **fields):
+    """Write a one-profile store and return env dict pointing at it."""
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="kinetic-profiles-")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
+    payload = {"current": "p", "profiles": {"p": fields}}
+    with open(path, "w", encoding="utf-8") as f:
+      json.dump(payload, f)
+    return {"KINETIC_PROFILES_FILE": path}
+
+  def test_attach_falls_back_to_on_disk_profile(self):
+    """When no env vars / kwargs are set, attach() reads the active profile."""
+    env = self._stage_profile(
+      project="prof-proj",
+      zone="prof-zone",
+      cluster="prof-cluster",
+      namespace="prof-ns",
+    )
+    payload = self._make_payload("job-a1", "2026-03-25T10:00:00Z")
+    payload["project"] = "prof-proj"
+    payload["cluster_name"] = "prof-cluster"
+
+    with (
+      mock.patch.dict(os.environ, env, clear=True),
+      mock.patch(
+        "kinetic.jobs.storage.download_handle",
+        return_value=payload,
+      ) as mock_download,
+    ):
+      handle = attach("job-a1")
+
+    self.assertEqual(handle.job_id, "job-a1")
+    mock_download.assert_called_once_with(
+      "prof-proj-kn-prof-cluster-jobs",
+      "job-a1",
+      project="prof-proj",
+    )
+
+  def test_list_jobs_falls_back_to_on_disk_profile(self):
+    """list_jobs() reads the active profile when no env vars / kwargs set."""
+    env = self._stage_profile(
+      project="prof-proj",
+      zone="prof-zone",
+      cluster="prof-cluster",
+      namespace="prof-ns",
+    )
+    payload = self._make_payload("job-1", "2026-03-25T10:00:00Z")
+    payload["project"] = "prof-proj"
+    payload["cluster_name"] = "prof-cluster"
+    payload["namespace"] = "prof-ns"
+
+    with (
+      mock.patch.dict(os.environ, env, clear=True),
+      mock.patch("kinetic.jobs.ensure_credentials") as mock_creds,
+      mock.patch(
+        "kinetic.jobs.gke_client.list_jobs",
+        return_value=[{"job_id": "job-1", "k8s_name": "kinetic-job-1"}],
+      ) as mock_gke,
+      mock.patch(
+        "kinetic.jobs.pathways_client.list_jobs",
+        return_value=[],
+      ) as mock_pathways,
+      mock.patch(
+        "kinetic.jobs.storage.download_handle",
+        return_value=payload,
+      ) as mock_download,
+    ):
+      handles = list_jobs()
+
+    self.assertEqual(len(handles), 1)
+    mock_creds.assert_called_once_with(
+      project="prof-proj",
+      zone="prof-zone",
+      cluster="prof-cluster",
+    )
+    mock_gke.assert_called_once_with(namespace="prof-ns")
+    mock_pathways.assert_called_once_with(namespace="prof-ns")
+    mock_download.assert_called_once_with(
+      "prof-proj-kn-prof-cluster-jobs",
+      "job-1",
+      project="prof-proj",
+    )
 
 
 class TestJobHandleMethods(absltest.TestCase):

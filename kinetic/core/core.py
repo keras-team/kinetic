@@ -12,7 +12,7 @@ from kinetic.backend.execution import (
   PathwaysBackend,
   submit_remote,
 )
-from kinetic.constants import DEFAULT_CLUSTER_NAME, get_default_namespace
+from kinetic.cli.profiles import resolve_infra
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
@@ -136,10 +136,9 @@ def _make_decorator(
           "Use 'gke', 'pathways', or None for auto-detection"
         )
 
-      resolved_cluster = cluster or os.environ.get(
-        "KINETIC_CLUSTER", DEFAULT_CLUSTER_NAME
+      infra = resolve_infra(
+        project=project, zone=zone, cluster=cluster, namespace=namespace
       )
-      resolved_namespace = get_default_namespace(namespace)
 
       ctx = JobContext.from_params(
         func,
@@ -147,10 +146,10 @@ def _make_decorator(
         kwargs,
         accelerator,
         container_image,
-        zone,
-        project,
+        infra["zone"],
+        infra["project"],
         env_vars,
-        cluster_name=resolved_cluster,
+        cluster_name=infra["cluster"],
         volumes=volumes,
         spot=spot,
         debug=debug,
@@ -160,11 +159,11 @@ def _make_decorator(
 
       if resolved_backend == "pathways":
         backend_inst = PathwaysBackend(
-          cluster=resolved_cluster, namespace=resolved_namespace
+          cluster=infra["cluster"], namespace=infra["namespace"]
         )
       else:
         backend_inst = GKEBackend(
-          cluster=resolved_cluster, namespace=resolved_namespace
+          cluster=infra["cluster"], namespace=infra["namespace"]
         )
 
       handle = submit_remote(ctx, backend_inst)
@@ -214,14 +213,17 @@ def run(
       (e.g., `"mycompany/kinetic"`). Defaults to `KINETIC_BASE_IMAGE_REPO`
       env var, then `"kinetic"`. Only used when `container_image` is
       `"prebuilt"`.
-    zone: GCP zone (default: from KINETIC_ZONE or 'us-central1-a')
-    project: GCP project (default: from KINETIC_PROJECT)
+    zone: GCP zone. Falls back to KINETIC_ZONE, then the active profile's
+      zone (from ~/.kinetic/profiles.json), then 'us-central1-a'.
+    project: GCP project. Falls back to KINETIC_PROJECT, then the active
+      profile's project, then GOOGLE_CLOUD_PROJECT.
     capture_env_vars: List of environment variable names or patterns (ending in `*`)
       to propagate to the remote environment. Defaults to None.
-    cluster: GKE cluster name (default: from KINETIC_CLUSTER)
+    cluster: GKE cluster name. Falls back to KINETIC_CLUSTER, then the
+      active profile's cluster, then the built-in default.
     backend: Backend to use ('gke' or 'pathways')
-    namespace: Kubernetes namespace (default: None, resolved via
-      KINETIC_NAMESPACE env var or 'default')
+    namespace: Kubernetes namespace. Falls back to KINETIC_NAMESPACE, then
+      the active profile's namespace, then 'default'.
     volumes: Dict mapping absolute mount paths to Data objects, e.g.
       `{"/data": Data("./dataset/")}`. Data is downloaded to these
       paths on the pod before function execution.

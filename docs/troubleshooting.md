@@ -7,13 +7,15 @@ guidance there.
 For a quick diagnostic of common environment problems, run:
 
 ```bash
-kinetic doctor
+kinetic init
 ```
 
-It checks for missing tools, misconfigured credentials, and unhealthy
-infrastructure, and prints a concrete fix command for each failed check.
-The full list of categories it covers is described at the end of this
-page.
+and choose `troubleshoot` at the prompt. It checks for missing tools,
+misconfigured credentials, and unhealthy infrastructure, and prints a
+concrete fix command for each failed check. `kinetic init` will also
+offer this path automatically when it detects that prerequisites are
+missing. The full list of categories the troubleshoot path covers is
+described at the end of this page.
 
 ## Startup and build issues
 
@@ -86,8 +88,8 @@ gcloud projects add-iam-policy-binding $KINETIC_PROJECT \
     --role="roles/storage.admin"
 ```
 
-Repeat for the other roles. `kinetic doctor` flags missing roles by
-checking the actual operations that fail.
+Repeat for the other roles. `kinetic init`'s troubleshoot path flags
+missing roles by checking the actual operations that fail.
 
 ### Application Default Credentials missing or expired
 
@@ -119,9 +121,10 @@ common reasons:
   `--spot`, GCP may have no spot capacity to allocate right now.
   Switch to on-demand or try later.
 
-`kinetic doctor` includes a quota check that surfaces exhausted
-accelerator quotas in your region. If it doesn't flag anything, inspect
-the Cloud Console quota page directly for finer-grained breakdowns.
+`kinetic init`'s troubleshoot path includes a quota check that surfaces
+exhausted accelerator quotas in your region. If it doesn't flag
+anything, inspect the Cloud Console quota page directly for
+finer-grained breakdowns.
 
 ### Multi-host TPU job fails right after submit
 
@@ -190,11 +193,11 @@ pod is unaffected — log retrieval is read-only. Use
 `kinetic jobs logs <id>` (without `--follow`) or `--tail N` to fetch
 fresh logs from any machine.
 
-## What `kinetic doctor` actually checks
+## What the troubleshoot path actually checks
 
-`kinetic doctor` runs eight groups of checks and prints concrete fix
-commands when any fail. The groups (matching the source at
-`kinetic/cli/commands/doctor.py`):
+`kinetic init`'s troubleshoot path runs eight groups of checks and
+prints concrete fix commands when any fail. The groups (matching the
+source at `kinetic/cli/commands/doctor.py`):
 
 1. **Local Tools** — `gcloud`, `kubectl`, and
    `gke-gcloud-auth-plugin` are installed and on your PATH.
@@ -214,7 +217,7 @@ commands when any fail. The groups (matching the source at
    where needed, and accelerator quotas are not exhausted.
 
 Each failing check prints a one-line fix suggestion. For multi-step
-fixes, `kinetic doctor` prints a copy-paste command block.
+fixes, the troubleshoot path prints a copy-paste command block.
 
 ## Related pages
 

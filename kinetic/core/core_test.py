@@ -1,21 +1,40 @@
 """Tests for kinetic.core.core — run/submit decorators and env var capture."""
 
+import json
 import os
+import tempfile
 from unittest import mock
 from unittest.mock import MagicMock
 
 from absl.testing import absltest
 
+from kinetic.cli.profiles import resolve_infra
+from kinetic.constants import DEFAULT_CLUSTER_NAME, DEFAULT_ZONE
 from kinetic.core.core import run
+
+
+def _isolate_profile_env(extra=None):
+  """Build an env dict that disables on-disk profile loading.
+
+  Tests should not be affected by whatever profile the developer happens
+  to have saved at ~/.kinetic/profiles.json. Pointing KINETIC_PROFILES_FILE
+  at a nonexistent path makes `resolve_active()` return None.
+  """
+  env = {"KINETIC_PROFILES_FILE": "/nonexistent/kinetic-profiles.json"}
+  if extra:
+    env.update(extra)
+  return env
 
 
 class TestEnvVarCapture(absltest.TestCase):
   def test_exact_match(self):
-    _ = {**os.environ, "MY_VAR": "my_val"}
     mock_handle = MagicMock()
     mock_handle.result.return_value = None
     with (
-      mock.patch.dict(os.environ, {"MY_VAR": "my_val"}),
+      mock.patch.dict(
+        os.environ,
+        _isolate_profile_env({"MY_VAR": "my_val", "KINETIC_PROJECT": "p"}),
+      ),
       mock.patch("kinetic.core.core.submit_remote", return_value=mock_handle),
       mock.patch(
         "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
@@ -31,12 +50,14 @@ class TestEnvVarCapture(absltest.TestCase):
       self.assertEqual(env_vars, {"MY_VAR": "my_val"})
 
   def test_wildcard_pattern(self):
-    env = {
-      k: v
-      for k, v in os.environ.items()
-      if k not in ("PREFIX_A", "PREFIX_B", "OTHER")
-    }
-    env.update({"PREFIX_A": "1", "PREFIX_B": "2", "OTHER": "3"})
+    env = _isolate_profile_env(
+      {
+        "PREFIX_A": "1",
+        "PREFIX_B": "2",
+        "OTHER": "3",
+        "KINETIC_PROJECT": "p",
+      }
+    )
     mock_handle = MagicMock()
     mock_handle.result.return_value = None
     with (
@@ -58,7 +79,7 @@ class TestEnvVarCapture(absltest.TestCase):
       self.assertNotIn("OTHER", env_vars)
 
   def test_missing_var_skipped(self):
-    env = {k: v for k, v in os.environ.items() if k != "NONEXISTENT"}
+    env = _isolate_profile_env({"KINETIC_PROJECT": "p"})
     mock_handle = MagicMock()
     mock_handle.result.return_value = None
     with (
@@ -78,12 +99,14 @@ class TestEnvVarCapture(absltest.TestCase):
       self.assertEqual(env_vars, {})
 
   def test_mixed_exact_and_wildcard(self):
-    env = {
-      k: v
-      for k, v in os.environ.items()
-      if k not in ("EXACT_VAR", "WILD_A", "WILD_B")
-    }
-    env.update({"EXACT_VAR": "exact", "WILD_A": "a", "WILD_B": "b"})
+    env = _isolate_profile_env(
+      {
+        "EXACT_VAR": "exact",
+        "WILD_A": "a",
+        "WILD_B": "b",
+        "KINETIC_PROJECT": "p",
+      }
+    )
     mock_handle = MagicMock()
     mock_handle.result.return_value = None
     with (
@@ -116,10 +139,12 @@ class TestExecuteOnBackendDefaults(absltest.TestCase):
     with (
       mock.patch.dict(
         os.environ,
-        {
-          "KINETIC_CLUSTER": "env-cluster",
-          "KINETIC_PROJECT": "proj",
-        },
+        _isolate_profile_env(
+          {
+            "KINETIC_CLUSTER": "env-cluster",
+            "KINETIC_PROJECT": "proj",
+          }
+        ),
       ),
       mock.patch(
         "kinetic.core.core.submit_remote",
@@ -147,10 +172,12 @@ class TestExecuteOnBackendDefaults(absltest.TestCase):
     with (
       mock.patch.dict(
         os.environ,
-        {
-          "KINETIC_NAMESPACE": "custom-ns",
-          "KINETIC_PROJECT": "proj",
-        },
+        _isolate_profile_env(
+          {
+            "KINETIC_NAMESPACE": "custom-ns",
+            "KINETIC_PROJECT": "proj",
+          }
+        ),
       ),
       mock.patch(
         "kinetic.core.core.submit_remote",
@@ -172,13 +199,114 @@ class TestExecuteOnBackendDefaults(absltest.TestCase):
       self.assertEqual(backend.namespace, "custom-ns")
 
 
+class TestResolveInfra(absltest.TestCase):
+  """Unit tests for the precedence chain in `resolve_infra`."""
+
+  def _stage_profile(self, **fields):
+    """Write a one-profile store and return env dict pointing at it."""
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="kinetic-profiles-")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
+    payload = {"current": "p", "profiles": {"p": fields}}
+    with open(path, "w", encoding="utf-8") as f:
+      json.dump(payload, f)
+    return {"KINETIC_PROFILES_FILE": path}
+
+  def test_precedence_kwarg_beats_env_beats_profile_beats_default(self):
+    """Each layer wins over the layers below for the field it sets."""
+    env = self._stage_profile(
+      project="prof-proj",
+      zone="prof-zone",
+      cluster="prof-cluster",
+      namespace="prof-ns",
+    )
+    # Sets env for cluster only; kwarg only for namespace.
+    env["KINETIC_CLUSTER"] = "env-cluster"
+    with mock.patch.dict(os.environ, env, clear=True):
+      out = resolve_infra(
+        project=None, zone=None, cluster=None, namespace="kwarg-ns"
+      )
+    self.assertEqual(
+      out,
+      {
+        "project": "prof-proj",  # profile (no kwarg / env)
+        "zone": "prof-zone",  # profile (no kwarg / env)
+        "cluster": "env-cluster",  # env beats profile
+        "namespace": "kwarg-ns",  # kwarg beats env / profile
+      },
+    )
+
+  def test_built_in_defaults_when_nothing_set(self):
+    """Without a profile or env vars, falls through to built-in defaults."""
+    env = {
+      "KINETIC_PROFILES_FILE": "/nonexistent/kinetic-profiles.json",
+      "KINETIC_PROJECT": "fallback-proj",  # required, no default
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+      out = resolve_infra(project=None, zone=None, cluster=None, namespace=None)
+    self.assertEqual(out["zone"], DEFAULT_ZONE)
+    self.assertEqual(out["cluster"], DEFAULT_CLUSTER_NAME)
+    self.assertEqual(out["namespace"], "default")
+    self.assertEqual(out["project"], "fallback-proj")
+
+
+class TestProfileEndToEnd(absltest.TestCase):
+  """Smoke test that an on-disk profile actually reaches the backend."""
+
+  def test_profile_flows_through_run_to_backend(self):
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="kinetic-profiles-")
+    os.close(fd)
+    self.addCleanup(os.unlink, path)
+    with open(path, "w", encoding="utf-8") as f:
+      json.dump(
+        {
+          "current": "dev",
+          "profiles": {
+            "dev": {
+              "project": "prof-project",
+              "zone": "europe-west4-a",
+              "cluster": "prof-cluster",
+              "namespace": "prof-ns",
+            }
+          },
+        },
+        f,
+      )
+
+    mock_handle = MagicMock()
+    mock_handle.result.return_value = None
+    with (
+      mock.patch.dict(os.environ, {"KINETIC_PROFILES_FILE": path}, clear=True),
+      mock.patch(
+        "kinetic.core.core.submit_remote", return_value=mock_handle
+      ) as mock_submit,
+      mock.patch(
+        "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
+      ),
+    ):
+
+      @run(accelerator="cpu")
+      def func():
+        pass
+
+      func()
+
+      backend = mock_submit.call_args[0][1]
+      self.assertEqual(backend.cluster, "prof-cluster")
+      self.assertEqual(backend.namespace, "prof-ns")
+
+
 class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
   """run(debug=True) requires a TTY so the user can attach a debugger."""
 
   def test_run_debug_raises_when_stdin_not_tty(self):
     mock_handle = MagicMock()
     with (
-      mock.patch.dict(os.environ, {"KINETIC_PROJECT": "proj"}, clear=False),
+      mock.patch.dict(
+        os.environ,
+        _isolate_profile_env({"KINETIC_PROJECT": "proj"}),
+        clear=False,
+      ),
       mock.patch(
         "kinetic.core.core.submit_remote",
         return_value=mock_handle,
@@ -208,7 +336,11 @@ class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
     mock_handle = MagicMock()
     mock_handle.result.return_value = 7
     with (
-      mock.patch.dict(os.environ, {"KINETIC_PROJECT": "proj"}, clear=False),
+      mock.patch.dict(
+        os.environ,
+        _isolate_profile_env({"KINETIC_PROJECT": "proj"}),
+        clear=False,
+      ),
       mock.patch(
         "kinetic.core.core.submit_remote",
         return_value=mock_handle,
@@ -236,7 +368,9 @@ class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
     with (
       mock.patch.dict(
         os.environ,
-        {"KINETIC_PROJECT": "proj", "KINETIC_NO_TTY_DEBUG": "1"},
+        _isolate_profile_env(
+          {"KINETIC_PROJECT": "proj", "KINETIC_NO_TTY_DEBUG": "1"}
+        ),
         clear=False,
       ),
       mock.patch(
@@ -265,7 +399,11 @@ class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
     mock_handle = MagicMock()
     mock_handle.result.return_value = 42
     with (
-      mock.patch.dict(os.environ, {"KINETIC_PROJECT": "proj"}, clear=False),
+      mock.patch.dict(
+        os.environ,
+        _isolate_profile_env({"KINETIC_PROJECT": "proj"}),
+        clear=False,
+      ),
       mock.patch(
         "kinetic.core.core.submit_remote",
         return_value=mock_handle,
@@ -293,7 +431,9 @@ class TestSubmitOnBackend(absltest.TestCase):
     mock_handle = MagicMock()
     mock_handle.result.return_value = 123
     with (
-      mock.patch.dict(os.environ, {"KINETIC_PROJECT": "proj"}),
+      mock.patch.dict(
+        os.environ, _isolate_profile_env({"KINETIC_PROJECT": "proj"})
+      ),
       mock.patch(
         "kinetic.core.core.submit_remote",
         return_value=mock_handle,
