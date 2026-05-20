@@ -31,8 +31,6 @@ import kinetic
 import kinetic.credentials
 
 load_dotenv()
-# Disable credential check for mock run if needed, but let's assume it works
-# kinetic.credentials.ensure_credentials = lambda *args, **kwargs: None
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -404,23 +402,13 @@ def run_grpo(tokenizer_path):
     ],
     algo_config=grpo_config,
   )
-
-  print("Starting GRPO training...")
-  print(f"NUM_ITERATIONS: {NUM_ITERATIONS}")
-  print(f"NUM_GENERATIONS: {NUM_GENERATIONS}")
-  print(f"BETA: {BETA}")
-  print(f"EPSILON: {EPSILON}")
-  print(f"MAX_STEPS: {MAX_STEPS}")
-  print(f"TRAIN_MICRO_BATCH_SIZE: {TRAIN_MICRO_BATCH_SIZE}")
   print(
-    "Calling grpo_trainer.train()... This might take a while due to JAX compilation."
+    "Calling grpo_trainer.train()."
   )
-  metrics = grpo_trainer.train(train_dataset, val_dataset)
+  grpo_trainer.train(train_dataset, val_dataset)
   print("GRPO training completed.")
-  print(f"Final metrics: {metrics}")
-  return metrics
+  return
 
 
 if __name__ == "__main__":
-  result = run_grpo(kinetic.Data(GEMMA_TOKENIZER_PATH))
-  print(f"Job execution result: {result}")
+  run_grpo(kinetic.Data(GEMMA_TOKENIZER_PATH))
