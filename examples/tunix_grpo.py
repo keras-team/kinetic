@@ -43,26 +43,12 @@ GEMMA_TOKENIZER_PATH = "gs://gemma-data/tokenizers/tokenizer_gemma3.model"
 
 # ====== Data ======
 TRAIN_DATA_DIR = "./data/train"
-TEST_DATA_DIR = "./data/test"
-TRAIN_FRACTION = 0.9
+
 
 # ====== LoRA ======
 RANK = 64
 ALPHA = 64.0
 
-# ====== Sharding ======
-NUM_TPUS = len(jax.devices())
-if NUM_TPUS == 8 or NUM_TPUS == 4:
-  MESH_COUNTS = (1, 4)
-elif NUM_TPUS == 1:
-  MESH_COUNTS = (1, 1)
-else:
-  raise ValueError(f"Unsupported number of TPUs: {NUM_TPUS}")
-
-MESH = [
-  MESH_COUNTS,
-  ("fsdp", "tp"),
-]
 
 # ====== GRPO ======
 MAX_PROMPT_LENGTH = 256
@@ -90,7 +76,9 @@ WEIGHT_DECAY = 0.1
 WARMUP_STEPS = 1
 MAX_GRAD_NORM = 0.1
 
-CKPT_DIR = "/tmp/content/ckpts/"
+CKPT_DIR = os.path.join(
+  os.environ.get("KINETIC_OUTPUT_DIR", "/tmp/content/"), "ckpts/"
+)
 SAVE_INTERVAL_STEPS = 5
 MAX_TO_KEEP = 2
 
@@ -186,7 +174,7 @@ def check_answer(prompts, completions, answer, **kwargs):
   )
   for guess, true_answer in zip(extracted_responses, answer, strict=False):
     score = 0
-    if guess is None:
+    if guess is None or true_answer is None:
       scores.append(0)
       continue
     if guess == true_answer:
@@ -195,14 +183,18 @@ def check_answer(prompts, completions, answer, **kwargs):
       score += 1.5
     else:
       try:
-        ratio = float(guess) / float(true_answer)
-        if ratio >= 0.9 and ratio <= 1.1:
-          score += 0.5
-        elif ratio >= 0.8 and ratio <= 1.2:
-          score += 0.25
+        t_val = float(true_answer)
+        if t_val == 0:
+          score -= 0.5
         else:
-          score -= 1.0
-      except Exception:
+          ratio = float(guess) / t_val
+          if 0.9 <= ratio <= 1.1:
+            score += 0.5
+          elif 0.8 <= ratio <= 1.2:
+            score += 0.25
+          else:
+            score -= 1.0
+      except (ValueError, ZeroDivisionError):
         score -= 0.5
     scores.append(score)
   return scores
@@ -221,7 +213,7 @@ def check_numbers(prompts, completions, answer, **kwargs):
   ]
   scores = []
   for guess, true_answer in zip(extracted_responses, answer, strict=False):
-    if guess is None:
+    if guess is None or true_answer is None:
       scores.append(0)
       continue
     try:
@@ -266,7 +258,7 @@ def get_lora_model(base_model, mesh):
     "JAX_LOG_COMPILES",
   ],
 )
-def run_grpo():
+def run_grpo(tokenizer_path):
   logging.basicConfig(level=logging.DEBUG)
   from absl import logging as absl_logging
 
@@ -292,8 +284,24 @@ def run_grpo():
 
   model_config = gemma_lib.ModelConfig.gemma3_1b_it()
 
+  # ====== Sharding ======
+  num_tpus = len(jax.devices())
+  if num_tpus == 8:
+    mesh_counts = (2, 4)
+  elif num_tpus == 4:
+    mesh_counts = (1, 4)
+  elif num_tpus == 1:
+    mesh_counts = (1, 1)
+  else:
+    raise ValueError(f"Unsupported number of TPUs: {num_tpus}")
+
+  mesh_spec = [
+    mesh_counts,
+    ("fsdp", "tp"),
+  ]
+
   mesh = jax.make_mesh(
-    *MESH, axis_types=(jax.sharding.AxisType.Auto,) * len(MESH[0])
+    *mesh_spec, axis_types=(jax.sharding.AxisType.Auto,) * len(mesh_spec[0])
   )
   with mesh:
     gemma3 = params_safetensors_lib.create_model_from_safe_tensors(
@@ -302,7 +310,7 @@ def run_grpo():
 
   lora_policy = get_lora_model(gemma3, mesh=mesh)
 
-  tokenizer = tokenizer_lib.Tokenizer(tokenizer_path=GEMMA_TOKENIZER_PATH)
+  tokenizer = tokenizer_lib.Tokenizer(tokenizer_path=tokenizer_path)
   if tokenizer.eos_id() not in eos_tokens:
     eos_tokens.append(tokenizer.eos_id())
 
@@ -337,7 +345,11 @@ def run_grpo():
     save_interval_steps=SAVE_INTERVAL_STEPS, max_to_keep=MAX_TO_KEEP
   )
   metrics_logging_options = metrics_logger.MetricsLoggerOptions(
-    log_dir="/tmp/content/tmp/tensorboard/grpo", flush_every_n_steps=2
+    log_dir=os.path.join(
+      os.environ.get("KINETIC_OUTPUT_DIR", "/tmp/content/"),
+      "tmp/tensorboard/grpo",
+    ),
+    flush_every_n_steps=2,
   )
 
   cluster_config = rl_cluster_lib.ClusterConfig(
@@ -410,5 +422,5 @@ def run_grpo():
 
 
 if __name__ == "__main__":
-  result = run_grpo()
+  result = run_grpo(kinetic.Data(GEMMA_TOKENIZER_PATH))
   print(f"Job execution result: {result}")
