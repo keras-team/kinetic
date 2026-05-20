@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """Tunix GRPO Demo
-
-Adapted for local execution and launched on remote TPU via Kinetic.
 Based on: https://tunix.readthedocs.io/en/latest/_collections/examples/grpo_gemma.html
 """
 
@@ -402,9 +400,7 @@ def run_grpo(tokenizer_path):
     ],
     algo_config=grpo_config,
   )
-  print(
-    "Calling grpo_trainer.train()."
-  )
+  print("Calling grpo_trainer.train().")
   grpo_trainer.train(train_dataset, val_dataset)
   print("GRPO training completed.")
   return
