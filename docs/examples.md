@@ -15,6 +15,7 @@ examples/pathways_example
 examples/gemma_sft_pathways_distributed
 examples/gemma3_sft_demo
 examples/tunix_sft
+examples/tunix_grpo
 ```
 
 A catalog of runnable example scripts using Kinetic. Every example below is rendered directly on this site and is also available as a raw Python script in the GitHub repository.
@@ -254,6 +255,23 @@ capture for credentials.
 {bdg-secondary}`LLM` &nbsp;
 {bdg-secondary}`TPU` &nbsp;
 {bdg-secondary}`LoRA`
+:::
+
+:::{grid-item-card} Tunix GRPO Example
+:link: examples/tunix_grpo.md
+:class-card: sd-shadow-sm
+:class-body: sd-fs-6
+:class-title: sd-fs-5
+
+GRPO post-training for Gemma with Tunix on a Kinetic TPU job. Shows the
+Data API for GSM8K-style inputs, detached execution, reward functions,
+and durable Orbax checkpoints under `KINETIC_OUTPUT_DIR`.
+
++++
+
+{bdg-secondary}`LLM` &nbsp;
+{bdg-secondary}`TPU` &nbsp;
+{bdg-secondary}`GRPO`
 :::
 ::::
 
