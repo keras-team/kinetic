@@ -3,7 +3,7 @@
 ## When should I use `run()` vs `submit()`?
 
 Use `@kinetic.run()` when you want your local script to wait for the
-result. Use `@kinetic.run()` when the job is long enough that you'd
+result. Use `run_async()` when the job is long enough that you'd
 rather get a `JobHandle` back, walk away, and reattach later. `submit()` is
 the right call for anything multi-hour, anything you might want to monitor
 from a different machine, or anything you want to fan out and check on in
