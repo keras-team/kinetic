@@ -31,7 +31,7 @@ import numpy as np
 import kinetic
 
 # ---------------------------------------------------------------------------
-# 1. Define functions using @kinetic.run (same params as @kinetic.run)
+# 1. Define functions using @kinetic.run
 # ---------------------------------------------------------------------------
 
 
