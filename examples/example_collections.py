@@ -1,11 +1,11 @@
 """
 Example: Async Collections with Kinetic
 
-This demonstrates the kinetic.map() workflow for running the same function
+This demonstrates the run_async_map() workflow for running the same function
 over many inputs — hyperparameter sweeps, data shards, evaluation runs, etc.
 
 Instead of submitting jobs one by one and managing handles manually,
-kinetic.map() fans out across accelerators and gives you a single
+run_async_map() fans out across accelerators and gives you a single
 BatchHandle to monitor, collect results, and clean up the whole batch.
 
 Prerequisites:
@@ -14,8 +14,8 @@ Prerequisites:
 3. KINETIC_PROJECT environment variable set
 
 Workflow overview:
-    1. Define a @kinetic.submit function
-    2. kinetic.map()       → fan out over inputs, get a BatchHandle
+    1. Define a @kinetic.run function
+    2. func.run_async_map() → fan out over inputs, get a BatchHandle
     3. statuses/wait       → monitor batch progress
     4. results()           → collect all results (ordered or streaming)
     5. attach_batch()      → reattach from a different session
@@ -33,7 +33,7 @@ import numpy as np
 import kinetic
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def train(lr, epochs):
   """Train a small model and return the final loss."""
   model = keras.Sequential(
@@ -67,9 +67,9 @@ def demo_basic_sweep():
     {"lr": 0.05, "epochs": 5},
   ]
 
-  # kinetic.map() dispatches each dict as **kwargs to train().
+  # run_async_map() dispatches each dict as **kwargs to train().
   # max_concurrent=2 limits how many jobs run at once.
-  batch = kinetic.map(train, configs, max_concurrent=2)
+  batch = train.run_async_map(configs, max_concurrent=2)
 
   print(f"\nBatch ID: {batch.group_id}")
   print(f"Submitted {len(configs)} jobs (max 2 concurrent)\n")
@@ -97,7 +97,7 @@ def demo_monitoring():
     {"lr": 0.03, "epochs": 8},
   ]
 
-  batch = kinetic.map(train, configs)
+  batch = train.run_async_map(configs)
   print(f"\nBatch ID: {batch.group_id}")
 
   # Poll status a few times.
@@ -117,7 +117,7 @@ def demo_monitoring():
   batch.cleanup()
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def fragile_train(lr):
   """Training that fails on extreme learning rates."""
   if lr > 1.0:
@@ -132,7 +132,7 @@ def demo_error_handling():
   print("=" * 60)
 
   # The third config will fail.
-  batch = kinetic.map(fragile_train, [0.01, 0.1, 5.0, 0.5])
+  batch = fragile_train.run_async_map([0.01, 0.1, 5.0, 0.5])
 
   results = batch.results(timeout=600, return_exceptions=True, cleanup=False)
 

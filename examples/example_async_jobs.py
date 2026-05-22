@@ -1,9 +1,9 @@
 """
 Example: Async Jobs with Kinetic
 
-This demonstrates the submit/attach/list workflow for detached execution.
-Instead of blocking until the remote function finishes (@kinetic.run),
-@kinetic.submit returns a JobHandle immediately so you can monitor,
+This demonstrates the run_async/attach/list workflow for detached execution.
+Instead of blocking until the remote function finishes,
+run_async returns a JobHandle immediately so you can monitor,
 reattach from another session, or manage multiple jobs concurrently.
 
 Prerequisites:
@@ -12,7 +12,7 @@ Prerequisites:
 3. KINETIC_PROJECT environment variable set
 
 Workflow overview:
-    1. submit()   → fire-and-forget, get a JobHandle back instantly
+    1. run_async() → fire-and-forget, get a JobHandle back instantly
     2. status()   → poll the job without blocking
     3. logs()     → fetch or stream logs
     4. result()   → block until completion and collect the return value
@@ -31,11 +31,11 @@ import numpy as np
 import kinetic
 
 # ---------------------------------------------------------------------------
-# 1. Define functions using @kinetic.submit (same params as @kinetic.run)
+# 1. Define functions using @kinetic.run (same params as @kinetic.run)
 # ---------------------------------------------------------------------------
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def train_model_a():
   """Train a small dense model — returns final loss."""
   model = keras.Sequential(
@@ -57,7 +57,7 @@ def train_model_a():
   return final_loss
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def train_model_b():
   """Train a slightly larger model — returns final loss."""
   model = keras.Sequential(
@@ -90,8 +90,8 @@ def demo_submit_and_monitor():
   print("Submitting two training jobs...")
   print("=" * 60)
 
-  job_a = train_model_a()
-  job_b = train_model_b()
+  job_a = train_model_a.run_async()
+  job_b = train_model_b.run_async()
 
   print(f"\nJob A: id={job_a.job_id}")
   print(f"Job B: id={job_b.job_id}")

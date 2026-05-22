@@ -1,7 +1,7 @@
 """Async job handles and detached job operations for Kinetic.
 
 Provides `JobHandle` for observing, collecting, and cleaning up
-remote jobs submitted via `kinetic.submit()`.  Includes `attach()`
+remote jobs submitted via `func.run_async()`.  Includes `attach()`
 for cross-session reattachment and `list_jobs()` for discovery.
 """
 
@@ -523,7 +523,7 @@ def list_jobs(
   `handle.json` is missing are skipped with a warning.
 
   Each field falls back through KINETIC_* env vars, the active profile,
-  and finally the built-in defaults — matching `kinetic.run`/`submit`.
+  and finally the built-in defaults — matching `kinetic.run`.
   """
   infra = resolve_infra(
     project=project, zone=zone, cluster=cluster, namespace=namespace

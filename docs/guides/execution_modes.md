@@ -14,7 +14,7 @@ The three modes:
   the build and the install steps.
 
 You select the mode with the `container_image` argument on `@kinetic.run()` or
-`@kinetic.submit()`:
+`@kinetic.run()`:
 
 ```python
 @kinetic.run(accelerator="tpu-v6e-8")                              # bundled (default)

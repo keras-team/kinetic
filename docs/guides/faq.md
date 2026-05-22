@@ -3,7 +3,7 @@
 ## When should I use `run()` vs `submit()`?
 
 Use `@kinetic.run()` when you want your local script to wait for the
-result. Use `@kinetic.submit()` when the job is long enough that you'd
+result. Use `@kinetic.run()` when the job is long enough that you'd
 rather get a `JobHandle` back, walk away, and reattach later. `submit()` is
 the right call for anything multi-hour, anything you might want to monitor
 from a different machine, or anything you want to fan out and check on in
@@ -129,7 +129,7 @@ publish base images with `kinetic build-base` first.
 a GCS bucket is mounted lazily into the pod's filesystem so reads stream
 on demand instead of downloading up front.
 
-**Handle**: A `JobHandle` returned by `kinetic.submit()` (or
+**Handle**: A `JobHandle` returned by `run_async()` (or
 `kinetic.attach()`). Wraps `status()`, `result()`, `tail()`, and
 `cleanup()` for one job.
 

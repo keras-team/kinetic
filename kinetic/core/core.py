@@ -16,7 +16,6 @@ from kinetic.cli.profiles import resolve_infra
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
-from kinetic.jobs import JobHandle
 
 
 def _validate_volumes(volumes):
@@ -69,9 +68,9 @@ def _require_interactive_terminal():
   if not sys.stdin.isatty():
     raise RuntimeError(
       "debug=True requires an interactive terminal but stdin is not a TTY. "
-      "Either remove debug=True, switch to kinetic.submit(debug=True) and "
-      "call handle.debug_attach() from an interactive session, or set "
-      "KINETIC_NO_TTY_DEBUG=1 to override."
+      "Either remove debug=True, or use func.run_async() (inheriting "
+      "debug=True from the decorator) and call handle.debug_attach() from "
+      "an interactive session, or set KINETIC_NO_TTY_DEBUG=1 to override."
     )
 
 
@@ -234,62 +233,66 @@ def run(
     debug: If True, enable debugpy remote debugging. The pod will start
       a debugpy server and wait for a VS Code debugger to attach before
       executing the function. Port-forwarding is set up automatically.
-  """
-  return _make_decorator(
-    accelerator,
-    container_image,
-    base_image_repo,
-    zone,
-    project,
-    capture_env_vars,
-    cluster,
-    backend,
-    namespace,
-    volumes,
-    spot,
-    sync=True,
-    output_dir=output_dir,
-    debug=debug,
-  )
-
-
-def submit(
-  accelerator: str = "tpu-v5e-1",
-  container_image: str | None = None,
-  base_image_repo: str | None = None,
-  zone: str | None = None,
-  project: str | None = None,
-  capture_env_vars: list[str] | None = None,
-  cluster: str | None = None,
-  backend: str | None = None,
-  namespace: str | None = None,
-  volumes: dict[str, Data] | None = None,
-  spot: bool = False,
-  output_dir: str | None = None,
-  debug: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., JobHandle]]:
-  """Submit function for remote execution, returning a `JobHandle`.
-
-  Same parameters as `run()`.  Blocks through container build and
-  artifact upload, but returns immediately after k8s submission.
-  Use the returned `JobHandle` to observe, collect, or cancel.
 
   Returns:
-    A decorator whose wrapper returns a `JobHandle`.
+    A decorator that returns a wrapper function. When called, the wrapper
+    executes the function remotely and blocks until completion (sync mode).
+    The wrapper also has the following methods:
+      - run_async(*args, **kwargs): Submits the job for remote execution
+        and returns a JobHandle immediately (async mode).
+      - run_async_map(inputs, **kwargs): Fans out across accelerators
+        for a collection of inputs, returning a BatchHandle.
   """
-  return _make_decorator(
-    accelerator,
-    container_image,
-    base_image_repo,
-    zone,
-    project,
-    capture_env_vars,
-    cluster,
-    backend,
-    namespace,
-    volumes,
-    spot,
-    sync=False,
-    output_dir=output_dir,
-    debug=debug,
-  )
+
+  def decorator(func):
+    # Create the sync wrapper
+    sync_decorator = _make_decorator(
+      accelerator,
+      container_image,
+      base_image_repo,
+      zone,
+      project,
+      capture_env_vars,
+      cluster,
+      backend,
+      namespace,
+      volumes,
+      spot,
+      sync=True,
+      output_dir=output_dir,
+      debug=debug,
+    )
+    sync_wrapper = sync_decorator(func)
+
+    # Create the async wrapper
+    async_decorator = _make_decorator(
+      accelerator,
+      container_image,
+      base_image_repo,
+      zone,
+      project,
+      capture_env_vars,
+      cluster,
+      backend,
+      namespace,
+      volumes,
+      spot,
+      sync=False,
+      output_dir=output_dir,
+      debug=debug,
+    )
+    async_wrapper = async_decorator(func)
+
+    # Attach methods to sync_wrapper
+    sync_wrapper.run_async = async_wrapper
+
+    def run_async_map(inputs, **kwargs):
+      from kinetic.collections import map as collections_map
+
+      return collections_map(async_wrapper, inputs, **kwargs)
+
+    sync_wrapper.run_async_map = run_async_map
+
+    return sync_wrapper
+
+  return decorator

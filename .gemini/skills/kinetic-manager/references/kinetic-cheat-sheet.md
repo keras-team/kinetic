@@ -30,15 +30,15 @@ def my_func(arg1):
   return "result"
 ```
 
-### `@kinetic.submit()`
+### `run_async()`
 Asynchronous execution. Returns a `JobHandle` immediately.
 
 ```python
-@kinetic.submit(accelerator="gpu-l4")
+@kinetic.run(accelerator="gpu-l4")
 def my_func(arg1):
   return "result"
 
-job = my_func("val")
+job = my_func.run_async("val")
 print(job.job_id)
 ```
 

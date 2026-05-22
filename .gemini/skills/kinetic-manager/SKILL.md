@@ -19,21 +19,23 @@ If infrastructure is not yet provisioned:
 ### 2. Job Submission
 To run a workload:
 - Use `@kinetic.run()` for synchronous execution (blocks until completion).
-- Use `@kinetic.submit()` for asynchronous execution (returns a `JobHandle`).
+- Call `func.run_async()` on a `@kinetic.run()` decorated function for asynchronous execution (returns a `JobHandle`).
 
 Example:
 ```python
 import kinetic
 
-@kinetic.submit(accelerator="tpu-v5e-1")
+@kinetic.run(accelerator="tpu-v5e-1")
 def train():
   import keras
   # ... training code ...
   return history.history
+
+job = train.run_async()
 ```
 
 ### 3. Job Management
-For jobs submitted with `@kinetic.submit()`:
+For jobs submitted with `run_async()`:
 - **List jobs**: `kinetic jobs list`
 - **Check status**: `kinetic jobs status <job-id>`
 - **Stream logs**: `kinetic jobs logs <job-id> --follow`
@@ -52,6 +54,6 @@ train(kinetic.Data("./my_dataset/"))
 ```
 
 ## Best Practices
-- Prefer `@kinetic.submit()` for long-running jobs to avoid blocking the local session.
+- Prefer `run_async()` for long-running jobs to avoid blocking the local session.
 - Always use `kinetic down` when finished to avoid ongoing cloud costs.
 - Use `kinetic doctor` to diagnose environment or credential issues.

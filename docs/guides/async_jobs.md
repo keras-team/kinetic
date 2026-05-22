@@ -7,10 +7,10 @@ you're iterating on code interactively.
 
 When the job is **long**, when you want to **walk away from your laptop**,
 or when you want to **fan out and check on multiple jobs in parallel**,
-switch to `@kinetic.submit()`. It returns a `JobHandle` immediately and
-leaves the actual work running on the cluster. You can then poll status,
+switch to calling `func.run_async()`. It returns a `JobHandle` immediately
+and leaves the actual work running on the cluster. You can then poll status,
 tail logs, collect results, or reattach to the job from a different machine
-— all backed by metadata Kinetic persisted to GCS at submit time.
+— all backed by metadata Kinetic persisted to GCS at submission time.
 
 This page covers the full submit → observe → collect → cleanup loop, both
 from Python and from the `kinetic jobs` CLI.
@@ -20,12 +20,12 @@ from Python and from the `kinetic jobs` CLI.
 ```python
 import kinetic
 
-@kinetic.submit(accelerator="tpu-v5e-1")
+@kinetic.run(accelerator="tpu-v5e-1")
 def train_model():
     # Long-running training code
     return {"final_loss": 0.123}
 
-job = train_model()
+job = train_model.run_async()
 print(f"Submitted: {job.job_id}")
 
 # ... do something else, possibly close the script entirely ...
@@ -34,9 +34,13 @@ final = job.result(timeout=3600)  # blocks until done
 print(final)
 ```
 
-`@kinetic.submit()` accepts the same arguments as `@kinetic.run()` —
-accelerator, project, zone, cluster, container_image, env vars, data
-volumes, etc. The only difference is what the call returns.
+The `@kinetic.run()` decorator accepts the same arguments regardless of
+whether you execute the function synchronously or asynchronously (accelerator,
+project, zone, cluster, container_image, env vars, data volumes, etc.). The
+only difference is how you invoke the function: calling it directly (e.g.,
+`train_model()`) runs it synchronously and blocks, while calling
+`train_model.run_async()` runs it asynchronously and returns a `JobHandle`
+immediately.
 
 ## Python and CLI side by side
 
@@ -45,7 +49,7 @@ Every operation is available both as a `JobHandle` method and as a
 
 Operation        | Python                            | CLI
 ---------------- | --------------------------------- | ----------------------------------------------
-Submit           | `job = train_model()`             | (use the decorator from a script)
+Submit           | `job = train_model.run_async()`   | (use the decorator from a script)
 Reattach         | `job = kinetic.attach(job_id)`    | (pass `<id>` to any `kinetic jobs` subcommand)
 List             | `kinetic.list_jobs()`             | `kinetic jobs list`
 Check status     | `job.status()`                    | `kinetic jobs status <id>`
@@ -62,7 +66,7 @@ A submitted job moves through five states (defined as `JobStatus` in
 
 ```text
                   ┌──────────┐
-   submit() ────▶ │ PENDING  │ ── pod is waiting on a node
+ run_async() ───▶ │ PENDING  │ ── pod is waiting on a node
                   └────┬─────┘
                        │ pod scheduled
                        ▼
@@ -105,7 +109,7 @@ What each state means and what to do:
 
 The full submit-to-cleanup flow:
 
-1. `submit()` packages your code, builds (or reuses) a container image,
+1. `run_async()` packages your code, builds (or reuses) a container image,
    uploads artifacts to GCS, creates a k8s Job, and returns a `JobHandle`.
    Status is `PENDING`.
 2. The cluster autoscaler provisions a node if needed; the pod is
@@ -181,7 +185,7 @@ hours.
 - **Persist the `job_id`.** Record it via stdout, a log file, or your
   workflow's tracking system. With the ID, you can reattach from any
   machine that has Kinetic installed and access to the same GCP project.
-- **Do not rely on the local Python process.** Once `submit()` returns,
+- **Do not rely on the local Python process.** Once `run_async()` returns,
   the local script is no longer involved in the job's execution.
   Interrupting it (for example, with `Ctrl-C`) does not affect the
   remote job.

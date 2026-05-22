@@ -109,9 +109,9 @@ python fashion_mnist.py
 - Stay in **bundled mode** (the default — you don't need to pass
   `container_image=`). It's the only mode that works without
   publishing your own base image.
-- Use **`@kinetic.run()`** while you're iterating; switch to
-  **`@kinetic.submit()`** once your jobs run for more than a few
-  minutes and you'd rather not block your local shell.
+- Use direct calls to **`@kinetic.run()`** decorated functions while you're
+  iterating; switch to calling **`run_async()`** once your jobs run for
+  more than a few minutes and you'd rather not block your local shell.
 - Write any artifacts you want to keep under `KINETIC_OUTPUT_DIR`,
   not under `/tmp`.
   :::
@@ -125,7 +125,7 @@ After your first run works, the most useful follow-ups are:
   fine-tuning. The fastest way to see real patterns end to end.
 - [Execution Modes](guides/execution_modes.md): bundled vs prebuilt
   vs custom image, and when to switch.
-- [Detached Jobs](guides/async_jobs.md): `@kinetic.submit()`,
+- [Detached Jobs](guides/async_jobs.md): `run_async()`,
   reattach, and the job lifecycle for long-running work.
 - [Data](guides/data.md) and
   [Checkpointing](guides/checkpointing.md): `kinetic.Data(...)` for

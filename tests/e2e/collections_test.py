@@ -27,17 +27,17 @@ _JOB_TIMEOUT = 600
 # ------------------------------------------------------------------
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def _double(x):
   return x * 2
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def _add(a, b):
   return a + b
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def _train(lr, epochs):
   """Simulate training — returns a dict summary."""
   loss = 1.0
@@ -46,14 +46,14 @@ def _train(lr, epochs):
   return {"lr": lr, "epochs": epochs, "loss": round(loss, 6)}
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def _fail_on_negative(x):
   if x < 0:
     raise ValueError(f"negative input: {x}")
   return x
 
 
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def _slow(seconds):
   import time as _time
 
@@ -72,7 +72,7 @@ class TestMapBasic(absltest.TestCase):
 
   def test_map_scalar_inputs(self):
     """map() over scalars with default auto input mode."""
-    batch = kinetic.map(_double, [1, 2, 3])
+    batch = _double.run_async_map([1, 2, 3])
     results = batch.results(timeout=_JOB_TIMEOUT)
 
     self.assertEqual(results, [2, 4, 6])
@@ -84,7 +84,7 @@ class TestMapBasic(absltest.TestCase):
       {"lr": 0.1, "epochs": 5},
       {"lr": 0.01, "epochs": 10},
     ]
-    batch = kinetic.map(_train, configs)
+    batch = _train.run_async_map(configs)
     results = batch.results(timeout=_JOB_TIMEOUT)
 
     self.assertEqual(len(results), 2)
@@ -96,15 +96,14 @@ class TestMapBasic(absltest.TestCase):
 
   def test_map_tuple_inputs_auto_args(self):
     """Tuples are unpacked as *args in auto mode."""
-    batch = kinetic.map(_add, [(1, 2), (10, 20)])
+    batch = _add.run_async_map([(1, 2), (10, 20)])
     results = batch.results(timeout=_JOB_TIMEOUT)
 
     self.assertEqual(results, [3, 30])
 
   def test_map_name_and_tags(self):
     """name and tags are stored on the handle."""
-    batch = kinetic.map(
-      _double,
+    batch = _double.run_async_map(
       [1],
       name="e2e-test-batch",
       tags={"env": "test"},
@@ -126,7 +125,7 @@ class TestMapMonitoring(absltest.TestCase):
 
   def test_status_counts_and_wait(self):
     """status_counts() reflects progress; wait() blocks to completion."""
-    batch = kinetic.map(_double, [1, 2, 3])
+    batch = _double.run_async_map([1, 2, 3])
 
     # Wait for all jobs to finish.
     batch.wait(timeout=_JOB_TIMEOUT)
@@ -139,7 +138,7 @@ class TestMapMonitoring(absltest.TestCase):
 
   def test_as_completed_yields_all_jobs(self):
     """as_completed() should yield one handle per input."""
-    batch = kinetic.map(_double, [10, 20, 30])
+    batch = _double.run_async_map([10, 20, 30])
 
     seen = []
     for job in batch.as_completed(timeout=_JOB_TIMEOUT):
@@ -161,7 +160,7 @@ class TestMapUnordered(absltest.TestCase):
 
   def test_results_unordered(self):
     """ordered=False returns results as jobs finish."""
-    batch = kinetic.map(_double, [5, 10])
+    batch = _double.run_async_map([5, 10])
     results = batch.results(timeout=_JOB_TIMEOUT, ordered=False)
 
     self.assertEqual(sorted(results), [10, 20])
@@ -178,7 +177,7 @@ class TestMapConcurrency(absltest.TestCase):
 
   def test_max_concurrent(self):
     """All jobs should complete even with max_concurrent=1."""
-    batch = kinetic.map(_double, [1, 2, 3], max_concurrent=1)
+    batch = _double.run_async_map([1, 2, 3], max_concurrent=1)
     results = batch.results(timeout=_JOB_TIMEOUT)
 
     self.assertEqual(results, [2, 4, 6])
@@ -195,7 +194,7 @@ class TestMapErrorHandling(absltest.TestCase):
 
   def test_batch_error_raised_on_failure(self):
     """A failing job should cause results() to raise BatchError."""
-    batch = kinetic.map(_fail_on_negative, [1, -1, 2])
+    batch = _fail_on_negative.run_async_map([1, -1, 2])
 
     with self.assertRaises(kinetic.BatchError) as ctx:
       batch.results(timeout=_JOB_TIMEOUT)
@@ -208,7 +207,7 @@ class TestMapErrorHandling(absltest.TestCase):
 
   def test_return_exceptions(self):
     """return_exceptions=True should place exceptions in the list."""
-    batch = kinetic.map(_fail_on_negative, [1, -1, 2])
+    batch = _fail_on_negative.run_async_map([1, -1, 2])
     results = batch.results(timeout=_JOB_TIMEOUT, return_exceptions=True)
 
     self.assertEqual(results[0], 1)
@@ -218,7 +217,7 @@ class TestMapErrorHandling(absltest.TestCase):
 
   def test_failures_method(self):
     """failures() should return handles for failed jobs only."""
-    batch = kinetic.map(_fail_on_negative, [1, -1])
+    batch = _fail_on_negative.run_async_map([1, -1])
     # Collect with return_exceptions to avoid raising.
     batch.results(timeout=_JOB_TIMEOUT, return_exceptions=True, cleanup=False)
 
@@ -241,7 +240,7 @@ class TestAttachBatch(absltest.TestCase):
 
   def test_attach_batch_and_collect(self):
     """attach_batch() should reconstruct a usable handle."""
-    batch = kinetic.map(_double, [7, 8])
+    batch = _double.run_async_map([7, 8])
     batch.results(timeout=_JOB_TIMEOUT, cleanup=False)
 
     # Simulate reattachment from a different session.
@@ -270,7 +269,7 @@ class TestMapCleanup(absltest.TestCase):
 
   def test_results_cleanup_removes_child_resources(self):
     """results(cleanup=True) should clean up each child."""
-    batch = kinetic.map(_double, [1])
+    batch = _double.run_async_map([1])
     batch.results(timeout=_JOB_TIMEOUT, cleanup=True)
 
     # The child's K8s resource should be gone.
@@ -278,7 +277,7 @@ class TestMapCleanup(absltest.TestCase):
 
   def test_batch_cleanup_removes_everything(self):
     """BatchHandle.cleanup() should remove children and manifest."""
-    batch = kinetic.map(_double, [1])
+    batch = _double.run_async_map([1])
     batch.results(timeout=_JOB_TIMEOUT, cleanup=False)
 
     batch.cleanup(k8s=True, gcs=True)
@@ -296,7 +295,7 @@ class TestMapCancel(absltest.TestCase):
 
   def test_cancel_stops_running_jobs(self):
     """cancel() should delete K8s resources for non-terminal jobs."""
-    batch = kinetic.map(_slow, [120, 120])
+    batch = _slow.run_async_map([120, 120])
 
     # Give jobs a moment to be submitted and start.
     time.sleep(15)
