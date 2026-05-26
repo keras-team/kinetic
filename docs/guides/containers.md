@@ -2,7 +2,7 @@
 
 This page is the deep reference for the container image system: the
 three modes side by side, the prebuilt-base workflow, the custom-image
-contract, and the `kinetic build-base` command.
+contract, and the `kinetic build-image` command.
 
 For a higher-level overview and the recommendation matrix on which
 mode to pick, start with [Execution Modes](../guides/execution_modes.md).
@@ -84,12 +84,12 @@ def train():
 
 ### Custom prebuilt images
 
-By default, Kinetic pulls official base images from Docker Hub (`kinetic/base-{category}:{version}`). To use your own prebuilt images — for example, with additional system libraries or private packages — build and push them with the `kinetic build-base` command, then point Kinetic at your repository.
+By default, Kinetic pulls official base images from Docker Hub (`kinetic/base-{category}:{version}`). To use your own prebuilt images — for example, with additional system libraries or private packages — build and push them with the `kinetic build-image` command, then point Kinetic at your repository.
 
 Build and push images:
 
 ```bash
-kinetic build-base --repo us-docker.pkg.dev/my-project/kinetic-base
+kinetic build-image --repo us-docker.pkg.dev/my-project/kinetic-base
 ```
 
 Then set the repository so Kinetic uses your images:
@@ -106,7 +106,7 @@ def train():
     ...
 ```
 
-See [`kinetic build-base`](#kinetic-build-base) for the full command reference.
+See [`kinetic build-image`](#kinetic-build-image) for the full command reference.
 
 ## Custom Image Mode
 
@@ -135,28 +135,28 @@ Your custom image must:
 - **Corporate compliance**: Base images vetted by your security or platform team.
 - **Full control**: When you want to manage the entire image lifecycle yourself.
 
-## `kinetic build-base`
+## `kinetic build-image`
 
 Build and push prebuilt base images to a Docker Hub or Artifact Registry repository. One image is built per accelerator category (`cpu`, `gpu`, `tpu`) using Cloud Build.
 
 ```bash
 # Interactive mode — guides you through registry selection and setup
-kinetic build-base
+kinetic build-image
 
 # Non-interactive with Artifact Registry
-kinetic build-base \
+kinetic build-image \
   --repo us-docker.pkg.dev/my-project/kinetic-base \
   --project my-project \
   --yes
 
 # Build only GPU and TPU images
-kinetic build-base --repo myuser/kinetic --category gpu --category tpu
+kinetic build-image --repo myuser/kinetic --category gpu --category tpu
 
 # Use a custom Dockerfile
-kinetic build-base --repo myuser/kinetic --dockerfile ./Dockerfile.custom
+kinetic build-image --repo myuser/kinetic --dockerfile ./Dockerfile.custom
 
 # Specific version tag (default: kinetic package version)
-kinetic build-base --repo myuser/kinetic --tag v2.0.0
+kinetic build-image --repo myuser/kinetic --tag v2.0.0
 ```
 
 ### Options

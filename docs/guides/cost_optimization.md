@@ -14,7 +14,7 @@ This guide covers the primary configurations and workflows for optimizing your c
   dependencies are stable, so you only pay for the first build per
   dependency set. Prebuilt mode skips Cloud Build entirely, but
   requires you to publish your own base image first with
-  `kinetic build-base`.
+  `kinetic build-image`.
 - Use `--spot` only on fault-tolerant single-host workloads with
   frequent checkpoints — spot is risky on multi-host slices because
   any host preemption fails the whole slice.

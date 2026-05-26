@@ -1,4 +1,4 @@
-"""Tests for kinetic.cli.commands.build_base — build prebuilt base images."""
+"""Tests for kinetic.cli.commands.build_image - build prebuilt base images."""
 
 from unittest import mock
 from unittest.mock import MagicMock
@@ -7,15 +7,16 @@ from absl.testing import absltest
 from click.testing import CliRunner
 from google.api_core import exceptions as google_exceptions
 
-from kinetic.cli.commands.build_base import (
+from kinetic.cli.commands.build_image import (
   _ensure_dockerhub_secrets,
   _is_ar_repo,
   _parse_ar_repo,
   _secret_exists,
-  build_base,
+  build_image,
 )
+from kinetic.cli.main import cli
 
-_MODULE = "kinetic.cli.commands.build_base"
+_MODULE = "kinetic.cli.commands.build_image"
 
 
 class TestSecretExists(absltest.TestCase):
@@ -106,10 +107,14 @@ class TestEnsureDockerHubSecrets(absltest.TestCase):
     self.assertTrue(token_call.kwargs["hide_input"])
 
 
-class TestBuildBaseCommand(absltest.TestCase):
+class TestBuildImageCommand(absltest.TestCase):
   def setUp(self):
     super().setUp()
     self.runner = CliRunner()
+
+  def test_public_cli_uses_build_image_name(self):
+    self.assertIn("build-image", cli.commands)
+    self.assertNotIn("build-base", cli.commands)
 
   def test_build_failure_reported_gracefully(self):
     with (
@@ -120,7 +125,7 @@ class TestBuildBaseCommand(absltest.TestCase):
       ),
     ):
       result = self.runner.invoke(
-        build_base,
+        build_image,
         ["--project", "proj", "--repo", "r", "--category", "gpu", "-y"],
       )
 
@@ -133,7 +138,7 @@ class TestBuildBaseCommand(absltest.TestCase):
     """When --repo is given (non-interactive), --project must be set."""
     with mock.patch.dict("os.environ", {}, clear=True):
       result = self.runner.invoke(
-        build_base,
+        build_image,
         ["--repo", "r", "-y"],
       )
     self.assertNotEqual(result.exit_code, 0)
@@ -151,7 +156,7 @@ class TestBuildBaseCommand(absltest.TestCase):
       ) as mock_build,
     ):
       result = self.runner.invoke(
-        build_base,
+        build_image,
         ["-y"],
         input="0.0.1\n",
       )
@@ -187,7 +192,7 @@ class TestParseArRepo(absltest.TestCase):
     self.assertEqual(location, "europe-west1")
 
 
-class TestBuildBaseArtifactRegistry(absltest.TestCase):
+class TestBuildImageArtifactRegistry(absltest.TestCase):
   def setUp(self):
     super().setUp()
     self.runner = CliRunner()
@@ -201,7 +206,7 @@ class TestBuildBaseArtifactRegistry(absltest.TestCase):
       ),
     ):
       result = self.runner.invoke(
-        build_base,
+        build_image,
         [
           "--project",
           "proj",
@@ -225,7 +230,7 @@ class TestBuildBaseArtifactRegistry(absltest.TestCase):
       ),
     ):
       result = self.runner.invoke(
-        build_base,
+        build_image,
         [
           "--project",
           "proj",
