@@ -16,6 +16,8 @@ from kinetic.cli.profiles import resolve_infra
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
+from kinetic.jobs import JobHandle
+from kinetic.collections import BatchHandle
 
 
 def _validate_volumes(volumes):
@@ -68,9 +70,9 @@ def _require_interactive_terminal():
   if not sys.stdin.isatty():
     raise RuntimeError(
       "debug=True requires an interactive terminal but stdin is not a TTY. "
-      "Either remove debug=True, or use func.run_async() (inheriting "
-      "debug=True from the decorator) and call handle.debug_attach() from "
-      "an interactive session, or set KINETIC_NO_TTY_DEBUG=1 to override."
+      "Either remove debug=True, or call func.run_async() and attach with "
+      "handle.debug_attach() from an interactive session, or set "
+      "KINETIC_NO_TTY_DEBUG=1 to override."
     )
 
 
@@ -111,17 +113,9 @@ def _make_decorator(
 
   Args:
     sync: If True, block on result (`run()` semantics).
-      If False, return a `JobHandle` immediately (`submit()` semantics).
+      If False, return a `JobHandle` immediately (`run_async()` semantics).
     debug: If True, enable debugpy remote debugging.
   """
-  _validate_volumes(volumes)
-
-  if debug and spot:
-    warnings.warn(
-      "debug=True with spot=True is not recommended — your debug "
-      "session may be interrupted by preemption.",
-      stacklevel=3,
-    )
 
   def decorator(func):
     @functools.wraps(func)
@@ -181,6 +175,57 @@ def _make_decorator(
     return wrapper
 
   return decorator
+
+
+class RemoteCallable:
+  """Wrapper class returned by @kinetic.run to handle sync and async calls.
+
+  Supports instance methods via the descriptor protocol (__get__).
+  """
+
+  def __init__(self, func, sync_wrapper, async_wrapper):
+    self._func = func
+    self._sync_wrapper = sync_wrapper
+    self._async_wrapper = async_wrapper
+    functools.update_wrapper(self, func)
+
+  def __call__(self, *args, **kwargs):
+    """Synchronous execution (blocks)."""
+    return self._sync_wrapper(*args, **kwargs)
+
+  def run_async(self, *args, **kwargs) -> JobHandle:
+    """Asynchronous execution (returns JobHandle)."""
+    return self._async_wrapper(*args, **kwargs)
+
+  def run_async_map(self, inputs, **kwargs) -> BatchHandle:
+    """Fan out across accelerators."""
+    from kinetic.collections import map as collections_map
+    return collections_map(self._async_wrapper, inputs, **kwargs)
+
+  def __get__(self, instance, owner):
+    if instance is None:
+      return self
+    return _BoundRemoteCallable(self, instance)
+
+
+class _BoundRemoteCallable:
+  """Proxy for RemoteCallable bound to an instance."""
+
+  def __init__(self, callable_, instance):
+    self._c = callable_
+    self._instance = instance
+
+  def __call__(self, *args, **kwargs):
+    return self._c(self._instance, *args, **kwargs)
+
+  def run_async(self, *args, **kwargs) -> JobHandle:
+    return self._c.run_async(self._instance, *args, **kwargs)
+
+  def run_async_map(self, inputs, **kwargs) -> BatchHandle:
+    def bound_async_wrapper(*a, **kw):
+      return self._c._async_wrapper(self._instance, *a, **kw)
+    from kinetic.collections import map as collections_map
+    return collections_map(bound_async_wrapper, inputs, **kwargs)
 
 
 def run(
@@ -243,6 +288,14 @@ def run(
       - run_async_map(inputs, **kwargs): Fans out across accelerators
         for a collection of inputs, returning a BatchHandle.
   """
+  _validate_volumes(volumes)
+
+  if debug and spot:
+    warnings.warn(
+      "debug=True with spot=True is not recommended — your debug "
+      "session may be interrupted by preemption.",
+      stacklevel=3,
+    )
 
   def decorator(func):
     # Create the sync wrapper
@@ -283,16 +336,6 @@ def run(
     )
     async_wrapper = async_decorator(func)
 
-    # Attach methods to sync_wrapper
-    sync_wrapper.run_async = async_wrapper
-
-    def run_async_map(inputs, **kwargs):
-      from kinetic.collections import map as collections_map
-
-      return collections_map(async_wrapper, inputs, **kwargs)
-
-    sync_wrapper.run_async_map = run_async_map
-
-    return sync_wrapper
+    return RemoteCallable(func, sync_wrapper, async_wrapper)
 
   return decorator

@@ -454,5 +454,52 @@ class TestSubmitOnBackend(absltest.TestCase):
       mock_handle.result.assert_called_once_with(stream_logs=True)
 
 
+class TestRemoteCallableDescriptor(absltest.TestCase):
+  def test_instance_method_sync(self):
+    mock_handle = MagicMock()
+    mock_handle.result.return_value = 42
+    with (
+      mock.patch.dict(
+        os.environ, _isolate_profile_env({"KINETIC_PROJECT": "proj"})
+      ),
+      mock.patch("kinetic.core.core.submit_remote", return_value=mock_handle),
+      mock.patch(
+        "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
+      ) as mock_from_params,
+    ):
+      class Trainer:
+        @run(accelerator="cpu")
+        def train(self, lr):
+          return lr
+      trainer = Trainer()
+      trainer.train(0.01)
+      args = mock_from_params.call_args[0][1]
+      self.assertEqual(len(args), 2)
+      self.assertEqual(args[0], trainer)
+      self.assertEqual(args[1], 0.01)
+
+  def test_instance_method_async(self):
+    mock_handle = MagicMock()
+    with (
+      mock.patch.dict(
+        os.environ, _isolate_profile_env({"KINETIC_PROJECT": "proj"})
+      ),
+      mock.patch("kinetic.core.core.submit_remote", return_value=mock_handle),
+      mock.patch(
+        "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
+      ) as mock_from_params,
+    ):
+      class Trainer:
+        @run(accelerator="cpu")
+        def train(self, lr):
+          return lr
+      trainer = Trainer()
+      trainer.train.run_async(0.01)
+      args = mock_from_params.call_args[0][1]
+      self.assertEqual(len(args), 2)
+      self.assertEqual(args[0], trainer)
+      self.assertEqual(args[1], 0.01)
+
+
 if __name__ == "__main__":
   absltest.main()

@@ -1,6 +1,6 @@
 # FAQ
 
-## When should I use `run()` vs `submit()`?
+## When should I use `run()` vs `run_async()`?
 
 Use `@kinetic.run()` when you want your local script to wait for the
 result. Use `run_async()` when the job is long enough that you'd
@@ -53,10 +53,10 @@ checkpoints belong on the output dir. See [Checkpointing](checkpointing.md).
 ## How do I reattach to a job?
 
 Use `kinetic.attach(job_id)`. It reconstructs a `JobHandle` from the
-metadata Kinetic persisted to GCS at submit time, so you can call
+metadata Kinetic persisted to GCS at submission time, so you can call
 `.status()`, `.result()`, `.tail()`, or `.cleanup()` from any machine that
-has Kinetic and your GCP credentials. The `job_id` is what `submit()`
-returned originally. If you have lost it, `kinetic.list_jobs()` enumerates
+has Kinetic and your GCP credentials. The `job_id` is available on the `JobHandle`
+returned by `run_async()`. If you have lost it, `kinetic.list_jobs()` enumerates
 jobs on the cluster. See [Managing Async Jobs](async_jobs.md).
 
 ## What gets cleaned up automatically?
