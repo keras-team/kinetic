@@ -13,11 +13,11 @@ from kinetic.backend.execution import (
   submit_remote,
 )
 from kinetic.cli.profiles import resolve_infra
+from kinetic.collections import BatchHandle
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
 from kinetic.jobs import JobHandle
-from kinetic.collections import BatchHandle
 
 
 def _validate_volumes(volumes):
@@ -200,6 +200,7 @@ class RemoteCallable:
   def run_async_map(self, inputs, **kwargs) -> BatchHandle:
     """Fan out across accelerators."""
     from kinetic.collections import map as collections_map
+
     return collections_map(self._async_wrapper, inputs, **kwargs)
 
   def __get__(self, instance, owner):
@@ -224,7 +225,9 @@ class _BoundRemoteCallable:
   def run_async_map(self, inputs, **kwargs) -> BatchHandle:
     def bound_async_wrapper(*a, **kw):
       return self._c._async_wrapper(self._instance, *a, **kw)
+
     from kinetic.collections import map as collections_map
+
     return collections_map(bound_async_wrapper, inputs, **kwargs)
 
 

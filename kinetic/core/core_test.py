@@ -467,10 +467,12 @@ class TestRemoteCallableDescriptor(absltest.TestCase):
         "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
       ) as mock_from_params,
     ):
+
       class Trainer:
         @run(accelerator="cpu")
         def train(self, lr):
           return lr
+
       trainer = Trainer()
       trainer.train(0.01)
       args = mock_from_params.call_args[0][1]
@@ -489,10 +491,12 @@ class TestRemoteCallableDescriptor(absltest.TestCase):
         "kinetic.core.core.JobContext.from_params", return_value=MagicMock()
       ) as mock_from_params,
     ):
+
       class Trainer:
         @run(accelerator="cpu")
         def train(self, lr):
           return lr
+
       trainer = Trainer()
       trainer.train.run_async(0.01)
       args = mock_from_params.call_args[0][1]
