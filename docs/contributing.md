@@ -59,7 +59,7 @@ Before submitting a pull request, please ensure your changes pass linting and un
   - A GCP project with a provisioned GKE cluster.
   - Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
   - GKE credentials configured: `gcloud container clusters get-credentials <KINETIC_CLUSTER> --zone <KINETIC_ZONE> --project <KINETIC_PROJECT>`
-  - Test dependencies installed: `uv pip install -e ".[test,cli]"`
+  - Test dependencies installed: `uv pip install -e ".[test]"`
 
   **Required environment variables:**
 

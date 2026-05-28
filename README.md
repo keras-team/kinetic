@@ -38,14 +38,11 @@ Comprehensive documentation is available at: https://kinetic.readthedocs.io
 ## Install
 
 ```bash
-uv pip install "keras-kinetic[cli]"
+uv pip install keras-kinetic
 ```
 
-The base `keras-kinetic` package installs the `@kinetic.run()`
-decorator. The `[cli]` extra adds the dependencies the `kinetic` CLI
-needs to provision and manage infrastructure. Drop the `[cli]` extra
-only if you just need to submit jobs against an already-provisioned
-cluster.
+This installs the `@kinetic.run()` decorator and the `kinetic` CLI,
+which provisions and manages infrastructure.
 
 ## One-time setup
 

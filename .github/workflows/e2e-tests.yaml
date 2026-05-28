@@ -58,7 +58,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[test,cli]"
+        run: uv pip install --system -e ".[test]"
 
       - name: Run E2E tests
         env:
