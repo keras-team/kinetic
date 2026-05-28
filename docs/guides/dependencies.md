@@ -141,7 +141,7 @@ up in build logs and cached artifacts.
   shell that isn't reflected in those files won't carry over.
 - **Massive dependency sets** — every `requirements.txt` change forces
   a bundled rebuild. If your deps churn daily, consider prebuilt mode
-  (after publishing a base image with `kinetic build-base`).
+  (after publishing a base image with `kinetic build-image`).
 - **Editable installs (`pip install -e`)** — these don't show up in
   `requirements.txt` and won't carry over. Either ship the source via
   your working directory (already auto-packaged) or publish the package

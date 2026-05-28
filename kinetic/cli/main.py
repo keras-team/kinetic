@@ -3,7 +3,7 @@
 import click
 
 from kinetic.cli.commands.accelerators import accelerators
-from kinetic.cli.commands.build_base import build_base
+from kinetic.cli.commands.build_image import build_image
 from kinetic.cli.commands.config import config
 from kinetic.cli.commands.down import down
 from kinetic.cli.commands.init import init
@@ -98,5 +98,5 @@ cli.add_command(status)
 cli.add_command(config)
 cli.add_command(pool)
 cli.add_command(jobs)
-cli.add_command(build_base)
+cli.add_command(build_image)
 cli.add_command(profile)
