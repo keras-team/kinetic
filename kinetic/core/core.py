@@ -13,6 +13,7 @@ from kinetic.backend.execution import (
   submit_remote,
 )
 from kinetic.cli.profiles import resolve_infra
+from kinetic.collections import BatchHandle
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
@@ -69,8 +70,8 @@ def _require_interactive_terminal():
   if not sys.stdin.isatty():
     raise RuntimeError(
       "debug=True requires an interactive terminal but stdin is not a TTY. "
-      "Either remove debug=True, switch to kinetic.submit(debug=True) and "
-      "call handle.debug_attach() from an interactive session, or set "
+      "Either remove debug=True, or call func.run_async() and attach with "
+      "handle.debug_attach() from an interactive session, or set "
       "KINETIC_NO_TTY_DEBUG=1 to override."
     )
 
@@ -112,17 +113,9 @@ def _make_decorator(
 
   Args:
     sync: If True, block on result (`run()` semantics).
-      If False, return a `JobHandle` immediately (`submit()` semantics).
+      If False, return a `JobHandle` immediately (`run_async()` semantics).
     debug: If True, enable debugpy remote debugging.
   """
-  _validate_volumes(volumes)
-
-  if debug and spot:
-    warnings.warn(
-      "debug=True with spot=True is not recommended — your debug "
-      "session may be interrupted by preemption.",
-      stacklevel=3,
-    )
 
   def decorator(func):
     @functools.wraps(func)
@@ -184,6 +177,60 @@ def _make_decorator(
   return decorator
 
 
+class RemoteCallable:
+  """Wrapper class returned by @kinetic.run to handle sync and async calls.
+
+  Supports instance methods via the descriptor protocol (__get__).
+  """
+
+  def __init__(self, func, sync_wrapper, async_wrapper):
+    self._func = func
+    self._sync_wrapper = sync_wrapper
+    self._async_wrapper = async_wrapper
+    functools.update_wrapper(self, func)
+
+  def __call__(self, *args, **kwargs):
+    """Synchronous execution (blocks)."""
+    return self._sync_wrapper(*args, **kwargs)
+
+  def run_async(self, *args, **kwargs) -> JobHandle:
+    """Asynchronous execution (returns JobHandle)."""
+    return self._async_wrapper(*args, **kwargs)
+
+  def run_async_map(self, inputs, **kwargs) -> BatchHandle:
+    """Fan out across accelerators."""
+    from kinetic.collections import map as collections_map
+
+    return collections_map(self._async_wrapper, inputs, **kwargs)
+
+  def __get__(self, instance, owner):
+    if instance is None:
+      return self
+    return _BoundRemoteCallable(self, instance)
+
+
+class _BoundRemoteCallable:
+  """Proxy for RemoteCallable bound to an instance."""
+
+  def __init__(self, callable_, instance):
+    self._c = callable_
+    self._instance = instance
+
+  def __call__(self, *args, **kwargs):
+    return self._c(self._instance, *args, **kwargs)
+
+  def run_async(self, *args, **kwargs) -> JobHandle:
+    return self._c.run_async(self._instance, *args, **kwargs)
+
+  def run_async_map(self, inputs, **kwargs) -> BatchHandle:
+    def bound_async_wrapper(*a, **kw):
+      return self._c._async_wrapper(self._instance, *a, **kw)
+
+    from kinetic.collections import map as collections_map
+
+    return collections_map(bound_async_wrapper, inputs, **kwargs)
+
+
 def run(
   accelerator: str = "tpu-v5e-1",
   container_image: str | None = None,
@@ -234,62 +281,64 @@ def run(
     debug: If True, enable debugpy remote debugging. The pod will start
       a debugpy server and wait for a VS Code debugger to attach before
       executing the function. Port-forwarding is set up automatically.
-  """
-  return _make_decorator(
-    accelerator,
-    container_image,
-    base_image_repo,
-    zone,
-    project,
-    capture_env_vars,
-    cluster,
-    backend,
-    namespace,
-    volumes,
-    spot,
-    sync=True,
-    output_dir=output_dir,
-    debug=debug,
-  )
-
-
-def submit(
-  accelerator: str = "tpu-v5e-1",
-  container_image: str | None = None,
-  base_image_repo: str | None = None,
-  zone: str | None = None,
-  project: str | None = None,
-  capture_env_vars: list[str] | None = None,
-  cluster: str | None = None,
-  backend: str | None = None,
-  namespace: str | None = None,
-  volumes: dict[str, Data] | None = None,
-  spot: bool = False,
-  output_dir: str | None = None,
-  debug: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., JobHandle]]:
-  """Submit function for remote execution, returning a `JobHandle`.
-
-  Same parameters as `run()`.  Blocks through container build and
-  artifact upload, but returns immediately after k8s submission.
-  Use the returned `JobHandle` to observe, collect, or cancel.
 
   Returns:
-    A decorator whose wrapper returns a `JobHandle`.
+    A decorator that returns a wrapper function. When called, the wrapper
+    executes the function remotely and blocks until completion (sync mode).
+    The wrapper also has the following methods:
+      - run_async(*args, **kwargs): Submits the job for remote execution
+        and returns a JobHandle immediately (async mode).
+      - run_async_map(inputs, **kwargs): Fans out across accelerators
+        for a collection of inputs, returning a BatchHandle.
   """
-  return _make_decorator(
-    accelerator,
-    container_image,
-    base_image_repo,
-    zone,
-    project,
-    capture_env_vars,
-    cluster,
-    backend,
-    namespace,
-    volumes,
-    spot,
-    sync=False,
-    output_dir=output_dir,
-    debug=debug,
-  )
+  _validate_volumes(volumes)
+
+  if debug and spot:
+    warnings.warn(
+      "debug=True with spot=True is not recommended — your debug "
+      "session may be interrupted by preemption.",
+      stacklevel=3,
+    )
+
+  def decorator(func):
+    # Create the sync wrapper
+    sync_decorator = _make_decorator(
+      accelerator,
+      container_image,
+      base_image_repo,
+      zone,
+      project,
+      capture_env_vars,
+      cluster,
+      backend,
+      namespace,
+      volumes,
+      spot,
+      sync=True,
+      output_dir=output_dir,
+      debug=debug,
+    )
+    sync_wrapper = sync_decorator(func)
+
+    # Create the async wrapper
+    async_decorator = _make_decorator(
+      accelerator,
+      container_image,
+      base_image_repo,
+      zone,
+      project,
+      capture_env_vars,
+      cluster,
+      backend,
+      namespace,
+      volumes,
+      spot,
+      sync=False,
+      output_dir=output_dir,
+      debug=debug,
+    )
+    async_wrapper = async_decorator(func)
+
+    return RemoteCallable(func, sync_wrapper, async_wrapper)
+
+  return decorator

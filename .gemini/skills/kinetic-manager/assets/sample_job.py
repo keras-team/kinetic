@@ -8,7 +8,7 @@ import kinetic
 os.environ["KERAS_BACKEND"] = "jax"
 
 
-@kinetic.submit(accelerator="tpu-v5e-1")
+@kinetic.run(accelerator="tpu-v5e-1")
 def train_model(data_dir):
   import keras
   import numpy as np
@@ -46,8 +46,8 @@ if __name__ == "__main__":
     with open(os.path.join(local_data_path, "info.txt"), "w") as f:
       f.write("Sample dataset info")
 
-  # Execute remotely via submit.
-  handle = train_model(kinetic.Data(local_data_path))
+  # Execute remotely via run_async.
+  handle = train_model.run_async(kinetic.Data(local_data_path))
   absl.logging.info(f"Submitted job with ID: {handle.job_id}")
 
   # Showcase async methods.

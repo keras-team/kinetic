@@ -1,9 +1,9 @@
 # FAQ
 
-## When should I use `run()` vs `submit()`?
+## When should I use `run()` vs `run_async()`?
 
 Use `@kinetic.run()` when you want your local script to wait for the
-result. Use `@kinetic.submit()` when the job is long enough that you'd
+result. Use `run_async()` when the job is long enough that you'd
 rather get a `JobHandle` back, walk away, and reattach later. `submit()` is
 the right call for anything multi-hour, anything you might want to monitor
 from a different machine, or anything you want to fan out and check on in
@@ -53,10 +53,10 @@ checkpoints belong on the output dir. See [Checkpointing](checkpointing.md).
 ## How do I reattach to a job?
 
 Use `kinetic.attach(job_id)`. It reconstructs a `JobHandle` from the
-metadata Kinetic persisted to GCS at submit time, so you can call
+metadata Kinetic persisted to GCS at submission time, so you can call
 `.status()`, `.result()`, `.tail()`, or `.cleanup()` from any machine that
-has Kinetic and your GCP credentials. The `job_id` is what `submit()`
-returned originally. If you have lost it, `kinetic.list_jobs()` enumerates
+has Kinetic and your GCP credentials. The `job_id` is available on the `JobHandle`
+returned by `run_async()`. If you have lost it, `kinetic.list_jobs()` enumerates
 jobs on the cluster. See [Managing Async Jobs](async_jobs.md).
 
 ## What gets cleaned up automatically?
@@ -129,7 +129,7 @@ publish base images with `kinetic build-base` first.
 a GCS bucket is mounted lazily into the pod's filesystem so reads stream
 on demand instead of downloading up front.
 
-**Handle**: A `JobHandle` returned by `kinetic.submit()` (or
+**Handle**: A `JobHandle` returned by `run_async()` (or
 `kinetic.attach()`). Wraps `status()`, `result()`, `tail()`, and
 `cleanup()` for one job.
 

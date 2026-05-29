@@ -73,7 +73,7 @@ class BatchError(Exception):
 class BatchHandle:
   """Handle for a collection of submitted jobs.
 
-  Created by `kinetic.map()` or reconstructed by
+  Created by `run_async_map()` or reconstructed by
   `kinetic.attach_batch()`.  Provides collection-level observation,
   result gathering, and cleanup.
   """
@@ -734,12 +734,12 @@ def map(
 ) -> BatchHandle:
   """Launch many independent jobs over a set of inputs.
 
-  `submit_fn` must be a function decorated with
-  `@kinetic.submit(...)`.  Each input is dispatched according to
+  `submit_fn` must be a function obtained from `func.run_async` where
+  `func` is decorated with `@kinetic.run(...)`. Each input is dispatched according to
   `input_mode` and submitted as a separate remote job.
 
   Args:
-    submit_fn: A `@kinetic.submit`-decorated callable.
+    submit_fn: A callable obtained from `func.run_async`.
     inputs: Iterable of inputs to fan out over.
     input_mode: How each input item is passed to *submit_fn*.
       `"auto"` (default) dispatches dicts as `**kwargs`,

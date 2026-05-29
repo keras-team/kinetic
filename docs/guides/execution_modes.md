@@ -13,8 +13,7 @@ The three modes:
 - **Custom image mode** — You provide a full image URI; Kinetic skips both
   the build and the install steps.
 
-You select the mode with the `container_image` argument on `@kinetic.run()` or
-`@kinetic.submit()`:
+You select the mode with the `container_image` argument on `@kinetic.run()`:
 
 ```python
 @kinetic.run(accelerator="tpu-v6e-8")                              # bundled (default)

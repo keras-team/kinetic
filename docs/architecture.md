@@ -6,8 +6,9 @@ and execution management to provide a seamless experience for remote workloads.
 
 ## Execution Lifecycle
 
-When a function decorated with `@kinetic.run()` or `@kinetic.submit()` is
-called, the system follows these steps:
+When a function decorated with `@kinetic.run()` is executed (either directly
+for a synchronous run, or via `run_async()` for a detached job), the system
+follows these steps:
 
 1.  **Context Resolution**: Kinetic aggregates function parameters, environment variables, and local configurations into a unified `JobContext`.
 2.  **Credential Validation**: The system verifies active `gcloud` and `kubectl` credentials, performing automatic configuration where necessary to ensure access to GCP services.
