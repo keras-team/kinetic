@@ -185,10 +185,13 @@ hours.
   the local script is no longer involved in the job's execution.
   Interrupting it (for example, with `Ctrl-C`) does not affect the
   remote job.
-- **Avoid `--follow` for jobs that run for hours.** Continuous log
-  streaming is sensitive to transient network failures. Use
-  `kinetic jobs logs <id> --tail 200` from a fresh shell to check in
-  periodically instead.
+- **`--follow` is resumable.** The stream reconnects through transient
+  network failures (laptop sleep, wifi drops, VPN reconnects). A small
+  per-pod cursor under `~/.kinetic/streams/<job_id>/` lets a fresh
+  `kinetic jobs logs <id> --follow` invocation pick up where the
+  previous one left off. Pass `--no-resume` to re-stream from the
+  start. The cursor is removed when the pod reaches a terminal state.
+  Use `kinetic jobs logs <id> --tail 200` if you only want to glance.
 - **Retain artifacts on multi-host or expensive jobs.** Pass
   `cleanup=False` to the first successful `result()` call so the
   Kubernetes resources and GCS artifacts remain available for

@@ -52,6 +52,18 @@ class MakePanelTest(absltest.TestCase):
 
     self.assertIsNone(panel._make_panel().subtitle)
 
+  def test_set_subtitle_overrides_even_when_show_subtitle_false(self):
+    panel = LiveOutputPanel("Title", show_subtitle=False)
+    panel.set_subtitle("reconnecting in 4s")
+    subtitle = panel._make_panel().subtitle
+    self.assertIn("reconnecting in 4s", str(subtitle))
+
+  def test_set_subtitle_none_clears_override(self):
+    panel = LiveOutputPanel("Title", show_subtitle=False)
+    panel.set_subtitle("transient status")
+    panel.set_subtitle(None)
+    self.assertIsNone(panel._make_panel().subtitle)
+
 
 class TransientBehaviorTest(absltest.TestCase):
   """Tests for transient panel clearing/persistence on exit."""

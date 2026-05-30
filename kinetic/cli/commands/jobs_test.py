@@ -293,7 +293,52 @@ class TestJobsLogs(absltest.TestCase):
       catch_exceptions=False,
     )
     self.assertEqual(result.exit_code, 0)
-    handle.logs.assert_called_once_with(follow=True)
+    handle.logs.assert_called_once_with(follow=True, resume=True)
+
+  @mock.patch(f"{_JOBS_MODULE}._attach")
+  def test_logs_follow_no_resume(self, mock_attach):
+    handle = _make_handle()
+    handle.logs = MagicMock(return_value=None)
+    mock_attach.return_value = handle
+
+    runner = CliRunner()
+    result = runner.invoke(
+      jobs,
+      [
+        "logs",
+        "job-abc",
+        "--follow",
+        "--no-resume",
+        "--project",
+        "proj",
+        "--cluster",
+        "cluster",
+      ],
+      catch_exceptions=False,
+    )
+    self.assertEqual(result.exit_code, 0)
+    handle.logs.assert_called_once_with(follow=True, resume=False)
+
+  @mock.patch(f"{_JOBS_MODULE}._attach")
+  def test_logs_no_resume_without_follow_rejected(self, mock_attach):
+    handle = _make_handle()
+    mock_attach.return_value = handle
+
+    runner = CliRunner()
+    result = runner.invoke(
+      jobs,
+      [
+        "logs",
+        "job-abc",
+        "--no-resume",
+        "--project",
+        "proj",
+        "--cluster",
+        "cluster",
+      ],
+    )
+    self.assertNotEqual(result.exit_code, 0)
+    self.assertIn("--no-resume only applies with --follow", result.output)
 
   @mock.patch(f"{_JOBS_MODULE}._attach")
   def test_logs_tail(self, mock_attach):
