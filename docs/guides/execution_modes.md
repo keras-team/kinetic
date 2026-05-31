@@ -32,7 +32,7 @@ the build step only re-runs when your deps change.
 Reach for **prebuilt mode** only if you're iterating on `requirements.txt`
 several times a day and the per-iteration build cost is hurting you — and
 note that prebuilt currently requires you to publish your own base image
-with `kinetic build-base`, since no blessed base images ship with Kinetic
+with `kinetic build-image`, since no blessed base images ship with Kinetic
 today.
 :::
 
@@ -51,7 +51,7 @@ On a corporate base image                          | **custom image**           
 
 \* Prebuilt mode requires a base image at the configured repo. Kinetic does
 not currently ship blessed base images, so you'll need to run
-`kinetic build-base` once and set `KINETIC_BASE_IMAGE_REPO` before this is a
+`kinetic build-image` once and set `KINETIC_BASE_IMAGE_REPO` before this is a
 practical option.
 
 ## Bundled mode
@@ -95,7 +95,7 @@ def train():
 :::{warning}
 **You need to publish a base image first.** Kinetic does not currently ship
 blessed prebuilt base images. Before you can use prebuilt mode, run
-`kinetic build-base --repo <your-repo>` once and set
+`kinetic build-image --repo <your-repo>` once and set
 `KINETIC_BASE_IMAGE_REPO=<your-repo>` (or pass `base_image_repo=` to the
 decorator). See [Container Images](containers.md) for the full
 workflow.
@@ -186,5 +186,5 @@ picked:
 
 - [Dependencies](dependencies.md) — how Kinetic discovers what to install.
 - [Container Images](containers.md) — base-image workflow and
-  `kinetic build-base`.
+  `kinetic build-image`.
 - [Getting Started](../getting_started.md) — your first run end-to-end.

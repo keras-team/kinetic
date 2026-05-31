@@ -43,7 +43,7 @@ wins:
 | Cluster         | `cluster=`         | `--cluster`                      | `KINETIC_CLUSTER`                               | `cluster`                            | `kinetic-cluster`                |
 | Namespace       | `namespace=`       | `--namespace`                    | `KINETIC_NAMESPACE`                             | `namespace`                          | `default`                        |
 | Output dir      | `output_dir=`      | `--output-dir`                   | `KINETIC_OUTPUT_DIR`                            | _(n/a)_                              | `gs://{bucket}/outputs/{job_id}` |
-| Base image repo | `base_image_repo=` | `kinetic build-base --repo`      | `KINETIC_BASE_IMAGE_REPO`                       | _(n/a)_                              | `kinetic`                        |
+| Base image repo | `base_image_repo=` | `kinetic build-image --repo`     | `KINETIC_BASE_IMAGE_REPO`                       | _(n/a)_                              | `kinetic`                        |
 | Reservation\*   | _(n/a)_            | `kinetic pool add --reservation` | `KINETIC_RESERVATION`                           | _(n/a)_                              | _(unset)_                        |
 
 \* Reservation is a node-pool-level setting, not a per-job one. You bind

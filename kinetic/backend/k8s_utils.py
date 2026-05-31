@@ -473,7 +473,7 @@ def _check_image_pull_errors(pod) -> None:
         f"Container image pull failed for '{image}': {detail}\n"
         f"If using prebuilt images, either:\n"
         f"  1. If using custom prebuilt images, ensure you have built and\n"
-        f"     pushed the image (kinetic build-base --repo <repo>) and set\n"
+        f"     pushed the image (kinetic build-image --repo <repo>) and set\n"
         f"     KINETIC_BASE_IMAGE_REPO=<repo>.\n"
         f"  2. Use bundled mode: @kinetic.run(..., container_image='bundled')\n"
         f"  3. If using official kinetic images, report the issue at:\n"
