@@ -1,4 +1,4 @@
-"""kinetic build-base command — build and push prebuilt base images."""
+"""kinetic build-image command — build and push prebuilt base images."""
 
 import concurrent.futures
 
@@ -192,7 +192,7 @@ def _prompt_categories():
   return selected
 
 
-@click.command("build-base")
+@click.command("build-image")
 @common_options
 @click.option(
   "--repo",
@@ -227,7 +227,7 @@ def _prompt_categories():
   help="Re-enter Docker Hub credentials even if they already exist",
 )
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def build_base(
+def build_image(
   project,
   zone,
   cluster_name,

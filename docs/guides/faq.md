@@ -28,7 +28,7 @@ publishing a base image. Reach for **prebuilt** when you change
 `requirements.txt` several times a day and the per-iteration build cost is
 hurting you. Prebuilt mode itself works with any base image at the
 configured repo, but the kinetic project does not currently publish public
-base images, so you will need to run `kinetic build-base` once to push your
+base images, so you will need to run `kinetic build-image` once to push your
 own before this becomes a usable option. See [Execution Modes](execution_modes.md).
 
 ## When should I use `Data(...)` vs direct `gs://...` URIs?
@@ -123,7 +123,7 @@ by a hash of your `requirements.txt`.
 **Prebuilt image**: A published base image that already has the
 accelerator runtime installed. Your project deps are installed at pod
 startup. Selected with `container_image="prebuilt"`. Requires you to
-publish base images with `kinetic build-base` first.
+publish base images with `kinetic build-image` first.
 
 **FUSE**: Filesystem-in-userspace mount. With `kinetic.Data(..., fuse=True)`,
 a GCS bucket is mounted lazily into the pod's filesystem so reads stream
