@@ -14,6 +14,7 @@ from kinetic.backend.execution import (
 )
 from kinetic.cli.profiles import resolve_infra
 from kinetic.collections import BatchHandle
+from kinetic.collections import map as collections_map
 from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
@@ -199,7 +200,6 @@ class RemoteCallable:
 
   def run_async_map(self, inputs, **kwargs) -> BatchHandle:
     """Fan out across accelerators."""
-    from kinetic.collections import map as collections_map
 
     return collections_map(self._async_wrapper, inputs, **kwargs)
 
