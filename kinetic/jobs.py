@@ -413,6 +413,15 @@ class JobHandle:
       except google_exceptions.NotFound:
         raise self._missing_result_error(observed_status) from None
 
+      if observed_status == JobStatus.FAILED and result_payload["success"]:
+        # The job is terminal-FAILED (e.g. a worker pod failed) even though
+        # the leader produced a successful result payload. Returning the
+        # leader's result here would silently mask the failure (see #239).
+        raise RuntimeError(
+          f"Job {self.job_id} failed even though the leader produced a "
+          "result. This usually means a worker pod failed; check the worker "
+          "pod logs (e.g. `job.logs()`) for details."
+        )
       if result_payload["success"]:
         return result_payload["result"]
       raise attach_remote_traceback(
