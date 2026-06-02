@@ -1,13 +1,13 @@
 # Batched Jobs
 
-`@kinetic.submit()` is the tool for a single long-running job. When you
+`run_async()` is the tool for a single long-running job. When you
 need to run the **same function over many inputs**, such as a hyperparameter
 sweep, one job per dataset shard, an evaluation grid — wiring that up
-by hand means a loop that calls `submit()`, your own bookkeeping for
+by hand means a loop that calls `run_async()`, your own bookkeeping for
 which handles are still live, your own error aggregation, your own
-cleanup. `kinetic.map()` is that loop, done for you.
+cleanup. `run_async_map()` is that loop, done for you.
 
-You hand it a `@kinetic.submit()`-decorated function and a list of
+You call `run_async_map()` on a `@kinetic.run()`-decorated function with a list of
 inputs. It returns a single `BatchHandle` that represents the whole
 collection: one place to observe progress, collect results in input
 order, handle failures, cancel siblings, and tear everything down. The
@@ -21,14 +21,14 @@ assumed.
 
 ## A first fan-out
 
-Pass a `@kinetic.submit()`-decorated function and a list of inputs to
-`kinetic.map()`. It returns a `BatchHandle` immediately while jobs are
+Pass a `@kinetic.run()`-decorated function and a list of inputs to
+`run_async_map()`. It returns a `BatchHandle` immediately while jobs are
 submitted in the background.
 
 ```python
 import kinetic
 
-@kinetic.submit(accelerator="tpu-v5e-1")
+@kinetic.run(accelerator="tpu-v5e-1")
 def train(lr):
     import keras
     model = keras.Sequential([keras.layers.Dense(64, activation="relu"),
@@ -37,21 +37,21 @@ def train(lr):
     history = model.fit(x_train, y_train, epochs=10, verbose=0)
     return history.history["loss"][-1]
 
-batch = kinetic.map(train, [0.001, 0.01, 0.1])
+batch = train.run_async_map([0.001, 0.01, 0.1])
 losses = batch.results()
 print(losses)  # [0.32, 0.28, 0.41] — one result per input, in order
 ```
 
 :::{note}
-The first argument must be decorated with `@kinetic.submit()`, not
-`@kinetic.run()`. `@kinetic.run()` blocks until the job finishes and
-returns the result directly, so it cannot be used for fan-out.
+You must use `run_async_map()` to fan out. Calling the decorated function
+directly will block until the job finishes and return the result directly,
+so it cannot be used for concurrent execution of multiple inputs.
 :::
 
 ## Input modes
 
 The `input_mode` parameter controls how each item in `inputs` is passed
-to the submit function.
+to the function.
 
 | `input_mode`       | Item type                         | How it's called | Example item                  |
 | ------------------ | --------------------------------- | --------------- | ----------------------------- |
@@ -68,7 +68,7 @@ When using `"auto"` mode, dicts with valid Python identifier keys are
 unpacked as keyword arguments:
 
 ```python
-@kinetic.submit(accelerator="tpu-v5e-1")
+@kinetic.run(accelerator="tpu-v5e-1")
 def train(lr, batch_size):
     ...
 
@@ -76,7 +76,7 @@ configs = [
     {"lr": 0.001, "batch_size": 32},
     {"lr": 0.01,  "batch_size": 64},
 ]
-batch = kinetic.map(train, configs)
+batch = train.run_async_map(configs)
 ```
 
 ### Preventing unpacking
@@ -85,11 +85,11 @@ If your function takes a list or dict as a single argument, use
 `input_mode="single"` to prevent automatic unpacking:
 
 ```python
-@kinetic.submit(accelerator="cpu")
+@kinetic.run(accelerator="cpu")
 def process(items):
     return sum(items)
 
-batch = kinetic.map(process, [[1, 2, 3], [4, 5, 6]], input_mode="single")
+batch = process.run_async_map([[1, 2, 3], [4, 5, 6]], input_mode="single")
 ```
 
 :::{note}
@@ -239,7 +239,7 @@ gets after failure. The total number of attempts per input is
 `1 + retries`.
 
 ```python
-batch = kinetic.map(train, configs, retries=2)
+batch = train.run_async_map(configs, retries=2)
 # Each job gets up to 3 attempts (1 initial + 2 retries)
 ```
 
@@ -249,7 +249,7 @@ batch = kinetic.map(train, configs, retries=2)
   Kubernetes resources (GCS artifacts are preserved for debugging).
 - The group manifest tracks the attempt count per job, so
   `attach_batch()` can distinguish retries from initial submissions.
-- Submission errors (when the call to `submit_fn` itself raises) are
+- Submission errors (when the call to the function itself raises) are
   not retried. These are typically packaging or configuration errors
   that would fail again.
 
@@ -260,17 +260,17 @@ Kinetic can poll for failures and resubmit.
 
 ## Concurrency control
 
-By default, `kinetic.map()` limits the number of concurrently active
+By default, `run_async_map()` limits the number of concurrently active
 jobs to 64. Use `max_concurrent` to tune this.
 
 ```python
 # At most 8 jobs running at once
-batch = kinetic.map(train, configs, max_concurrent=8)
+batch = train.run_async_map(configs, max_concurrent=8)
 ```
 
 ```python
 # Submit all jobs immediately (no concurrency limit)
-batch = kinetic.map(train, configs, max_concurrent=None)
+batch = train.run_async_map(configs, max_concurrent=None)
 ```
 
 - **Default:** `64`. New jobs are launched as running ones finish.
@@ -302,15 +302,15 @@ happens when a job fails.
 
 ```python
 # Stop the batch as soon as any job fails, cancel all running siblings
-batch = kinetic.map(
-    train, configs,
+batch = train.run_async_map(
+    configs,
     fail_fast=True,
     cancel_running_on_fail=True,
 )
 ```
 
-A "failure" here means either a submission error (the call to
-`submit_fn` itself raised) or a runtime failure (the remote job reached
+A "failure" here means either a submission error (
+the call raised) or a runtime failure (the remote job reached
 `FAILED` or `NOT_FOUND` status after exhausting retries).
 
 ### Manual cancellation
@@ -332,7 +332,7 @@ different machine, save the `group_id` and reattach later.
 
 ```python
 # Original session
-batch = kinetic.map(train, configs)
+batch = train.run_async_map(configs)
 print(f"Batch ID: {batch.group_id}")  # e.g., "grp-a1b2c3d4"
 
 # Later, from any machine with access to the same GCP project
@@ -400,7 +400,7 @@ via `attach_batch()` because the manifest has been deleted.
 ### Threading model
 
 When `max_concurrent` is set (the default is 64) or `retries > 0`,
-`kinetic.map()` launches a non-daemon background thread to manage
+`run_async_map()` launches a non-daemon background thread to manage
 submissions. The thread polls active jobs for terminal states and
 launches new ones as concurrency slots free up. The `BatchHandle` is
 returned immediately.
@@ -426,7 +426,7 @@ Each batch gets a unique identifier in the format `grp-{8-hex-chars}`
 
 ### Submission errors
 
-If a call to `submit_fn` itself raises (e.g., a packaging or validation
+If a call to the function itself raises (e.g., a packaging or validation
 error), the exception is captured internally and the corresponding slot
 in `batch.jobs` remains `None`. These errors are surfaced when you call
 `results()` — either as entries in the `BatchError.partial_results`
@@ -434,7 +434,7 @@ list or as exception objects when `return_exceptions=True`.
 
 ## Related pages
 
-- [Detached Jobs](async_jobs.md) — the single-job `@kinetic.submit()`
+- [Detached Jobs](async_jobs.md) — the single-job `run_async()`
   workflow each child of a batch is built on.
 - [Cost Optimization](../guides/cost_optimization.md) — fan-out
   amplifies both throughput and spend; concurrency limits and spot

@@ -84,7 +84,7 @@ Three entry points cover what most new users need first:
      - Data and checkpoints
    * - Install, point at a cluster, and run a real Keras job in minutes.
        :doc:`Getting Started <getting_started>`.
-     - Switch from blocking ``run()`` to detached ``submit()`` for jobs
+     - Switch from blocking ``run()`` to detached ``run_async()`` for jobs
        that take hours. :doc:`Detached Jobs <guides/advanced>`.
      - Ship local files in, write durable artifacts back out via
        ``KINETIC_OUTPUT_DIR``. :doc:`Data <guides/data>` and
@@ -109,7 +109,7 @@ Five short phases on every job:
    ``KINETIC_OUTPUT_DIR`` set; logs stream back to your terminal.
 5. **Collect.** The return value is serialized to GCS and pulled back
    to your local process. ``@kinetic.run()`` cleans up the pod and GCS
-   artifacts as soon as the result is collected. ``@kinetic.submit()``
+   artifacts as soon as the result is collected. ``run_async()``
    leaves the pod running until you call ``.result()`` or ``.cleanup()``
    on the returned ``JobHandle`` — important to remember on expensive
    accelerators.

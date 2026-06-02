@@ -14,9 +14,7 @@ from rich.logging import RichHandler
 from kinetic.collections import BatchError as BatchError
 from kinetic.collections import BatchHandle as BatchHandle
 from kinetic.collections import attach_batch as attach_batch
-from kinetic.collections import map as map
 from kinetic.core.core import run as run
-from kinetic.core.core import submit as submit
 from kinetic.data import Data as Data
 from kinetic.jobs import JobHandle as JobHandle
 from kinetic.jobs import attach as attach

@@ -1,6 +1,6 @@
 # Interactive Debugging
 
-Pass `debug=True` to `@kinetic.run()` or `@kinetic.submit()` to attach
+Pass `debug=True` to `@kinetic.run()` to attach
 a VS Code debugger to the remote pod. Set breakpoints, step through
 your function, inspect variables, and evaluate expressions against the
 accelerator your code is running on.
@@ -13,8 +13,7 @@ extension.
 
 ## A first debug session
 
-Add `debug=True` to any `@kinetic.run()` or `@kinetic.submit()`
-invocation:
+Add `debug=True` to `@kinetic.run()`:
 
 ```python
 import kinetic
@@ -54,11 +53,11 @@ function runs, and UI breakpoints work from there.
 
 ## Attaching to a submitted job
 
-For longer sessions, use `@kinetic.submit(debug=True)` and attach later
+For longer sessions, use `@kinetic.run(debug=True)` and attach later
 from the CLI:
 
 ```python
-@kinetic.submit(accelerator="tpu-v5e-2x2", debug=True)
+@kinetic.run(accelerator="tpu-v5e-2x2", debug=True)
 def train():
     import jax
     breakpoint()
@@ -159,7 +158,7 @@ raises `RuntimeError` before submission so your job doesn't silently
 hang waiting for someone to attach.
 
 For async submission there's no TTY requirement —
-`@kinetic.submit(debug=True)` works fine in any environment, and
+`@kinetic.run(debug=True)` works fine in any environment, and
 `kinetic jobs debug` from an interactive shell attaches whenever
 you're ready.
 

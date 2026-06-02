@@ -90,7 +90,7 @@ ask for hardware.
 :class-body: sd-fs-6
 :class-title: sd-fs-5
 
-Walks through every part of the detached-job API end-to-end: `submit()`,
+Walks through every part of the detached-job API end-to-end: `run_async()`,
 `status()`/`tail()`/`result()`, reattach from another shell with
 `kinetic.attach()`, and enumerate jobs with `list_jobs()`.
 
@@ -156,7 +156,7 @@ save/load code.
 :class-body: sd-fs-6
 :class-title: sd-fs-5
 
-Fan out a grid of jobs with `kinetic.map()`, batch submissions to keep
+Fan out a grid of jobs with `run_async_map()`, batch submissions to keep
 the cluster happy, and gather results — including how to handle the
 job that inevitably fails halfway through.
 

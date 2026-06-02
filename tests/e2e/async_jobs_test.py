@@ -22,11 +22,11 @@ class TestAsyncJobLifecycle(absltest.TestCase):
   def test_submit_and_collect_result(self):
     """Submit a job, wait for the result, and verify the return value."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def add(a, b):
       return a + b
 
-    handle = add(10, 32)
+    handle = add.run_async(10, 32)
     self.assertIsNotNone(handle.job_id)
 
     result = handle.result(timeout=300)
@@ -35,11 +35,11 @@ class TestAsyncJobLifecycle(absltest.TestCase):
   def test_status_transitions(self):
     """Status should move from PENDING/RUNNING to SUCCEEDED."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def noop():
       return "done"
 
-    handle = noop()
+    handle = noop.run_async()
 
     # Initial status should be PENDING or RUNNING.
     initial = handle.status()
@@ -55,12 +55,12 @@ class TestAsyncJobLifecycle(absltest.TestCase):
   def test_logs_available_after_completion(self):
     """Logs should be retrievable after a job succeeds."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def chatty():
       print("hello from remote")
       return 1
 
-    handle = chatty()
+    handle = chatty.run_async()
     handle.result(timeout=300, cleanup=False)
 
     log_text = handle.logs()
@@ -72,13 +72,13 @@ class TestAsyncJobLifecycle(absltest.TestCase):
   def test_tail_returns_partial_logs(self):
     """tail(n=5) should return at most 5 lines."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def many_lines():
       for i in range(20):
         print(f"line {i}")
       return "ok"
 
-    handle = many_lines()
+    handle = many_lines.run_async()
     handle.result(timeout=300, cleanup=False)
 
     tail_text = handle.tail(n=5)
@@ -90,11 +90,11 @@ class TestAsyncJobLifecycle(absltest.TestCase):
   def test_remote_exception_reraised(self):
     """A remote exception should be re-raised locally with traceback."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def failing():
       raise ValueError("intentional e2e error")
 
-    handle = failing()
+    handle = failing.run_async()
 
     with self.assertRaisesRegex(ValueError, "intentional e2e error"):
       handle.result(timeout=300)
@@ -107,11 +107,11 @@ class TestAttachAndListJobs(absltest.TestCase):
   def test_attach_to_completed_job(self):
     """attach() should reconstruct a handle that can still fetch results."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def compute():
       return 99
 
-    original = compute()
+    original = compute.run_async()
     original.result(timeout=300, cleanup=False)
 
     reattached = attach(original.job_id)
@@ -123,14 +123,14 @@ class TestAttachAndListJobs(absltest.TestCase):
   def test_list_jobs_includes_submitted_job(self):
     """list_jobs() should discover a live job on the cluster."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def discoverable():
       import time
 
       time.sleep(10)
       return "found"
 
-    handle = discoverable()
+    handle = discoverable.run_async()
 
     try:
       jobs = list_jobs()
@@ -147,14 +147,14 @@ class TestCancelAndCleanup(absltest.TestCase):
   def test_cancel_running_job(self):
     """cancel() should delete the k8s resource; status becomes NOT_FOUND."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def long_running():
       import time
 
       time.sleep(600)
       return "should not reach"
 
-    handle = long_running()
+    handle = long_running.run_async()
 
     # Wait until the job is at least pending/running.
     for _ in range(30):
@@ -173,11 +173,11 @@ class TestCancelAndCleanup(absltest.TestCase):
   def test_cleanup_removes_resources(self):
     """cleanup() should delete both k8s and GCS artifacts."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def ephemeral():
       return "bye"
 
-    handle = ephemeral()
+    handle = ephemeral.run_async()
     handle.result(timeout=300, cleanup=False)
 
     handle.cleanup(k8s=True, gcs=True)
@@ -191,14 +191,14 @@ class TestResultOptions(absltest.TestCase):
   def test_result_timeout_raises(self):
     """result(timeout=1) should raise TimeoutError for a slow job."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def slow():
       import time
 
       time.sleep(600)
       return "late"
 
-    handle = slow()
+    handle = slow.run_async()
 
     with self.assertRaises(TimeoutError):
       handle.result(timeout=1)
@@ -210,11 +210,11 @@ class TestResultOptions(absltest.TestCase):
   def test_result_no_cleanup_preserves_resources(self):
     """result(cleanup=False) should leave k8s/GCS resources intact."""
 
-    @kinetic.submit(accelerator="cpu")
+    @kinetic.run(accelerator="cpu")
     def keep_alive():
       return "still here"
 
-    handle = keep_alive()
+    handle = keep_alive.run_async()
     handle.result(timeout=300, cleanup=False)
 
     # Job should still be findable (k8s resource exists).

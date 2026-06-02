@@ -7,7 +7,7 @@ contract, and the `kinetic build-image` command.
 For a higher-level overview and the recommendation matrix on which
 mode to pick, start with [Execution Modes](../guides/execution_modes.md).
 
-Kinetic supports three container image modes that control how your remote execution environment is built and deployed. Choose the mode that best fits your workflow by setting the `container_image` parameter in the `@kinetic.run()` or `@kinetic.submit()` decorator.
+Kinetic supports three container image modes that control how your remote execution environment is built and deployed. Choose the mode that best fits your workflow by setting the `container_image` parameter in the `@kinetic.run()` decorator.
 
 :::{note}
 **Expected timing:**

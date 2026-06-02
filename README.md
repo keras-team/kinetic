@@ -25,7 +25,7 @@ final_loss = train_model()
 - **Simple remote execution.** A `@kinetic.run()` decorator runs the
   function on the accelerator you ask for and returns the result.
   Nothing else changes about your code.
-- **Detached jobs.** Switch to `@kinetic.submit()` for long runs.
+- **Detached jobs.** Use `func.run_async()` for long runs.
   You get a `JobHandle` back — poll status, tail logs, collect the
   result later, or reattach from another machine entirely.
 - **Data and checkpoint support.** Wrap inputs in `kinetic.Data(...)`
@@ -83,7 +83,7 @@ guide.
 | Question                                         | Where to look                                                                                                                                             |
 | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | How do I get my first job running?               | [Getting Started](https://kinetic.readthedocs.io/en/latest/getting_started.html)                                                                          |
-| When should I use `submit()` instead of `run()`? | [Detached Jobs](https://kinetic.readthedocs.io/en/latest/advanced/async_jobs.html)                                                                        |
+| When should I use `run_async()` instead of `run()`? | [Detached Jobs](https://kinetic.readthedocs.io/en/latest/advanced/async_jobs.html)                                                                        |
 | How do I ship data and persist outputs?          | [Data](https://kinetic.readthedocs.io/en/latest/guides/data.html) and [Checkpointing](https://kinetic.readthedocs.io/en/latest/guides/checkpointing.html) |
 | Bundled vs prebuilt vs custom image — which one? | [Execution Modes](https://kinetic.readthedocs.io/en/latest/guides/execution_modes.html)                                                                   |
 | Something's broken; where do I start?            | [Troubleshooting](https://kinetic.readthedocs.io/en/latest/troubleshooting.html)                                                                          |
