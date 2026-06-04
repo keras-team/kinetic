@@ -1,6 +1,6 @@
 [project]
 name = "keras-kinetic"
-version = "0.0.2"
+version = "0.0.3"
 authors = [
     {name = "Keras team", email = "keras-users@googlegroups.com"},
 ]
