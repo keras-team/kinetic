@@ -172,13 +172,29 @@ def _consume_stream(
 def _open_log_stream(
   core_v1, pod_name: str, namespace: str, since_time: str | None, dedup: bool
 ):
-  return core_v1.read_namespaced_pod_log(
-    name=pod_name,
-    namespace=namespace,
-    follow=True,
-    timestamps=dedup,
-    since_time=since_time,
+  # The generated kubernetes client exposes ``since_seconds`` but not
+  # ``sinceTime`` for the pod log endpoint, so call the API directly to
+  # resume from an absolute timestamp. ``since_seconds`` is relative to
+  # "now" and would silently drop lines under client/server clock skew.
+  api_client = core_v1.api_client
+  query_params = [("follow", True), ("timestamps", dedup)]
+  if since_time is not None:
+    query_params.append(("sinceTime", since_time))
+  header_params = {
+    "Accept": api_client.select_header_accept(
+      ["text/plain", "application/json", "application/yaml"]
+    )
+  }
+  return api_client.call_api(
+    "/api/v1/namespaces/{namespace}/pods/{name}/log",
+    "GET",
+    {"name": pod_name, "namespace": namespace},
+    query_params,
+    header_params,
+    response_type="str",
+    auth_settings=["BearerToken"],
     _preload_content=False,
+    _return_http_data_only=True,
     _request_timeout=(_CONNECT_TIMEOUT_S, _READ_TIMEOUT_S),
   )
 

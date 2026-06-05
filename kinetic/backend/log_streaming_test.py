@@ -14,6 +14,7 @@ from kubernetes.client.rest import ApiException
 
 from kinetic.backend.log_cursor import (
   LogCursor,
+  clear_job_cursors,
   cursor_path_for,
 )
 from kinetic.backend.log_streaming import (
@@ -61,24 +62,26 @@ class TestStreamPodLogs(absltest.TestCase):
 
   def test_calls_log_api_with_timestamps_and_request_timeout(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp([])
+    mock_core.api_client.call_api.return_value = _make_resp([])
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
     self._run_once(mock_core)
 
-    mock_core.read_namespaced_pod_log.assert_called_once()
-    kwargs = mock_core.read_namespaced_pod_log.call_args.kwargs
-    self.assertEqual(kwargs["name"], "pod-1")
-    self.assertEqual(kwargs["namespace"], "default")
-    self.assertTrue(kwargs["follow"])
-    self.assertTrue(kwargs["timestamps"])
-    self.assertIsNone(kwargs["since_time"])
-    self.assertEqual(kwargs["_preload_content"], False)
-    self.assertEqual(kwargs["_request_timeout"], (10, 60))
+    mock_core.api_client.call_api.assert_called_once()
+    call = mock_core.api_client.call_api.call_args
+    path_params = call.args[2]
+    query = dict(call.args[3])
+    self.assertEqual(path_params["name"], "pod-1")
+    self.assertEqual(path_params["namespace"], "default")
+    self.assertTrue(query["follow"])
+    self.assertTrue(query["timestamps"])
+    self.assertNotIn("sinceTime", query)
+    self.assertEqual(call.kwargs["_preload_content"], False)
+    self.assertEqual(call.kwargs["_request_timeout"], (10, 60))
 
   def test_resume_passes_since_time_truncated_to_second(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp([])
+    mock_core.api_client.call_api.return_value = _make_resp([])
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
     cursor = LogCursor(path=None)
@@ -86,14 +89,12 @@ class TestStreamPodLogs(absltest.TestCase):
 
     self._run_once(mock_core, cursor=cursor)
 
-    self.assertEqual(
-      mock_core.read_namespaced_pod_log.call_args.kwargs["since_time"],
-      "2024-01-01T12:00:00Z",
-    )
+    query = dict(mock_core.api_client.call_api.call_args.args[3])
+    self.assertEqual(query["sinceTime"], "2024-01-01T12:00:00Z")
 
   def test_resume_false_omits_timestamps_and_since_time(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp([])
+    mock_core.api_client.call_api.return_value = _make_resp([])
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
     cursor = LogCursor(path=None)
@@ -101,13 +102,13 @@ class TestStreamPodLogs(absltest.TestCase):
 
     self._run_once(mock_core, cursor=cursor, resume=False)
 
-    kwargs = mock_core.read_namespaced_pod_log.call_args.kwargs
-    self.assertFalse(kwargs["timestamps"])
-    self.assertIsNone(kwargs["since_time"])
+    query = dict(mock_core.api_client.call_api.call_args.args[3])
+    self.assertFalse(query["timestamps"])
+    self.assertNotIn("sinceTime", query)
 
   def test_dedupes_lines_already_in_cursor_ring(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp(
+    mock_core.api_client.call_api.return_value = _make_resp(
       [
         b"2024-01-01T12:00:00.000Z dup line\n",
         b"2024-01-01T12:00:01.000Z fresh line\n",
@@ -142,7 +143,7 @@ class TestStreamPodLogs(absltest.TestCase):
 
   def test_handles_partial_lines(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp(
+    mock_core.api_client.call_api.return_value = _make_resp(
       [b"2024-01-01T12:00:00.000Z hel", b"lo\n2024-01-01T12:00:01.000Z world\n"]
     )
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
@@ -162,7 +163,7 @@ class TestStreamPodLogs(absltest.TestCase):
 
   def test_handles_carriage_returns(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp(
+    mock_core.api_client.call_api.return_value = _make_resp(
       [b"2024-01-01T12:00:00.000Z 1/10\r2/10\r", b"3/10\n"]
     )
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
@@ -193,7 +194,7 @@ class TestStreamPodLogs(absltest.TestCase):
     # "héllo" → "h" + 0xc3 0xa9 + "llo" — break the 2-byte é across chunks.
     encoded = "2024-01-01T12:00:00.000Z héllo\n".encode("utf-8")
     split = encoded.index(b"\xa9")  # split right after the first é byte
-    mock_core.read_namespaced_pod_log.return_value = _make_resp(
+    mock_core.api_client.call_api.return_value = _make_resp(
       [encoded[:split], encoded[split:]]
     )
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
@@ -215,7 +216,7 @@ class TestStreamPodLogs(absltest.TestCase):
     mock_core = MagicMock()
     resp = MagicMock()
     resp.stream.side_effect = ApiException(status=500, reason="boom")
-    mock_core.read_namespaced_pod_log.return_value = resp
+    mock_core.api_client.call_api.return_value = resp
     # Pod still Running so we'd otherwise retry. Stop after one iter.
     mock_core.read_namespaced_pod.return_value.status.phase = "Running"
 
@@ -233,22 +234,22 @@ class TestStreamPodLogs(absltest.TestCase):
 
   def test_404_on_open_breaks_immediately(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.side_effect = ApiException(
+    mock_core.api_client.call_api.side_effect = ApiException(
       status=404, reason="Not Found"
     )
     # Should not raise, should not retry, returns quickly.
     self._run_once(mock_core)
-    mock_core.read_namespaced_pod_log.assert_called_once()
+    mock_core.api_client.call_api.assert_called_once()
 
   def test_auth_failure_triggers_client_refresh(self):
     bad_core = MagicMock()
-    bad_core.read_namespaced_pod_log.side_effect = ApiException(
+    bad_core.api_client.call_api.side_effect = ApiException(
       status=401, reason="Unauthorized"
     )
     bad_core.read_namespaced_pod.return_value.status.phase = "Running"
 
     fresh_core = MagicMock()
-    fresh_core.read_namespaced_pod_log.return_value = _make_resp([])
+    fresh_core.api_client.call_api.return_value = _make_resp([])
     fresh_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
     stop_event = threading.Event()
@@ -265,12 +266,12 @@ class TestStreamPodLogs(absltest.TestCase):
       _stream_pod_logs(bad_core, "pod-1", "default", stop_event=stop_event)
 
     refresh.assert_called()
-    fresh_core.read_namespaced_pod_log.assert_called()
+    fresh_core.api_client.call_api.assert_called()
 
   def test_backoff_escalates_on_repeated_open_failures(self):
     """Repeated transient failures with no progress must escalate backoff."""
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.side_effect = (
+    mock_core.api_client.call_api.side_effect = (
       urllib3.exceptions.ProtocolError("nope") for _ in range(50)
     )
     mock_core.read_namespaced_pod.return_value.status.phase = "Running"
@@ -302,11 +303,11 @@ class TestStreamPodLogs(absltest.TestCase):
     good_resp = _make_resp([b"2024-01-01T12:00:00.000Z progress!\n"])
 
     def open_side_effect(*args, **kwargs):
-      if mock_core.read_namespaced_pod_log.call_count == 1:
+      if mock_core.api_client.call_api.call_count == 1:
         return good_resp
       raise urllib3.exceptions.ProtocolError("nope")
 
-    mock_core.read_namespaced_pod_log.side_effect = open_side_effect
+    mock_core.api_client.call_api.side_effect = open_side_effect
     mock_core.read_namespaced_pod.return_value.status.phase = "Running"
 
     backoff_calls = []
@@ -338,7 +339,7 @@ class TestStreamPodLogs(absltest.TestCase):
 
   def test_cursor_deleted_on_terminal_pod(self):
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.return_value = _make_resp([])
+    mock_core.api_client.call_api.return_value = _make_resp([])
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -368,7 +369,7 @@ class TestStreamPodLogs(absltest.TestCase):
   def test_cursor_kept_when_stop_event_set(self):
     """A user-initiated stop should preserve the cursor for next time."""
     mock_core = MagicMock()
-    mock_core.read_namespaced_pod_log.side_effect = (
+    mock_core.api_client.call_api.side_effect = (
       urllib3.exceptions.ProtocolError("nope") for _ in range(50)
     )
     mock_core.read_namespaced_pod.return_value.status.phase = "Running"
@@ -403,7 +404,7 @@ class TestStreamPodLogs(absltest.TestCase):
       "Connection broken"
     )
     good_resp = _make_resp([b"2024-01-01T12:00:05.000Z after reconnect\n"])
-    mock_core.read_namespaced_pod_log.side_effect = [bad_resp, good_resp]
+    mock_core.api_client.call_api.side_effect = [bad_resp, good_resp]
     mock_core.read_namespaced_pod.return_value.status.phase = "Succeeded"
 
     stop_event = threading.Event()
@@ -418,7 +419,7 @@ class TestStreamPodLogs(absltest.TestCase):
       mock_panel_cls.return_value.__exit__.return_value = False
       _stream_pod_logs(mock_core, "pod-1", "default", stop_event=stop_event)
 
-    self.assertEqual(mock_core.read_namespaced_pod_log.call_count, 2)
+    self.assertEqual(mock_core.api_client.call_api.call_count, 2)
     emitted = [c.args[0] for c in mock_panel.on_output.call_args_list]
     self.assertIn("after reconnect", emitted)
 
@@ -655,6 +656,32 @@ class TestLogCursor(absltest.TestCase):
       cursor.flush()
       data = json.loads(path.read_text())
       self.assertIsNone(data["last_ts"])
+
+  def test_clear_job_cursors_removes_only_its_own_dir(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      streams = Path(tmp)
+      (streams / "job-a").mkdir()
+      (streams / "job-a" / "pod-0.json").write_text("{}")
+      (streams / "job-b").mkdir()
+      (streams / "job-b" / "pod-0.json").write_text("{}")
+
+      clear_job_cursors(streams, "job-a")
+
+      self.assertFalse((streams / "job-a").exists())
+      self.assertTrue((streams / "job-b").exists())
+
+  def test_clear_job_cursors_empty_id_does_not_wipe_streams_dir(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      streams = Path(tmp)
+      (streams / "job-a").mkdir()
+      (streams / "job-a" / "pod-0.json").write_text("{}")
+
+      # An empty (or fully-sanitized-away) job id must not collapse onto
+      # the streams root and delete every other job's cursors.
+      clear_job_cursors(streams, "")
+
+      self.assertTrue((streams / "job-a").exists())
+      self.assertTrue(streams.exists())
 
 
 if __name__ == "__main__":

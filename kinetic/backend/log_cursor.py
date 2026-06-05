@@ -34,8 +34,13 @@ def clear_job_cursors(cursor_dir: Path | None, job_id: str) -> None:
   """Remove every per-pod cursor for a job once it reaches a terminal state."""
   if cursor_dir is None:
     return
-  job_dir = cursor_dir / _safe_name(job_id)
-  if job_dir.exists():
+  safe_job_id = _safe_name(job_id)
+  if not safe_job_id:
+    return
+  job_dir = cursor_dir / safe_job_id
+  # Guard against job_dir collapsing onto cursor_dir, which would wipe
+  # every other job's cursors.
+  if job_dir != cursor_dir and job_dir.exists():
     shutil.rmtree(job_dir, ignore_errors=True)
 
 
