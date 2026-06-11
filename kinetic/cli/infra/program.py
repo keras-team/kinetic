@@ -123,7 +123,7 @@ def _create_buckets(
     force_destroy=force_destroy,
     uniform_bucket_level_access=True,
     lifecycle_rules=_BUCKET_LIFECYCLE_30D,
-    labels={"goog-packaged-solution": "kinetic"},
+    labels={"goog-packaged-solution": RESOURCE_NAME_PREFIX},
     opts=api_deps,
   )
   builds_bucket = gcp.storage.Bucket(
@@ -134,7 +134,7 @@ def _create_buckets(
     force_destroy=force_destroy,
     uniform_bucket_level_access=True,
     lifecycle_rules=_BUCKET_LIFECYCLE_30D,
-    labels={"goog-packaged-solution": "kinetic"},
+    labels={"goog-packaged-solution": RESOURCE_NAME_PREFIX},
     opts=api_deps,
   )
   return jobs_bucket, builds_bucket
@@ -341,7 +341,7 @@ def _create_gke_cluster(
       ),
       labels={
         RESOURCE_NAME_PREFIX: "true",
-        "goog-packaged-solution": "kinetic",
+        "goog-packaged-solution": RESOURCE_NAME_PREFIX,
       },
     ),
     workload_identity_config=gcp.container.ClusterWorkloadIdentityConfigArgs(
@@ -363,7 +363,7 @@ def _create_gke_cluster(
     ),
     resource_labels={
       RESOURCE_NAME_PREFIX: "true",
-      "goog-packaged-solution": "kinetic",
+      "goog-packaged-solution": RESOURCE_NAME_PREFIX,
     },
     cluster_autoscaling=gcp.container.ClusterClusterAutoscalingArgs(
       enabled=True,
@@ -580,7 +580,7 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       format="DOCKER",
       description="kinetic container images",
       project=project_id,
-      labels={"goog-packaged-solution": "kinetic"},
+      labels={"goog-packaged-solution": RESOURCE_NAME_PREFIX},
       opts=pulumi.ResourceOptions(depends_on=enabled_apis),
     )
 
@@ -691,7 +691,7 @@ def _create_gpu_node_pool(
       ],
       labels={
         RESOURCE_NAME_PREFIX: "true",
-        "goog-packaged-solution": "kinetic",
+        "goog-packaged-solution": RESOURCE_NAME_PREFIX,
       },
       max_run_duration=f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
       spot=gpu.spot,
@@ -761,7 +761,7 @@ def _create_tpu_node_pool(
       ),
       labels={
         RESOURCE_NAME_PREFIX: "true",
-        "goog-packaged-solution": "kinetic",
+        "goog-packaged-solution": RESOURCE_NAME_PREFIX,
       },
       max_run_duration=None
       if tpu.spot
