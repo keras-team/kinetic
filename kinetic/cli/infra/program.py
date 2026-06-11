@@ -123,6 +123,7 @@ def _create_buckets(
     force_destroy=force_destroy,
     uniform_bucket_level_access=True,
     lifecycle_rules=_BUCKET_LIFECYCLE_30D,
+    labels={"goog-packaged-solution": "kinetic"},
     opts=api_deps,
   )
   builds_bucket = gcp.storage.Bucket(
@@ -133,6 +134,7 @@ def _create_buckets(
     force_destroy=force_destroy,
     uniform_bucket_level_access=True,
     lifecycle_rules=_BUCKET_LIFECYCLE_30D,
+    labels={"goog-packaged-solution": "kinetic"},
     opts=api_deps,
   )
   return jobs_bucket, builds_bucket
@@ -337,7 +339,10 @@ def _create_gke_cluster(
       workload_metadata_config=gcp.container.ClusterNodeConfigWorkloadMetadataConfigArgs(
         mode="GKE_METADATA",
       ),
-      labels={RESOURCE_NAME_PREFIX: "true"},
+      labels={
+        RESOURCE_NAME_PREFIX: "true",
+        "goog-packaged-solution": "kinetic",
+      },
     ),
     workload_identity_config=gcp.container.ClusterWorkloadIdentityConfigArgs(
       workload_pool=f"{project_id}.svc.id.goog",
@@ -356,7 +361,10 @@ def _create_gke_cluster(
         enabled=True,
       ),
     ),
-    resource_labels={RESOURCE_NAME_PREFIX: "true"},
+    resource_labels={
+      RESOURCE_NAME_PREFIX: "true",
+      "goog-packaged-solution": "kinetic",
+    },
     cluster_autoscaling=gcp.container.ClusterClusterAutoscalingArgs(
       enabled=True,
       autoscaling_profile="OPTIMIZE_UTILIZATION",
@@ -572,6 +580,7 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       format="DOCKER",
       description="kinetic container images",
       project=project_id,
+      labels={"goog-packaged-solution": "kinetic"},
       opts=pulumi.ResourceOptions(depends_on=enabled_apis),
     )
 
@@ -680,7 +689,10 @@ def _create_gpu_node_pool(
           count=gpu.count,
         ),
       ],
-      labels={RESOURCE_NAME_PREFIX: "true"},
+      labels={
+        RESOURCE_NAME_PREFIX: "true",
+        "goog-packaged-solution": "kinetic",
+      },
       max_run_duration=f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
       spot=gpu.spot,
       reservation_affinity=reservation_affinity,
@@ -747,7 +759,10 @@ def _create_tpu_node_pool(
       workload_metadata_config=gcp.container.NodePoolNodeConfigWorkloadMetadataConfigArgs(
         mode="GKE_METADATA",
       ),
-      labels={RESOURCE_NAME_PREFIX: "true"},
+      labels={
+        RESOURCE_NAME_PREFIX: "true",
+        "goog-packaged-solution": "kinetic",
+      },
       max_run_duration=None
       if tpu.spot
       else f"{NODE_MAX_RUN_DURATION_SECONDS}s",  # 24 hours
