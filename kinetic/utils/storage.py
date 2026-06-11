@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import tempfile
@@ -12,6 +13,9 @@ from google.cloud import exceptions as cloud_exceptions
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
 from google.cloud.storage.retry import DEFAULT_RETRY
+
+import google.auth
+from google.auth import impersonated_credentials
 
 from kinetic.constants import get_default_project
 from kinetic.data import Data
@@ -391,3 +395,99 @@ def _upload_directory(
     worker_type=transfer_manager.THREAD,
     raise_exception=True,
   )
+
+
+def generate_job_signed_urls(
+  bucket_name: str,
+  job_id: str,
+  project: str,
+  signer_sa_email: str,
+  has_requirements: bool = False,
+  debug: bool = False,
+) -> dict[str, str]:
+  """Generate GCS Signed URLs for job isolation.
+
+  Impersonates the signer service account to sign URLs for job artifacts,
+  preventing the worker pods from needing broad GCS access.
+
+  Args:
+      bucket_name: GCS bucket name.
+      job_id: Unique job identifier.
+      project: GCP project ID.
+      signer_sa_email: GSA email to impersonate for signing.
+      has_requirements: Whether the job has a requirements.txt to download.
+      debug: Whether debug mode is enabled (generates debug sentinel URLs).
+
+  Returns:
+      Dict mapping artifact names to their signed URLs.
+  """
+  # 1. Get source credentials (user or default GSA)
+  source_credentials, _ = google.auth.default()
+
+  # 2. Create impersonated credentials for the signer SA
+  target_scopes = ["https://www.googleapis.com/auth/devstorage.full_control"]
+  creds = impersonated_credentials.Credentials(
+    source_credentials=source_credentials,
+    target_principal=signer_sa_email,
+    target_scopes=target_scopes,
+    lifetime=3600,
+  )
+
+  # 3. Initialize storage client with impersonated credentials
+  client = storage.Client(project=project, credentials=creds)
+  bucket = client.bucket(bucket_name)
+
+  # 4. Generate signed URLs
+  expiration = datetime.timedelta(days=7)
+  urls = {}
+
+  # Standard artifacts
+  for name, key, method in [
+    ("payload.pkl", "payload_download", "GET"),
+    ("context.zip", "context_download", "GET"),
+    ("result.pkl", "result_upload", "PUT"),
+  ]:
+    blob = bucket.blob(f"{job_id}/{name}")
+    urls[key] = blob.generate_signed_url(
+      version="v4",
+      expiration=expiration,
+      method=method,
+      service_account_email=signer_sa_email,
+    )
+
+  # Optional requirements
+  if has_requirements:
+    blob = bucket.blob(f"{job_id}/requirements.txt")
+    urls["requirements_download"] = blob.generate_signed_url(
+      version="v4",
+      expiration=expiration,
+      method="GET",
+      service_account_email=signer_sa_email,
+    )
+
+  # Optional debug sentinels
+  if debug:
+    # .debug_ready (PUT)
+    blob = bucket.blob(f"{job_id}/.debug_ready")
+    urls["debug_ready_upload"] = blob.generate_signed_url(
+      version="v4",
+      expiration=expiration,
+      method="PUT",
+      service_account_email=signer_sa_email,
+    )
+    # .leader_ready (PUT for leader, GET for workers)
+    blob = bucket.blob(f"{job_id}/.leader_ready")
+    urls["leader_ready_upload"] = blob.generate_signed_url(
+      version="v4",
+      expiration=expiration,
+      method="PUT",
+      service_account_email=signer_sa_email,
+    )
+    urls["leader_ready_download"] = blob.generate_signed_url(
+      version="v4",
+      expiration=expiration,
+      method="GET",
+      service_account_email=signer_sa_email,
+    )
+
+  return urls

@@ -17,6 +17,8 @@ import tempfile
 import time
 import traceback
 import urllib.parse
+import urllib.request
+import urllib.error
 import zipfile
 
 import cloudpickle
@@ -69,6 +71,15 @@ def main():
   )
   parser.add_argument(
     "--context-sha256", help="Expected SHA-256 hash of context"
+  )
+  parser.add_argument(
+    "--debug-ready-url", help="Signed URL to upload debug ready sentinel"
+  )
+  parser.add_argument(
+    "--leader-ready-upload-url", help="Signed URL to upload leader ready sentinel"
+  )
+  parser.add_argument(
+    "--leader-ready-download-url", help="Signed URL to download leader ready sentinel"
   )
 
   args_parsed, _ = parser.parse_known_args()
@@ -173,14 +184,24 @@ def main():
       # so there's a single source of truth. Fall back to 5678 (debugpy's
       # default and VS Code's auto-fill) if the env var is missing.
       debug_port = int(os.environ.get("KINETIC_DEBUG_PORT", 5678))
-      debugger_attached = _start_debug_server(debug_port)
+      debugger_attached = _start_debug_server(debug_port, args_parsed.debug_ready_url)
       # Signal workers (if any) that the leader is about to call the
       # user function, so they can proceed without racing ahead and
       # hanging on the distributed runtime.
-      _upload_leader_ready_sentinel()
+      if args_parsed.leader_ready_upload_url:
+        _upload_sentinel(args_parsed.leader_ready_upload_url)
+      else:
+        _upload_leader_ready_sentinel()
     elif is_debug_worker:
       # Pathways worker pod — wait for leader's sentinel before running.
-      _wait_for_leader_ready_sentinel()
+      if args_parsed.leader_ready_download_url:
+        leader_timeout = int(
+            os.environ.get("KINETIC_DEBUG_WAIT_TIMEOUT", _DEBUG_WAIT_TIMEOUT_DEFAULT)
+        )
+        timeout = leader_timeout + _WORKER_WAIT_BUFFER_SECONDS
+        _wait_for_sentinel(args_parsed.leader_ready_download_url, timeout)
+      else:
+        _wait_for_leader_ready_sentinel()
 
     # Execute function and capture result
     logging.info("Executing %s()", func.__name__)
@@ -357,6 +378,43 @@ def _wait_for_leader_ready_sentinel():
   )
 
 
+def _upload_sentinel(url: str):
+  """Upload an empty sentinel to a Signed URL."""
+  logging.info("Uploading sentinel to: %s", url)
+  try:
+    req = urllib.request.Request(url, data=b"", method="PUT")
+    with urllib.request.urlopen(req) as response:
+      if response.status not in (200, 201):
+        logging.warning("Failed to upload sentinel to %s: status %d", url, response.status)
+      else:
+        logging.info("Successfully uploaded sentinel to %s", url)
+  except Exception as e:
+    logging.warning("Failed to upload sentinel to %s: %s", url, e)
+
+
+def _wait_for_sentinel(url: str, timeout: int):
+  """Poll a Signed URL until it returns 200 (exists), or time out."""
+  poll_interval = 5
+  deadline = time.monotonic() + timeout
+  logging.info("Waiting up to %ds for sentinel at %s", timeout, url)
+  while time.monotonic() < deadline:
+    try:
+      req = urllib.request.Request(url, method="GET")
+      with urllib.request.urlopen(req) as response:
+        if response.status == 200:
+          logging.info("Sentinel is ready, proceeding.")
+          return
+    except urllib.error.HTTPError as e:
+      if e.code == 404:
+        logging.debug("Sentinel not ready yet (404)...")
+      else:
+        logging.warning("Error polling sentinel: %s", e)
+    except Exception as e:
+      logging.warning("Error polling sentinel: %s", e)
+    time.sleep(poll_interval)
+  raise RuntimeError(f"Sentinel did not appear within {timeout}s at {url}")
+
+
 def _install_debugger():
   """Install debugpy via uv pip at pod startup."""
   logging.info("Installing debugpy...")
@@ -379,7 +437,7 @@ def _install_debugger():
 _DEBUG_WAIT_TIMEOUT_DEFAULT = 600
 
 
-def _start_debug_server(port):
+def _start_debug_server(port, debug_ready_url=None):
   """Start debugpy server and wait for client attachment.
 
   Waits up to ``KINETIC_DEBUG_WAIT_TIMEOUT`` seconds (default 600) for
@@ -388,6 +446,7 @@ def _start_debug_server(port):
 
   Args:
       port: TCP port for debugpy to listen on.
+      debug_ready_url: Optional Signed URL to upload debug ready sentinel.
 
   Returns:
       True if a debugger client attached, False if timed out.
@@ -399,22 +458,25 @@ def _start_debug_server(port):
   debugpy.listen(("0.0.0.0", port))
 
   try:
-    # Signal readiness via a GCS sentinel so the local client can detect it.
-    # Use env vars set by the pod spec rather than parsing sys.argv.
-    bucket_name = os.environ.get("GCS_BUCKET")
-    job_id = os.environ.get("JOB_ID")
-    if not bucket_name or not job_id:
-      logging.warning("GCS_BUCKET or JOB_ID not set; skipping debug sentinel.")
+    if debug_ready_url:
+      _upload_sentinel(debug_ready_url)
     else:
-      blob = storage.Client().bucket(bucket_name).blob(f"{job_id}/.debug_ready")
-      blob.upload_from_string("")
-      logging.info(
-        "Published debugpy GCS sentinel to gs://%s/%s/.debug_ready",
-        bucket_name,
-        job_id,
-      )
-  except cloud_exceptions.GoogleCloudError as e:
-    logging.warning("Failed to publish debug readiness sentinel to GCS: %s", e)
+      # Signal readiness via a GCS sentinel so the local client can detect it.
+      # Use env vars set by the pod spec rather than parsing sys.argv.
+      bucket_name = os.environ.get("GCS_BUCKET")
+      job_id = os.environ.get("JOB_ID")
+      if not bucket_name or not job_id:
+        logging.warning("GCS_BUCKET or JOB_ID not set; skipping debug sentinel.")
+      else:
+        blob = storage.Client().bucket(bucket_name).blob(f"{job_id}/.debug_ready")
+        blob.upload_from_string("")
+        logging.info(
+          "Published debugpy GCS sentinel to gs://%s/%s/.debug_ready",
+          bucket_name,
+          job_id,
+        )
+  except Exception as e:
+    logging.warning("Failed to publish debug readiness sentinel: %s", e)
 
   logging.info("[DEBUGPY] Ready \u2014 listening on 0.0.0.0:%d", port)
 
@@ -644,13 +706,18 @@ def _download_data(
 
 
 def _download_from_gcs(client, gcs_path, local_path):
-  """Download file from GCS.
+  """Download file from GCS or Signed URL.
 
   Args:
-      client: Cloud Storage client
-      gcs_path: GCS URI (gs://bucket/path)
+      client: Cloud Storage client (can be None if using Signed URL)
+      gcs_path: GCS URI (gs://...) or Signed URL (http://... or https://...)
       local_path: Local file path
   """
+  if gcs_path.startswith("http://") or gcs_path.startswith("https://"):
+    logging.info("Downloading from Signed URL: %s", gcs_path)
+    urllib.request.urlretrieve(gcs_path, local_path)
+    return
+
   # Parse gs://bucket/path format
   parts = gcs_path.replace("gs://", "").split("/", 1)
   bucket_name = parts[0]
@@ -662,13 +729,23 @@ def _download_from_gcs(client, gcs_path, local_path):
 
 
 def _upload_to_gcs(client, local_path, gcs_path):
-  """Upload file to GCS.
+  """Upload file to GCS or Signed URL.
 
   Args:
-      client: Cloud Storage client
+      client: Cloud Storage client (can be None if using Signed URL)
       local_path: Local file path
-      gcs_path: GCS URI (gs://bucket/path)
+      gcs_path: GCS URI (gs://...) or Signed URL (http://... or https://...)
   """
+  if gcs_path.startswith("http://") or gcs_path.startswith("https://"):
+    logging.info("Uploading to Signed URL: %s", gcs_path)
+    with open(local_path, "rb") as f:
+      data = f.read()
+    req = urllib.request.Request(gcs_path, data=data, method="PUT")
+    with urllib.request.urlopen(req) as response:
+      if response.status not in (200, 201):
+        raise RuntimeError(f"Upload failed with status {response.status}: {response.read()}")
+    return
+
   parts = gcs_path.replace("gs://", "").split("/", 1)
   bucket_name = parts[0]
   blob_path = parts[1]

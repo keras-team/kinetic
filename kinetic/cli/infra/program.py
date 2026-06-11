@@ -194,14 +194,23 @@ def _create_service_accounts(
   repo: gcp.artifactregistry.Repository,
   jobs_bucket: gcp.storage.Bucket,
   builds_bucket: gcp.storage.Bucket,
+  deployer_email: pulumi.Input[str],
   enabled_apis: list[gcp.projects.Service],
-) -> tuple[gcp.serviceaccount.Account, gcp.serviceaccount.Account]:
-  """Create node and build service accounts with their IAM bindings."""
+) -> tuple[
+    gcp.serviceaccount.Account,
+    gcp.serviceaccount.Account,
+    gcp.serviceaccount.Account,
+    gcp.serviceaccount.Account,
+]:
+  """Create service accounts with their IAM bindings.
+
+  Returns:
+      Tuple of (node_sa, worker_sa, signer_sa, build_sa)
+  """
   api_deps = pulumi.ResourceOptions(depends_on=enabled_apis)
   bucket_pairs = [("jobs", jobs_bucket), ("builds", builds_bucket)]
 
-  # Node SA — used by GKE workload pods (GCS, logging, monitoring,
-  #   pulling images from AR).
+  # 1. Node SA — used by GKE nodes (NO GCS bucket access, only logging/monitoring/AR).
   node_sa = gcp.serviceaccount.Account(
     "kinetic-node-sa",
     account_id=f"kn-{cluster_name}-nodes",
@@ -218,14 +227,83 @@ def _create_service_accounts(
       "roles/monitoring.metricWriter",
       "roles/container.defaultNodeServiceAccount",
     ],
-    bucket_pairs,
+    [],  # No GCS bucket access for nodes
     repo,
     ar_location,
     "roles/artifactregistry.reader",
     enabled_apis,
   )
 
-  # Build SA — used as the Cloud Build execution SA.
+  # 2. Worker SA — used by GKE workload pods (restricted GCS access to cache).
+  worker_sa = gcp.serviceaccount.Account(
+    "kinetic-worker-sa",
+    account_id=f"kn-{cluster_name}-workers",
+    display_name=f"kinetic {cluster_name} worker SA",
+    project=project_id,
+    opts=api_deps,
+  )
+  # Basic project roles for workers (logging/monitoring)
+  for role in ["roles/logging.logWriter", "roles/monitoring.metricWriter"]:
+    gcp.projects.IAMMember(
+      f"worker-sa-{role.split('/')[-1]}",
+      project=project_id,
+      role=role,
+      member=worker_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+      opts=api_deps,
+    )
+  # Restricted GCS access: read-only on data-cache and data-markers
+  gcp.storage.BucketIAMMember(
+    "worker-sa-storage-jobs-viewer",
+    bucket=jobs_bucket.name,
+    role="roles/storage.objectViewer",
+    member=worker_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+    condition=gcp.storage.BucketIAMMemberConditionArgs(
+      title="restrict-to-cache",
+      expression=pulumi.Output.format(
+        "resource.name.startsWith('projects/_/buckets/{0}/objects/default/data-cache/') || "
+        "resource.name.startsWith('projects/_/buckets/{0}/objects/default/data-markers/')",
+        jobs_bucket.name,
+      ),
+    ),
+  )
+  # Legacy bucket reader (required for FUSE mount to get bucket metadata)
+  gcp.storage.BucketIAMMember(
+    "worker-sa-storage-jobs-bucket-reader",
+    bucket=jobs_bucket.name,
+    role="roles/storage.legacyBucketReader",
+    member=worker_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+  )
+
+  # 3. Signer SA — used by client to sign GCS URLs.
+  signer_sa = gcp.serviceaccount.Account(
+    "kinetic-signer-sa",
+    account_id=f"kn-{cluster_name}-signer",
+    display_name=f"kinetic {cluster_name} signer SA",
+    project=project_id,
+    opts=api_deps,
+  )
+  # Full GCS admin on jobs bucket
+  gcp.storage.BucketIAMMember(
+    "signer-sa-storage-jobs-admin",
+    bucket=jobs_bucket.name,
+    role="roles/storage.objectAdmin",
+    member=signer_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+  )
+  gcp.storage.BucketIAMMember(
+    "signer-sa-storage-jobs-bucket-reader",
+    bucket=jobs_bucket.name,
+    role="roles/storage.legacyBucketReader",
+    member=signer_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+  )
+  # Allow deployer to impersonate signer GSA
+  gcp.serviceaccount.IAMMember(
+    "deployer-impersonate-signer",
+    service_account_id=signer_sa.name,
+    role="roles/iam.serviceAccountTokenCreator",
+    member=pulumi.Output.format("user:{0}", deployer_email),
+  )
+
+  # 4. Build SA — used as the Cloud Build execution SA (unchanged).
   build_sa = gcp.serviceaccount.Account(
     "kinetic-build-sa",
     account_id=f"kn-{cluster_name}-builds",
@@ -245,7 +323,7 @@ def _create_service_accounts(
     enabled_apis,
   )
 
-  return node_sa, build_sa
+  return node_sa, worker_sa, signer_sa, build_sa
 
 
 def _create_firewall_cleanup(
@@ -387,7 +465,7 @@ def _create_gke_cluster(
 
 def _create_k8s_resources(
   cluster: gcp.container.Cluster,
-  node_sa: gcp.serviceaccount.Account,
+  worker_sa: gcp.serviceaccount.Account,
   project_id: str,
   node_pools: list[NodePoolConfig],
 ) -> None:
@@ -403,10 +481,10 @@ def _create_k8s_resources(
   )
 
   # Workload Identity binding — allow the kinetic KSA to impersonate the
-  # node GSA.
+  # worker GSA.
   gcp.serviceaccount.IAMMember(
     "wif-kinetic-ksa",
-    service_account_id=node_sa.name,
+    service_account_id=worker_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=pulumi.Output.format(
       "serviceAccount:{0}.svc.id.goog[default/{1}]",
@@ -423,7 +501,7 @@ def _create_k8s_resources(
       name=KINETIC_KSA_NAME,
       namespace="default",
       annotations={
-        "iam.gke.io/gcp-service-account": node_sa.email,
+        "iam.gke.io/gcp-service-account": worker_sa.email,
       },
     ),
     opts=pulumi.ResourceOptions(provider=k8s_provider),
@@ -491,6 +569,8 @@ def _export_stack_outputs(
   zone: str,
   cluster: gcp.container.Cluster,
   node_sa: gcp.serviceaccount.Account,
+  worker_sa: gcp.serviceaccount.Account,
+  signer_sa: gcp.serviceaccount.Account,
   repo: gcp.artifactregistry.Repository,
   ar_location: str,
   cluster_name: str,
@@ -503,6 +583,8 @@ def _export_stack_outputs(
   pulumi.export("cluster_name", cluster.name)
   pulumi.export("cluster_endpoint", cluster.endpoint)
   pulumi.export("node_sa_email", node_sa.email)
+  pulumi.export("worker_sa_email", worker_sa.email)
+  pulumi.export("signer_sa_email", signer_sa.email)
   pulumi.export("force_destroy", force_destroy)
   pulumi.export(
     "ar_registry",
@@ -565,6 +647,10 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
 
     enabled_apis = _enable_apis(project_id)
 
+    # Get deployer email for signer GSA impersonation
+    client_config = gcp.organizations.get_client_config()
+    deployer_email = client_config.email
+
     repo = gcp.artifactregistry.Repository(
       "kinetic-repo",
       repository_id=f"kn-{cluster_name}",
@@ -584,13 +670,14 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       config.force_destroy,
     )
 
-    node_sa, _build_sa = _create_service_accounts(
+    node_sa, worker_sa, signer_sa, _build_sa = _create_service_accounts(
       project_id,
       cluster_name,
       ar_location,
       repo,
       jobs_bucket,
       builds_bucket,
+      deployer_email,
       enabled_apis,
     )
 
@@ -602,19 +689,20 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       cluster_name,
       zone,
       network,
-      node_sa,
+      node_sa, # Nodes still use node_sa
       enabled_apis,
       firewall_cleanup,
     )
 
-    _create_k8s_resources(cluster, node_sa, project_id, config.node_pools)
+    # K8s resources (WIF KSA) use worker_sa
+    _create_k8s_resources(cluster, worker_sa, project_id, config.node_pools)
 
     pool_entries = _create_accelerator_pools(
       cluster,
       config.node_pools,
       zone,
       project_id,
-      node_sa.email,
+      node_sa.email, # Node pools still use node_sa
     )
 
     _export_stack_outputs(
@@ -622,6 +710,8 @@ def create_program(config: InfraConfig) -> Callable[[], None]:
       zone,
       cluster,
       node_sa,
+      worker_sa,
+      signer_sa,
       repo,
       ar_location,
       cluster_name,

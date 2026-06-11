@@ -389,5 +389,92 @@ class TestUploadDirectory(absltest.TestCase):
     self.mock_upload.assert_not_called()
 
 
+class TestGenerateSignedUrls(_GcsTestBase):
+  """Verify generation of GCS Signed URLs for job isolation."""
+
+  @mock.patch("kinetic.utils.storage.storage.Client")
+  @mock.patch("kinetic.utils.storage.impersonated_credentials.Credentials")
+  @mock.patch("kinetic.utils.storage.google.auth.default")
+  def test_generates_standard_urls(self, mock_auth_default, mock_impersonated_creds, mock_client_class):
+    # Mock default credentials
+    mock_user_creds = mock.MagicMock()
+    mock_auth_default.return_value = (mock_user_creds, "test-project")
+    
+    # Mock impersonated credentials
+    mock_imp_creds = mock_impersonated_creds.return_value
+    
+    # Mock GCS blob generate_signed_url
+    mock_bucket = mock_client_class.return_value.bucket.return_value
+    mock_blob = mock_bucket.blob.return_value
+    mock_blob.generate_signed_url.return_value = "https://signed-url"
+    
+    urls = storage_module.generate_job_signed_urls(
+        bucket_name="my-bucket",
+        job_id="job-123",
+        project="test-project",
+        signer_sa_email="signer@test.iam.gserviceaccount.com",
+        has_requirements=False,
+        debug=False
+    )
+    
+    # Verify impersonation was set up
+    mock_impersonated_creds.assert_called_once_with(
+        source_credentials=mock_user_creds,
+        target_principal="signer@test.iam.gserviceaccount.com",
+        target_scopes=["https://www.googleapis.com/auth/devstorage.full_control"],
+        lifetime=3600
+    )
+    
+    # Verify storage.Client was initialized with impersonated credentials
+    mock_client_class.assert_called_with(project="test-project", credentials=mock_imp_creds)
+    
+    # Verify standard URLs are in the result
+    self.assertEqual(urls["payload_download"], "https://signed-url")
+    self.assertEqual(urls["context_download"], "https://signed-url")
+    self.assertEqual(urls["result_upload"], "https://signed-url")
+    self.assertNotIn("requirements_download", urls)
+    self.assertNotIn("debug_ready_upload", urls)
+    
+    # Verify generate_signed_url calls
+    self.assertEqual(mock_blob.generate_signed_url.call_count, 3)
+    mock_blob.generate_signed_url.assert_any_call(
+        version="v4",
+        expiration=mock.ANY,
+        method="GET",
+        service_account_email="signer@test.iam.gserviceaccount.com"
+    )
+    mock_blob.generate_signed_url.assert_any_call(
+        version="v4",
+        expiration=mock.ANY,
+        method="PUT",
+        service_account_email="signer@test.iam.gserviceaccount.com"
+    )
+
+  @mock.patch("kinetic.utils.storage.impersonated_credentials.Credentials")
+  @mock.patch("kinetic.utils.storage.google.auth.default")
+  def test_generates_optional_urls(self, mock_auth_default, mock_impersonated_creds):
+    mock_user_creds = mock.MagicMock()
+    mock_auth_default.return_value = (mock_user_creds, "test-project")
+    
+    mock_bucket = self.mock_gcs.bucket.return_value
+    mock_blob = mock_bucket.blob.return_value
+    mock_blob.generate_signed_url.return_value = "https://signed-url"
+    
+    urls = storage_module.generate_job_signed_urls(
+        bucket_name="my-bucket",
+        job_id="job-123",
+        project="test-project",
+        signer_sa_email="signer@test.iam.gserviceaccount.com",
+        has_requirements=True,
+        debug=True
+    )
+    
+    self.assertIn("requirements_download", urls)
+    self.assertIn("debug_ready_upload", urls)
+    self.assertIn("leader_ready_upload", urls)
+    self.assertIn("leader_ready_download", urls)
+    self.assertEqual(mock_blob.generate_signed_url.call_count, 7) # 3 std + 1 req + 3 debug
+
+
 if __name__ == "__main__":
   absltest.main()

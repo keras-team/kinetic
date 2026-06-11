@@ -73,6 +73,7 @@ def submit_pathways_job(
   debug=False,
   payload_sha256=None,
   context_sha256=None,
+  signed_urls=None,
 ):
   """Submit a LeaderWorkerSet to GKE cluster.
 
@@ -88,6 +89,7 @@ def submit_pathways_job(
           install (prebuilt image mode).
       payload_sha256: Optional SHA-256 hash of payload.pkl for verification.
       context_sha256: Optional SHA-256 hash of context.zip for verification.
+      signed_urls: Optional dict of GCS Signed URLs for job isolation.
 
   Returns:
       dict: The created LeaderWorkerSet object
@@ -120,6 +122,7 @@ def submit_pathways_job(
     debug=debug,
     payload_sha256=payload_sha256,
     context_sha256=context_sha256,
+    signed_urls=signed_urls,
   )
 
   custom_api = _custom_api()
@@ -440,6 +443,7 @@ def _create_lws_spec(
   debug=False,
   payload_sha256=None,
   context_sha256=None,
+  signed_urls=None,
 ):
   """Create a LeaderWorkerSet manifest."""
 
@@ -466,16 +470,31 @@ def _create_lws_spec(
       entry["value"] = t["value"]
     tolerations.append(entry)
 
-  container_args = [
-    "--context-gcs",
-    f"gs://{bucket_name}/{job_id}/context.zip",
-    "--payload-gcs",
-    f"gs://{bucket_name}/{job_id}/payload.pkl",
-    "--result-gcs",
-    f"gs://{bucket_name}/{job_id}/result.pkl",
-  ]
-  if requirements_uri:
-    container_args.extend(["--requirements-gcs", requirements_uri])
+  # Container arguments: context, payload, result, [requirements]
+  if signed_urls:
+    container_args = [
+      "--context-gcs", signed_urls["context_download"],
+      "--payload-gcs", signed_urls["payload_download"],
+      "--result-gcs", signed_urls["result_upload"],
+    ]
+    if "requirements_download" in signed_urls:
+      container_args.extend(["--requirements-gcs", signed_urls["requirements_download"]])
+    if "debug_ready_upload" in signed_urls:
+      container_args.extend(["--debug-ready-url", signed_urls["debug_ready_upload"]])
+    if "leader_ready_upload" in signed_urls:
+      container_args.extend(["--leader-ready-upload-url", signed_urls["leader_ready_upload"]])
+    if "leader_ready_download" in signed_urls:
+      container_args.extend(["--leader-ready-download-url", signed_urls["leader_ready_download"]])
+  else:
+    # Legacy GCS URIs
+    container_args = [
+      "--context-gcs", f"gs://{bucket_name}/{job_id}/context.zip",
+      "--payload-gcs", f"gs://{bucket_name}/{job_id}/payload.pkl",
+      "--result-gcs", f"gs://{bucket_name}/{job_id}/result.pkl",
+    ]
+    if requirements_uri:
+      container_args.extend(["--requirements-gcs", requirements_uri])
+
   if payload_sha256:
     container_args.extend(["--payload-sha256", payload_sha256])
   if context_sha256:
