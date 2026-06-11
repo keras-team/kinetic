@@ -204,7 +204,10 @@ class TestClusterResourceLabels(absltest.TestCase):
     self.assertIsNotNone(cluster_call)
     self.assertEqual(
       cluster_call.kwargs["resource_labels"],
-      {program.RESOURCE_NAME_PREFIX: "true"},
+      {
+        program.RESOURCE_NAME_PREFIX: "true",
+        "goog-packaged-solution": "kinetic",
+      },
     )
 
   def test_default_node_pool_has_kinetic_label(self):
@@ -226,7 +229,10 @@ class TestClusterResourceLabels(absltest.TestCase):
     self.assertIsNotNone(cluster_call)
     self.assertEqual(
       node_config_call.kwargs["labels"],
-      {program.RESOURCE_NAME_PREFIX: "true"},
+      {
+        program.RESOURCE_NAME_PREFIX: "true",
+        "goog-packaged-solution": "kinetic",
+      },
     )
 
 
