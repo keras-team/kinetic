@@ -26,7 +26,6 @@ def configure_kubectl(cluster_name, zone, project):
       "container",
       "clusters",
       "get-credentials",
-      "--",
       cluster_name,
       f"--zone={zone}",
       f"--project={project}",

@@ -222,7 +222,6 @@ def _configure_kubeconfig(cluster_name: str, zone: str, project: str) -> None:
         "container",
         "clusters",
         "get-credentials",
-        "--",
         cluster_name,
         f"--zone={zone}",
         f"--project={project}",
