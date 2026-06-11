@@ -227,7 +227,7 @@ class TestEnsureKubeconfig(absltest.TestCase):
       credentials.ensure_kubeconfig("my-proj", "us-central1-a", "my-cluster")
 
   def test_configure_kubeconfig_args(self):
-    """Verify that _configure_kubeconfig uses -- delimiter."""
+    """Verify that _configure_kubeconfig passes cluster before flags."""
     with (
       mock.patch(
         f"{_MODULE}.subprocess.run",
@@ -238,12 +238,12 @@ class TestEnsureKubeconfig(absltest.TestCase):
       )
       mock_run.assert_called_once()
       args = mock_run.call_args[0][0]
-      self.assertIn("--", args)
+      self.assertNotIn("--", args)
       idx_get = args.index("get-credentials")
-      idx_delim = args.index("--")
       idx_cluster = args.index("my-cluster")
-      self.assertLess(idx_get, idx_delim)
-      self.assertLess(idx_delim, idx_cluster)
+      self.assertEqual(idx_cluster, idx_get + 1)
+      self.assertGreater(args.index("--zone=us-central1-a"), idx_cluster)
+      self.assertGreater(args.index("--project=my-proj"), idx_cluster)
 
 
 if __name__ == "__main__":
