@@ -162,6 +162,49 @@ def _raise_with_details(base_msg, core_v1, job_name, namespace):
   raise RuntimeError(msg)
 
 
+def _pod_has_failed(pod):
+  """Return True if a pod (e.g. a worker) is in the ``Failed`` phase.
+
+  A container that fails (app or init) surfaces as a ``Failed`` pod phase,
+  which is the signal #239 is about. We intentionally do *not* infer
+  failure from a non-zero container exit code while the phase is still
+  ``Running``: under the LWS ``RecreateGroupOnPodRestart`` policy a pod can
+  briefly show a non-zero termination during a normal group recreate or
+  teardown, and treating that as a failure would risk marking a succeeding
+  job as failed.
+  """
+  status = pod.status
+  return status is not None and status.phase == "Failed"
+
+
+def _any_pod_failed(core_v1, job_name, namespace):
+  """Return True if any pod in the LWS group (e.g. a worker) has failed.
+
+  The leader pod can reach a terminal success state while a worker has
+  failed, so a leader-only check would report the whole job as successful.
+  All pods carry the ``job-name`` label, so we re-check every pod before
+  treating the job as done. If the listing fails we conservatively report
+  no failure rather than blocking on a transient API error.
+  """
+  try:
+    pods = k8s_utils.list_job_pods(core_v1, job_name, namespace)
+  except ApiException as e:
+    logging.warning(f"Could not verify worker pod status: {e.reason}")
+    return False
+  return any(_pod_has_failed(pod) for pod in pods)
+
+
+def _raise_if_any_pod_failed(core_v1, job_name, namespace):
+  """Raise with failure details if any pod in the LWS group has failed."""
+  if _any_pod_failed(core_v1, job_name, namespace):
+    _raise_with_details(
+      f"Pathways job {job_name} failed",
+      core_v1,
+      job_name,
+      namespace,
+    )
+
+
 def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
   """Wait for Pathways Job (LeaderWorkerSet) to complete."""
   core_v1 = k8s_utils.core_v1()
@@ -189,6 +232,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
           logged_running = True
 
         if pod.status.phase == "Succeeded":
+          _raise_if_any_pod_failed(core_v1, job_name, namespace)
           logging.info(f"[REMOTE] Job {job_name} completed successfully")
           return "success"
 
@@ -224,6 +268,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
         # Check current state
         if container_status.state.terminated:
           if container_status.state.terminated.exit_code == 0:
+            _raise_if_any_pod_failed(core_v1, job_name, namespace)
             logging.info(f"[REMOTE] Job {job_name} completed successfully")
             return "success"
           else:
@@ -237,6 +282,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
         # Check last state (in case it restarted)
         if container_status.last_state.terminated:
           if container_status.last_state.terminated.exit_code == 0:
+            _raise_if_any_pod_failed(core_v1, job_name, namespace)
             logging.info(
               f"[REMOTE] Job {job_name} completed successfully (restarted)"
             )
@@ -337,21 +383,28 @@ def get_job_status(job_name, namespace="default") -> JobStatus:
       )
     raise RuntimeError(f"Failed to read leader pod status: {e.reason}") from e
 
-  if pod.status.phase == "Succeeded":
+  def _succeeded_unless_worker_failed():
+    # A successful leader does not imply the whole job succeeded: a worker
+    # pod may have failed independently (see #239).
+    if _any_pod_failed(core_v1, job_name, namespace):
+      return JobStatus.FAILED
     return JobStatus.SUCCEEDED
+
+  if pod.status.phase == "Succeeded":
+    return _succeeded_unless_worker_failed()
   if pod.status.phase == "Failed":
     return JobStatus.FAILED
   if pod.status.container_statuses:
     container_status = pod.status.container_statuses[0]
     if container_status.state.terminated:
       return (
-        JobStatus.SUCCEEDED
+        _succeeded_unless_worker_failed()
         if container_status.state.terminated.exit_code == 0
         else JobStatus.FAILED
       )
     if container_status.last_state.terminated:
       return (
-        JobStatus.SUCCEEDED
+        _succeeded_unless_worker_failed()
         if container_status.last_state.terminated.exit_code == 0
         else JobStatus.FAILED
       )

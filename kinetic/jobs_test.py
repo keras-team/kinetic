@@ -379,6 +379,28 @@ class TestJobHandleMethods(absltest.TestCase):
       k8s=True, gcs=True, cleanup_timeout=180, cleanup_poll_interval=2
     )
 
+  def test_result_failed_status_with_success_payload_raises(self):
+    # A worker pod failed (terminal FAILED) even though the leader produced
+    # a success payload: result() must raise, not return the leader's value.
+    handle = self._make_handle(backend="pathways")
+
+    with (
+      mock.patch.object(
+        handle,
+        "status",
+        side_effect=[JobStatus.RUNNING, JobStatus.FAILED],
+      ),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={"success": True, "result": 42},
+      ),
+      mock.patch.object(handle, "cleanup"),
+      mock.patch("kinetic.jobs.time.sleep"),
+      self.assertRaisesRegex(RuntimeError, "failed even though"),
+    ):
+      handle.result()
+
   def test_result_checks_gcs_after_not_found(self):
     handle = self._make_handle()
 
