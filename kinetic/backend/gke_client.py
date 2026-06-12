@@ -126,7 +126,7 @@ def wait_for_job(job, namespace="default", timeout=3600, poll_interval=10):
   logged_running = False
   logged_pending = set()
 
-  with LogStreamer(core_v1, namespace) as streamer:
+  with LogStreamer(core_v1, namespace, job_id=job_name) as streamer:
     while True:
       # Check timeout
       elapsed = time.time() - start_time
