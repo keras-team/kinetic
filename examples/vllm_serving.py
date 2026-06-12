@@ -1,3 +1,9 @@
+"""Export a KerasHub causal LM to the Hugging Face Transformers format
+and serve it with vLLM on a Kinetic GPU, in a single job.
+
+See the accompanying guide for prerequisites and configuration.
+"""
+
 import os
 
 import kinetic
@@ -78,25 +84,38 @@ def _setup_gpu_runtime():
 
 
 def _persist_export(export_dir):
-  """Archive the exported checkpoint to the job's durable output dir."""
+  """Upload the exported checkpoint directory to the job's durable
+  output dir."""
   import shutil
 
   output_dir = os.environ.get("KINETIC_OUTPUT_DIR")
   if not output_dir:
     return None
-  # Plain tar: model weights are high-entropy, gzip only costs time.
-  print("Archiving exported checkpoint (this can take a few minutes)...")
-  archive = shutil.make_archive("/tmp/hf_export_archive", "tar", export_dir)
-  dest = f"{output_dir.rstrip('/')}/hf_export.tar"
+  dest = f"{output_dir.rstrip('/')}/hf_export"
   if dest.startswith("gs://"):
+    # Direct directory upload: no tar copy on ephemeral disk, and
+    # parallel workers make it fast.
     from google.cloud import storage
+    from google.cloud.storage import transfer_manager
 
-    bucket_name, _, blob_name = dest[5:].partition("/")
-    blob = storage.Client().bucket(bucket_name).blob(blob_name)
-    blob.upload_from_filename(archive)
+    bucket_name, _, blob_prefix = dest[5:].partition("/")
+    bucket = storage.Client().bucket(bucket_name)
+    files = []
+    for root, _, filenames in os.walk(export_dir):
+      for filename in filenames:
+        rel_path = os.path.relpath(os.path.join(root, filename), export_dir)
+        files.append(rel_path)
+    print("Uploading exported checkpoint to GCS...")
+    transfer_manager.upload_many_from_filenames(
+      bucket,
+      files,
+      source_directory=export_dir,
+      blob_name_prefix=blob_prefix + "/",
+      worker_type=transfer_manager.THREAD,
+      raise_exception=True,
+    )
   else:
-    os.makedirs(output_dir, exist_ok=True)
-    shutil.copy(archive, dest)
+    shutil.copytree(export_dir, dest, dirs_exist_ok=True)
   return dest
 
 
@@ -116,6 +135,8 @@ def export_and_serve(prompts):
   import keras_hub
   import torch
 
+  # Forwarded via capture_env_vars; ~/.kaggle/kaggle.json doesn't
+  # travel to the pod.
   print(
     "Kaggle creds in pod:",
     bool(os.environ.get("KAGGLE_USERNAME"))
@@ -128,6 +149,12 @@ def export_and_serve(prompts):
   print("Exporting to Hugging Face Transformers format...")
   lm.export_to_transformers(EXPORT_DIR)
   _ensure_architectures(EXPORT_DIR)
+
+  # Persist before starting vLLM: engine init is the riskiest step,
+  # and the checkpoint survives even if it crashes.
+  artifact = _persist_export(EXPORT_DIR)
+  if artifact:
+    print(f"Exported model uploaded to: {artifact}")
 
   # Release VRAM before handing the GPU to vLLM.
   del lm
@@ -152,10 +179,6 @@ def export_and_serve(prompts):
     {"prompt": o.prompt, "completion": o.outputs[0].text.strip()}
     for o in outputs
   ]
-
-  artifact = _persist_export(EXPORT_DIR)
-  if artifact:
-    print(f"Exported model archived at: {artifact}")
 
   return results
 

@@ -1,4 +1,4 @@
-# Serving KerasHub Models with vLLM
+# Serving KerasHub Models with vLLM using Kinetic 
 
 This guide explains how to export a KerasHub model to the Hugging Face
 Transformers format and serve it with vLLM using the Kinetic framework —
@@ -12,7 +12,7 @@ KerasHub causal LMs can be exported natively with
 and vLLM serving in a single GPU job: the model is downloaded and exported
 on the remote worker, the GPU is handed over to vLLM, and batched
 completions are returned to your local machine. The exported checkpoint is
-also archived to `KINETIC_OUTPUT_DIR`, so it can be served again anywhere
+also uploaded to `KINETIC_OUTPUT_DIR`, so it can be served again anywhere
 vLLM runs.
 
 The example uses `gemma3_4b` (~8 GB in bfloat16), which fits a single
@@ -111,7 +111,7 @@ machine, and no re-initialization of Kinetic is needed.
 
 1. **Export script** (directory A, `requirements.txt`: `keras`,
    `keras-hub`, `tensorflow-text`) — the export half of this example, on
-   any accelerator (`"cpu"` works). It archives the checkpoint to
+   any accelerator (`"cpu"` works). It uploads the checkpoint directory to
    `KINETIC_OUTPUT_DIR` (a GCS path), which it returns; pass that path to
    the serving script.
 2. **Serving script** (directory B, `requirements.txt`: `vllm-tpu`) —
@@ -119,9 +119,9 @@ machine, and no re-initialization of Kinetic is needed.
    [Running vLLM on TPU with Kinetic](../guides/vllm_tpu.md): set
    `VLLM_TARGET_DEVICE="tpu"`, `VLLM_USE_V1="0"`, and
    `JAX_PLATFORMS="tpu,cpu"` locally and forward them with
-   `capture_env_vars`. The job downloads the archive from GCS to the
-   pod's local disk, unpacks it, and points `LLM(model=...)` at that
-   directory instead of a Hub model ID:
+   `capture_env_vars`. The job downloads the checkpoint directory from
+   GCS to the pod's local disk and points `LLM(model=...)` at it instead
+   of a Hub model ID:
 
 ```python
 @kinetic.run(
@@ -129,8 +129,8 @@ machine, and no re-initialization of Kinetic is needed.
     capture_env_vars=["VLLM_*", "JAX_*"],
 )
 def serve_on_tpu(checkpoint_gs_path, prompts):
-    # Download + unpack the exported checkpoint from GCS to /tmp/hf_export
-    # (google.cloud.storage download, tarfile.extractall), then:
+    # Download the exported checkpoint directory from GCS to
+    # /tmp/hf_export (google.cloud.storage transfer_manager), then:
     from vllm import LLM, SamplingParams
 
     llm = LLM(model="/tmp/hf_export", max_model_len=1024)
