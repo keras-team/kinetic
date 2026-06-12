@@ -25,16 +25,12 @@ gcloud auth application-default login
 ## Install
 
 ```bash
-uv pip install "keras-kinetic[cli]"
+uv pip install keras-kinetic
 ```
 
-The base `keras-kinetic` package installs the `@kinetic.run()`
-decorator. The `[cli]` extra adds the dependencies the `kinetic` CLI
-needs to provision and manage infrastructure (Pulumi and the GCP
-plugins). We recommend installing the `[cli]` extra even if you're only
-submitting jobs against an already-provisioned cluster — the CLI makes
-troubleshooting and job management much easier. Drop it only if you're
-sure you won't need CLI access.
+This installs the `@kinetic.run()` decorator and the `kinetic` CLI,
+which provisions and manages infrastructure (Pulumi and the GCP
+plugins).
 
 > **Note:** The [Pulumi](https://www.pulumi.com/) CLI (used for
 > infrastructure provisioning) is bundled and managed automatically.

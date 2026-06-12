@@ -32,10 +32,6 @@ dependencies = [
     "google-cloud-storage>=3.10",
     "google-cloud-build>=3.36",
     "kubernetes>=35.0",
-]
-
-[project.optional-dependencies]
-cli = [
     "click>=8.1",
     "google-cloud-secret-manager>=2.20",
     "pulumi>=3.0",
@@ -43,6 +39,11 @@ cli = [
     "pulumi-command>=1.0",
     "pulumi-kubernetes>=4.0",
 ]
+
+[project.optional-dependencies]
+# Deprecated: CLI deps now ship in core. Kept empty so existing
+# `keras-kinetic[cli]` installs keep resolving; remove after 0.0.x.
+cli = []
 test = [
     "coverage>=7.0",
     "pytest-xdist>=3.0",
@@ -50,7 +51,6 @@ test = [
 dev = [
     "pre-commit",
     "ruff",
-    "keras-kinetic[cli]",
     "keras-kinetic[test]",
     "keras-kinetic[release]",
 ]

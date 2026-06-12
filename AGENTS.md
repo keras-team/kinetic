@@ -231,8 +231,8 @@ Images are tagged with `SHA256(base_image + accelerator_type + requirements.txt 
 
 - **Build tool**: hatchling
 - **Python**: >=3.11
-- **Core deps**: absl-py, cloudpickle, numpy, keras, google-cloud-{artifact-registry,storage,build}, kubernetes
-- **CLI deps** (optional `[cli]`): click, rich, pulumi, pulumi-gcp
+- **Core deps**: see `[project.dependencies]` in `pyproject.toml` (single source of truth)
+- **CLI deps**: now part of core (the `[cli]` extra is retained but empty for back-compat)
 - **Dev deps** (optional `[dev]`): pre-commit, ruff
 - **Entry point**: `kinetic` → `kinetic.cli.main:cli`
 
