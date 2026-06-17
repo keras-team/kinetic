@@ -1,138 +1,88 @@
-# Serving KerasHub Models with vLLM using Kinetic 
-
-This guide explains how to export a KerasHub model to the Hugging Face
-Transformers format and serve it with vLLM using the Kinetic framework —
-on a Cloud GPU in a single job, or on TPU as a two-job workflow.
+# Serving KerasHub models with vLLM using Kinetic
 
 ## Overview
 
-KerasHub causal LMs can be exported natively with
-`export_to_transformers()`, producing a standard Hugging Face checkpoint
-(config, safetensors weights, tokenizer). Kinetic lets you run the export
-and vLLM serving in a single GPU job: the model is downloaded and exported
-on the remote worker, the GPU is handed over to vLLM, and batched
-completions are returned to your local machine. The exported checkpoint is
-also uploaded to `KINETIC_OUTPUT_DIR`, so it can be served again anywhere
-vLLM runs.
+Export a KerasHub model to the Hugging Face Transformers format and serve it 
+with [vLLM](https://docs.vllm.ai) — on a Cloud**TPU** or **GPU**, in a single 
+Kinetic job, with any Keras backend. KerasHub
+causal LMs export natively with `export_to_transformers()`, producing a standard
+Hugging Face checkpoint (config, safetensors weights, tokenizer) that is
+independent of the backend used to create it. Any preset with a Transformers
+exporter works (Gemma, Gemma 3, Qwen, GPT-2, …).
 
-The example uses `gemma3_4b` (~8 GB in bfloat16), which fits a single
-NVIDIA L4. `gpt2_large_en` is an ungated alternative if you don't have
-Kaggle access to Gemma (use `dtype="float32"` with it).
+The export runs in a short-lived child process: when it exits, the OS releases
+its memory and the device is clean for vLLM. This keeps the export and serving
+stacks isolated — so any Keras backend works — while staying a single Kinetic
+job (the export is just a subprocess inside the pod).
 
 ## Prerequisites
 
-1.  **Kinetic Cluster**: You need a provisioned Kinetic cluster with GPU
-    nodes (e.g., `l4`), created with the latest `keras-kinetic`:
+1. **A node pool** for your accelerator (default scale-to-zero). Pick any
+   slice/GPU that fits your model:
 
-    ```bash
-    kinetic pool add --accelerator l4 --project your-project-id
-    ```
+   ```bash
+   kinetic pool add --accelerator tpu-v5litepod-1 --project your-project-id   # TPU
+   kinetic pool add --accelerator gpu-l4          --project your-project-id   # GPU
+   ```
 
-    GPU quota is the most common first-time blocker: in *IAM & Admin →
-    Quotas*, both **GPUs (all regions)** and **NVIDIA L4 GPUs** (regional)
-    must be ≥ 1.
-2.  **Kaggle Credentials**: If you are using gated models like Gemma 3,
-    you need a Kaggle account with the
-    [model license accepted](https://www.kaggle.com/models/keras/gemma3),
-    and `KAGGLE_USERNAME` / `KAGGLE_KEY` set in your local environment.
+   Larger models need a bigger slice (e.g. `tpu-v5litepod-4`, `gpu-a100`).
+   Make sure your project has matching **quota**, or the pod will sit `Pending`.
 
-## Configuration
+2. **A `requirements.txt`** next to the scripts. The base set depends on the
+   device; a non-default export backend adds one entry:
 
-To run vLLM successfully on GPU via Kinetic, you need to handle
-dependencies and environment variables properly.
+   | Device | base requirements           | backend extras                                                   |
+   |--------|-----------------------------|------------------------------------------------------------------|
+   | TPU    | `keras keras-hub vllm-tpu`  | `jax` / `torch`: none · `tensorflow`: add `tensorflow`           |
+   | GPU    | `keras keras-hub vllm`      | `torch`: none · `jax`: add `jax[cuda12]` · `tensorflow`: add `tensorflow[and-cuda]` |
 
-### 1. Dependencies
+   The default backend per device (`jax` on TPU, `torch` on GPU) needs no extras.
+   On TPU, `torch`/`tensorflow` exports run on the host CPU, leaving the chip for
+   vLLM. Kinetic builds the remote container to match your **local Python
+   version**, so use one with `vllm`/`vllm-tpu` wheels available (3.10–3.12).
 
-Create a `requirements.txt` file in the directory of your script
-containing:
+3. **Kaggle credentials** for gated models like Gemma: accept the
+   [license](https://www.kaggle.com/models/keras/gemma3) and set
+   `KAGGLE_USERNAME` / `KAGGLE_KEY` locally. Kinetic forwards them via
+   `capture_env_vars`.
 
-```text
-keras
-keras-hub
-tensorflow-text
-vllm
+## The example
+
+Two files: `vllm_serving.py` (the orchestrator — set `DEVICE`, `BACKEND`,
+`MODEL_PRESET`, and `ACCELERATOR` at the top) and `export_worker.py` (the
+standalone export, run as a subprocess).
+
+```{literalinclude} ../../examples/export_worker.py
+:language: python
+:caption: examples/export_worker.py
 ```
-
-Kinetic will detect this file and build a container with vLLM installed.
-`tensorflow-text` is required —
-KerasHub tokenizers preprocess with `tf.data` on every backend (CPU-side
-only). Use a **Python 3.12** local venv; the remote container matches your
-local interpreter, and `tensorflow-text` doesn't publish wheels for the
-newest Python yet.
-
-### 2. Environment Variables
-
-The example sets the following environment variables on the remote worker
-to ensure correct execution:
-
--   `KERAS_BACKEND="torch"`: vLLM is PyTorch-based, and the torch backend
-    is the only one that releases VRAM cleanly after the export, so vLLM's
-    KV cache gets the full GPU.
--   `VLLM_USE_FLASHINFER_SAMPLER="0"`: vLLM's FlashInfer sampler
-    JIT-compiles CUDA kernels with `nvcc`, which pip-only containers don't
-    have; this selects the native torch sampler instead.
--   `LD_LIBRARY_PATH=/usr/local/nvidia/lib64:...`: GKE mounts the host
-    NVIDIA driver at `/usr/local/nvidia`; this makes `libcuda` /
-    `libnvidia-ml` visible to vLLM's spawned engine processes (the example
-    also preloads them into the main process via `ctypes`).
-
-These are set inside the remote function by the example itself. Kaggle
-credentials are forwarded from your local environment via
-`capture_env_vars` in the `@kinetic.run` decorator.
-
-## Example
 
 ```{literalinclude} ../../examples/vllm_serving.py
 :language: python
+:caption: examples/vllm_serving.py
 ```
 
-## Running the Example
+On TPU the example sets `JAX_PLATFORMS=tpu,cpu` and runs the engine in-process
+(`VLLM_ENABLE_V1_MULTIPROCESSING=0`); on GPU it exposes the NVIDIA driver before
+the export. `find_spec("export_worker")` locates the worker on the pod (Kinetic
+unpacks the job's files onto `sys.path`) without importing it.
+
+## Running
 
 ```bash
-python3 vllm_serving.py
+python vllm_serving.py
 ```
 
-The first run builds the container image (15–25 minutes; subsequent runs
-reuse it as a cache hit) and provisions a GPU node from the scale-to-zero
-pool (~10 minutes including the image pull). Monitor from a second
-terminal with `kinetic jobs list` and
+The first run builds the container image (15–25 minutes; later runs reuse it as
+a cache hit) and provisions a node from the scale-to-zero pool. Monitor from a
+second terminal with `kinetic jobs list` and
 `kinetic jobs logs --follow JOB_ID --project your-project-id`.
 
-## Serving on TPU
+## Single job vs. two jobs
 
-The export step is accelerator-agnostic, but vLLM serving itself always
-needs a GPU or TPU. TPU serving uses a different vLLM build (`vllm-tpu`)
-and different environment variables than the GPU example above, and
-Kinetic builds one container per script directory — `vllm` and `vllm-tpu`
-cannot share an image. So on TPU, export and serving run as **two scripts
-in two directories, each with its own `requirements.txt`**. The checkpoint
-moves between them through GCS; nothing is downloaded to your local
-machine, and no re-initialization of Kinetic is needed.
-
-1. **Export script** (directory A, `requirements.txt`: `keras`,
-   `keras-hub`, `tensorflow-text`) — the export half of this example, on
-   any accelerator (`"cpu"` works). It uploads the checkpoint directory to
-   `KINETIC_OUTPUT_DIR` (a GCS path), which it returns; pass that path to
-   the serving script.
-2. **Serving script** (directory B, `requirements.txt`: `vllm-tpu`) —
-   configured per
-   [Running vLLM on TPU with Kinetic](../guides/vllm_tpu.md): set
-   `VLLM_TARGET_DEVICE="tpu"`, `VLLM_USE_V1="0"`, and
-   `JAX_PLATFORMS="tpu,cpu"` locally and forward them with
-   `capture_env_vars`. The job downloads the checkpoint directory from
-   GCS to the pod's local disk and points `LLM(model=...)` at it instead
-   of a Hub model ID:
-
-```python
-@kinetic.run(
-    accelerator="tpu-v5litepod-8",
-    capture_env_vars=["VLLM_*", "JAX_*"],
-)
-def serve_on_tpu(checkpoint_gs_path, prompts):
-    # Download the exported checkpoint directory from GCS to
-    # /tmp/hf_export (google.cloud.storage transfer_manager), then:
-    from vllm import LLM, SamplingParams
-
-    llm = LLM(model="/tmp/hf_export", max_model_len=1024)
-    return llm.generate(prompts, SamplingParams(max_tokens=128))
-```
+This example is one Kinetic job — one pod — that runs the export as a child
+process (two processes, one pod). To **export once and serve the same checkpoint
+many times**, split it into two jobs instead: an export job that uploads the
+checkpoint to `KINETIC_OUTPUT_DIR` (a GCS path), and a serve job that downloads
+and serves it. Each job gets its own container, which also lets `vllm` and
+`vllm-tpu` live in separate images.
