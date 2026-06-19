@@ -8,7 +8,9 @@ Decorators
 
 .. autofunction:: run
 
-.. autofunction:: submit
+.. autoclass:: RemoteCallable
+   :members: run_async, run_async_map
+   :special-members: __call__
 
 Data API
 --------
@@ -31,7 +33,7 @@ Detached Jobs
 Batched Jobs
 ------------
 
-.. autofunction:: map
+.. autofunction:: kinetic.collections.map
 
 .. autoclass:: BatchHandle
    :members: statuses, status_counts, wait, as_completed, results, failures, cancel, cleanup

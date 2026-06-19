@@ -139,7 +139,7 @@ If you need to relocate the file (for example, in CI) set
 
 - [Configuration](../configuration.md) — the full precedence table and
   the list of `KINETIC_*` env vars.
-- [Multiple Clusters](../advanced/clusters.md) — how Kinetic treats
+- [Multiple Clusters](clusters.md) — how Kinetic treats
   clusters as first-class targets; profiles are the ergonomic layer on
   top.
 - [CLI Reference](../cli.rst) — generated reference for every flag.

@@ -4,7 +4,7 @@ import functools
 import os
 import sys
 import warnings
-from typing import Any, Callable
+from typing import Any, Callable, Generic, ParamSpec, TypeVar, overload
 
 from kinetic.backend.execution import (
   GKEBackend,
@@ -19,6 +19,12 @@ from kinetic.core import accelerators
 from kinetic.data import Data
 from kinetic.debug import cleanup_port_forward
 from kinetic.jobs import JobHandle
+
+# Parameter signature and return type of the user's decorated function.
+# These let @kinetic.run preserve the original call signature on the
+# returned RemoteCallable so type checkers can resolve `.run_async(...)`.
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 def _validate_volumes(volumes):
@@ -178,45 +184,136 @@ def _make_decorator(
   return decorator
 
 
-class RemoteCallable:
+class RemoteCallable(Generic[P, R]):
   """Wrapper class returned by @kinetic.run to handle sync and async calls.
+
+  Generic over the decorated function's parameter signature (``P``) and
+  return type (``R``) so type checkers can resolve `.run_async(...)` and
+  preserve the original call signature.
 
   Supports instance methods via the descriptor protocol (__get__).
   """
 
-  def __init__(self, func, sync_wrapper, async_wrapper):
+  def __init__(
+    self,
+    func: Callable[P, R],
+    sync_wrapper: Callable[..., Any],
+    async_wrapper: Callable[..., JobHandle],
+  ):
     self._func = func
     self._sync_wrapper = sync_wrapper
     self._async_wrapper = async_wrapper
     functools.update_wrapper(self, func)
 
-  def __call__(self, *args, **kwargs):
+  def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
     """Synchronous execution (blocks)."""
     return self._sync_wrapper(*args, **kwargs)
 
-  def run_async(self, *args, **kwargs) -> JobHandle:
-    """Asynchronous execution (returns JobHandle)."""
+  def run_async(self, *args: P.args, **kwargs: P.kwargs) -> JobHandle:
+    """Submit the decorated function for remote execution without blocking.
+
+    Unlike calling the wrapper directly (which blocks until the remote job
+    finishes), `run_async` returns as soon as the job is submitted. The
+    returned `JobHandle` is a durable reference to the job: you can exit
+    the process, then reattach from any machine with the handle's
+    `job_id` to stream logs or collect the result.
+
+    Args:
+      *args: Positional arguments forwarded to the decorated function on
+        the remote worker. Must match the function's signature and be
+        picklable.
+      **kwargs: Keyword arguments forwarded to the decorated function on
+        the remote worker. Must be picklable.
+
+    Returns:
+      A `JobHandle` for the submitted job. Use `handle.job_id` to
+      reattach later, `handle.result()` to block until completion and
+      fetch the return value, and `handle.cancel()` to stop the job.
+
+    Examples::
+
+        @kinetic.run(accelerator="cpu")
+        def train():
+          ...
+
+        # Fire and forget, then reattach from another process.
+        handle = train.run_async()
+        print(handle.job_id)  # later: kinetic.attach(handle.job_id)
+
+        # Submit, do other work locally, then collect the result.
+        handle = train.run_async()
+        result = handle.result()
+    """
     return self._async_wrapper(*args, **kwargs)
 
   def run_async_map(self, inputs, **kwargs) -> BatchHandle:
-    """Fan out across accelerators."""
+    """Fan the decorated function out over many inputs as parallel jobs.
+
+    Each item in `inputs` is submitted as its own independent remote job
+    (one accelerator per job), letting you sweep hyperparameters or shard
+    a dataset across the cluster. This is a convenience wrapper around
+    `kinetic.collections.map(self.run_async, inputs, **kwargs)`.
+
+    Args:
+      inputs: Iterable of inputs to fan out over. By default (`input_mode`
+        of `"auto"`), each item is dispatched by type: a `dict` is passed
+        as `**kwargs`, a `list`/`tuple` as `*args`, and any other value as
+        a single positional argument.
+      **kwargs: Options forwarded to `kinetic.collections.map`, such as
+        `input_mode`, `max_concurrent`, `retries`, `fail_fast`,
+        `cancel_running_on_fail`, `name`, `tags`, `project`, and
+        `cluster`.
+
+    Returns:
+      A `BatchHandle` for observing, collecting, and cleaning up the
+      group of jobs. Use `handle.results()` to gather every return value
+      and `handle.wait()` to block until the batch finishes.
+
+    Examples::
+
+        @kinetic.run(accelerator="tpu-v6e-1")
+        def train(lr):
+          ...
+
+        # Sweep over learning rates, one remote job per value.
+        batch = train.run_async_map([{"lr": 0.1}, {"lr": 0.01}])
+        losses = batch.results()
+
+        # Cap concurrency so at most four jobs run at once.
+        batch = train.run_async_map(grid, max_concurrent=4)
+    """
 
     return collections_map(self._async_wrapper, inputs, **kwargs)
 
-  def __get__(self, instance, owner):
+  @overload
+  def __get__(self, instance: None, owner: Any) -> RemoteCallable[P, R]: ...
+
+  @overload
+  def __get__(
+    self, instance: object, owner: Any
+  ) -> _BoundRemoteCallable[R]: ...
+
+  def __get__(
+    self, instance, owner
+  ) -> RemoteCallable[P, R] | _BoundRemoteCallable[R]:
     if instance is None:
       return self
     return _BoundRemoteCallable(self, instance)
 
 
-class _BoundRemoteCallable:
-  """Proxy for RemoteCallable bound to an instance."""
+class _BoundRemoteCallable(Generic[R]):
+  """Proxy for RemoteCallable bound to an instance.
 
-  def __init__(self, callable_, instance):
+  Binding an instance method drops the leading ``self`` argument, which a
+  bare ``ParamSpec`` cannot express, so the wrapped callable is typed with
+  an open signature (``RemoteCallable[..., R]``) here.
+  """
+
+  def __init__(self, callable_: RemoteCallable[..., R], instance):
     self._c = callable_
     self._instance = instance
 
-  def __call__(self, *args, **kwargs):
+  def __call__(self, *args, **kwargs) -> R:
     return self._c(self._instance, *args, **kwargs)
 
   def run_async(self, *args, **kwargs) -> JobHandle:
@@ -245,7 +342,7 @@ def run(
   spot: bool = False,
   output_dir: str | None = None,
   debug: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[Callable[P, R]], RemoteCallable[P, R]]:
   """Execute function on remote TPU/GPU.
 
   Args:
@@ -286,10 +383,11 @@ def run(
     A decorator that returns a wrapper function. When called, the wrapper
     executes the function remotely and blocks until completion (sync mode).
     The wrapper also has the following methods:
-      - run_async(*args, **kwargs): Submits the job for remote execution
-        and returns a JobHandle immediately (async mode).
-      - run_async_map(inputs, **kwargs): Fans out across accelerators
-        for a collection of inputs, returning a BatchHandle.
+
+    - `run_async(*args, **kwargs)`: Submits the job for remote execution
+      and returns a `JobHandle` immediately (async mode).
+    - `run_async_map(inputs, **kwargs)`: Fans out across accelerators
+      for a collection of inputs, returning a `BatchHandle`.
   """
   _validate_volumes(volumes)
 
@@ -300,7 +398,7 @@ def run(
       stacklevel=3,
     )
 
-  def decorator(func):
+  def decorator(func: Callable[P, R]) -> RemoteCallable[P, R]:
     # Create the sync wrapper
     sync_decorator = _make_decorator(
       accelerator,
