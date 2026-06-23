@@ -1,22 +1,3 @@
-"""Demo 3a — Fire and forget: @kinetic.submit + JobHandle.
-
-@kinetic.run blocks until the function finishes. Real training takes
-hours — you don't want a shell open the whole time. @kinetic.submit
-returns immediately with a JobHandle. You can close the laptop,
-walk away, and come back from any machine.
-
-Run this in terminal 1:
-    python 05_submit_detached.py
-
-It will print a job id. Copy it, open a second terminal, and run:
-    python 06_attach_from_anywhere.py <job_id>
-
-Talk track:
-    "Watch this — I'm submitting, then immediately printing the
-     job id and exiting. No shell. No blocking. The training is
-     running in a datacenter, and I can pick it up from anywhere."
-"""
-
 import os
 
 os.environ["KERAS_BACKEND"] = "jax"

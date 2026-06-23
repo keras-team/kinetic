@@ -1,18 +1,3 @@
-"""Demo 3b — Reattach from a fresh shell with just the job id.
-
-This script imports kinetic and calls `kinetic.attach(job_id)`.
-That's all it takes — no shared state with the submitting process,
-no pickle file, no env var. The cluster is the source of truth.
-
-Run in terminal 2 after 05_submit_detached.py:
-    python 06_attach_from_anywhere.py <job_id>
-
-Talk track:
-    "Different process. Different shell. Could be a different machine.
-     I have a job id and that's it. kinetic.attach() reconstructs
-     everything I need: status, logs, the result when it lands."
-"""
-
 import sys
 
 import kinetic

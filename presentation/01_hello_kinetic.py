@@ -1,19 +1,3 @@
-"""Demo 1b — Hello, Kinetic. One decorator.
-
-The same training code as 01_local_train.py, but with `@kinetic.run`.
-The function body is byte-for-byte identical to the local version.
-
-Run:
-    python 02_hello_kinetic.py
-
-Talk track:
-    "Watch the diff: I added one import and one decorator. The
-     function body never changed. While this runs, look at the
-     console — credentials check, function serialized, container
-     image (cache hit), GCS upload, K8s Job created, logs streamed,
-     result returned. That's the entire pipeline."
-"""
-
 import os
 
 os.environ["KERAS_BACKEND"] = "jax"
