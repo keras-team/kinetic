@@ -44,12 +44,14 @@ def long_running_train():
   x = np.random.randn(5000, 20)
   y = np.random.randn(5000, 1)
 
+  final_loss = 0.0
   for epoch in range(20):
     history = model.fit(x, y, epochs=1, batch_size=64, verbose=0)
-    print(f"  epoch {epoch + 1}/20  loss={history.history['loss'][-1]:.4f}")
+    final_loss = float(history.history["loss"][-1])
+    print(f"  epoch {epoch + 1}/20  loss={final_loss:.4f}")
     time.sleep(2)  # exaggerate length so the demo feels long-running
 
-  return {"final_loss": float(history.history["loss"][-1])}
+  return {"final_loss": final_loss}
 
 
 if __name__ == "__main__":
