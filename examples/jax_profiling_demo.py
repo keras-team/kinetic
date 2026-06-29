@@ -39,11 +39,12 @@ def train_and_profile():
   params = update(params, x, y)
   jax.block_until_ready(params)
 
-  jax.profiler.start_trace(trace_dir)
-  for _ in range(10):
-    params = update(params, x, y)
-  jax.block_until_ready(params)  # force the async work to land before stop
-  jax.profiler.stop_trace()
+  # The context manager flushes the trace even if a step raises.
+  with jax.profiler.trace(trace_dir):
+    for _ in range(10):
+      params = update(params, x, y)
+    # force the async work to land before the trace closes
+    jax.block_until_ready(params)
 
   print(f"final loss: {float(loss_fn(params, x, y)):.4f}")
   print(f"trace written to: {trace_dir}")
