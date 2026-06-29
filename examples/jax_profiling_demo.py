@@ -39,7 +39,6 @@ def train_and_profile():
   params = update(params, x, y)
   jax.block_until_ready(params)
 
-  # Capture ~10 steps. Keep the window small — traces grow fast.
   jax.profiler.start_trace(trace_dir)
   for _ in range(10):
     params = update(params, x, y)

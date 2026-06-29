@@ -1,7 +1,7 @@
 # Performance Profiling (XProf)
 
 A job that *runs* on a TPU or GPU isn't necessarily using it well.
-Profiling shows where the accelerator time actually goes. This page
+Profiling shows where the accelerator time actually goes. This guide
 covers **XProf** — the profiler for XLA workloads — and how to capture a
 trace from a Kinetic job and view it on your own machine.
 
