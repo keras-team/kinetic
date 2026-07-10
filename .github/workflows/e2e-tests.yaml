@@ -17,11 +17,13 @@ jobs:
       (github.event_name == 'pull_request' && github.event.label.name == 'run-e2e')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Remove run-e2e label
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.removeLabel({
@@ -32,30 +34,34 @@ jobs:
             });
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        # zizmor: ignore[impostor-commit]
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        # zizmor: ignore[impostor-commit]
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
           install_components: "gke-gcloud-auth-plugin"
 
       - name: Get GKE credentials
-        uses: google-github-actions/get-gke-credentials@v2
+        # zizmor: ignore[impostor-commit]
+        uses: google-github-actions/get-gke-credentials@3da1e46a907576cefaa90c484278bb5b259dd395 # v3.0.0
         with:
           cluster_name: ${{ secrets.GKE_CLUSTER }}
           location: ${{ secrets.GKE_ZONE }}
           project_id: ${{ secrets.GCP_PROJECT }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        # zizmor: ignore[impostor-commit, mismatched-version-comment]
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
 
       - name: Install dependencies
         run: uv pip install --system -e ".[test]"
