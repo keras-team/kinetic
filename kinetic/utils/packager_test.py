@@ -2,6 +2,8 @@
 
 import os
 import pathlib
+import shutil
+import subprocess
 import tempfile
 import zipfile
 
@@ -32,6 +34,14 @@ class TestZipWorkingDir(absltest.TestCase):
     zip_working_dir(str(src), str(out), exclude_paths=exclude_paths)
     with zipfile.ZipFile(str(out)) as zf:
       return set(zf.namelist())
+
+  def _init_git_repo(self, path):
+    if shutil.which("git") is None:
+      self.skipTest("Git is required for this test.")
+    subprocess.run(
+      ["git", "init", "--quiet", str(path)],
+      check=True,
+    )
 
   def test_contains_all_files(self):
     tmp_path = _make_temp_path(self)
@@ -126,6 +136,126 @@ class TestZipWorkingDir(absltest.TestCase):
 
     names = self._zip_and_list(src, tmp_path, exclude_paths={str(d1), str(d2)})
     self.assertEqual(names, {"main.py"})
+
+  def test_git_repository_respects_gitignore(self):
+    tmp_path = _make_temp_path(self)
+    src = tmp_path / "src"
+    src.mkdir()
+    self._init_git_repo(src)
+    (src / ".gitignore").write_text(".venv/\n*.log\n")
+    (src / "main.py").write_text("code")
+    (src / "debug.log").write_text("logs")
+    venv = src / ".venv"
+    venv.mkdir()
+    (venv / "python").write_text("binary")
+
+    names = self._zip_and_list(src, tmp_path)
+
+    self.assertEqual(names, {".gitignore", "main.py"})
+
+  def test_git_repository_includes_tracked_ignored_file(self):
+    tmp_path = _make_temp_path(self)
+    src = tmp_path / "src"
+    src.mkdir()
+    self._init_git_repo(src)
+    (src / ".gitignore").write_text("tracked.txt\n")
+    tracked = src / "tracked.txt"
+    tracked.write_text("tracked")
+    subprocess.run(
+      ["git", "-C", str(src), "add", "-f", "tracked.txt"],
+      check=True,
+    )
+
+    names = self._zip_and_list(src, tmp_path)
+
+    self.assertIn("tracked.txt", names)
+
+  def test_git_repository_preserves_explicit_exclusions(self):
+    tmp_path = _make_temp_path(self)
+    src = tmp_path / "src"
+    src.mkdir()
+    self._init_git_repo(src)
+    data_dir = src / "data"
+    data_dir.mkdir()
+    (data_dir / "large.bin").write_text("data")
+    (src / "main.py").write_text("code")
+
+    names = self._zip_and_list(src, tmp_path, exclude_paths={str(data_dir)})
+
+    self.assertEqual(names, {"main.py"})
+
+  def test_git_repository_supports_subdirectory_working_dir(self):
+    tmp_path = _make_temp_path(self)
+    repo = tmp_path / "repo"
+    src = repo / "package"
+    src.mkdir(parents=True)
+    self._init_git_repo(repo)
+    (repo / ".gitignore").write_text("package/generated/\n")
+    (src / "main.py").write_text("code")
+    generated = src / "generated"
+    generated.mkdir()
+    (generated / "weights.bin").write_text("weights")
+
+    names = self._zip_and_list(src, tmp_path)
+
+    self.assertEqual(names, {"main.py"})
+
+  def test_git_repository_skips_deleted_tracked_file(self):
+    tmp_path = _make_temp_path(self)
+    src = tmp_path / "src"
+    src.mkdir()
+    self._init_git_repo(src)
+    deleted = src / "deleted.py"
+    deleted.write_text("old code")
+    subprocess.run(
+      ["git", "-C", str(src), "add", "deleted.py"],
+      check=True,
+    )
+    deleted.unlink()
+    (src / "main.py").write_text("code")
+
+    names = self._zip_and_list(src, tmp_path)
+
+    self.assertEqual(names, {"main.py"})
+
+  def test_git_repository_includes_submodule_files(self):
+    tmp_path = _make_temp_path(self)
+    repo = tmp_path / "repo"
+    submodule = repo / "vendor"
+    submodule.mkdir(parents=True)
+    self._init_git_repo(repo)
+    self._init_git_repo(submodule)
+    (submodule / "module.py").write_text("code")
+    subprocess.run(
+      ["git", "-C", str(submodule), "add", "module.py"],
+      check=True,
+    )
+    subprocess.run(
+      [
+        "git",
+        "-C",
+        str(submodule),
+        "-c",
+        "user.name=Kinetic Tests",
+        "-c",
+        "user.email=kinetic-tests@example.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "Initial commit",
+      ],
+      check=True,
+    )
+    subprocess.run(
+      ["git", "-C", str(repo), "add", "vendor"],
+      check=True,
+      stderr=subprocess.DEVNULL,
+    )
+    (repo / "main.py").write_text("code")
+
+    names = self._zip_and_list(repo, tmp_path)
+
+    self.assertEqual(names, {"main.py", os.path.join("vendor", "module.py")})
 
 
 class TestSavePayload(absltest.TestCase):
