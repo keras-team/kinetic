@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from unittest import mock
 
 import cloudpickle
 import numpy as np
@@ -88,7 +89,7 @@ class TestZipWorkingDir(absltest.TestCase):
 
     names = self._zip_and_list(src, tmp_path)
     self.assertIn("top.py", names)
-    self.assertIn(os.path.join("pkg", "sub", "deep.py"), names)
+    self.assertIn("pkg/sub/deep.py", names)
 
   def test_empty_directory(self):
     tmp_path = _make_temp_path(self)
@@ -184,6 +185,39 @@ class TestZipWorkingDir(absltest.TestCase):
 
     self.assertEqual(names, {"main.py"})
 
+  def test_git_repository_preserves_exclusions_with_relative_base_dir(self):
+    tmp_path = _make_temp_path(self)
+    src = tmp_path / "src"
+    src.mkdir()
+    self._init_git_repo(src)
+    data_dir = src / "data"
+    data_dir.mkdir()
+    (data_dir / "large.bin").write_text("data")
+    (src / "main.py").write_text("code")
+    previous_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    self.addCleanup(os.chdir, previous_cwd)
+    excluded_data_dir = os.path.abspath("src/data")
+
+    names = self._zip_and_list(
+      pathlib.Path("src"), tmp_path, exclude_paths={excluded_data_dir}
+    )
+
+    self.assertEqual(names, {"main.py"})
+
+  def test_falls_back_to_directory_walk_on_git_os_error(self):
+    tmp_path = _make_temp_path(self)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "main.py").write_text("code")
+
+    with mock.patch(
+      "kinetic.utils.packager.subprocess.run", side_effect=PermissionError
+    ):
+      names = self._zip_and_list(src, tmp_path)
+
+    self.assertEqual(names, {"main.py"})
+
   def test_git_repository_supports_subdirectory_working_dir(self):
     tmp_path = _make_temp_path(self)
     repo = tmp_path / "repo"
@@ -255,7 +289,7 @@ class TestZipWorkingDir(absltest.TestCase):
 
     names = self._zip_and_list(repo, tmp_path)
 
-    self.assertEqual(names, {"main.py", os.path.join("vendor", "module.py")})
+    self.assertEqual(names, {"main.py", "vendor/module.py"})
 
 
 class TestSavePayload(absltest.TestCase):

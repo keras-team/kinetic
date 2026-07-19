@@ -6,6 +6,7 @@ arbitrarily nested arg structures.
 """
 
 import os
+import posixpath
 import subprocess
 import zipfile
 from collections.abc import Callable
@@ -39,13 +40,15 @@ def _list_git_files(base_dir: str) -> list[str] | None:
       stdout=subprocess.PIPE,
       stderr=subprocess.DEVNULL,
     )
-  except (FileNotFoundError, subprocess.CalledProcessError):
+  except (OSError, subprocess.CalledProcessError):
     return None
 
   return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]
 
 
 def _path_is_excluded(path: str, exclude_paths: set[str]) -> bool:
+  if not exclude_paths:
+    return False
   normalized_path = os.path.normpath(path)
   return any(
     normalized_path == excluded or normalized_path.startswith(excluded + os.sep)
@@ -67,7 +70,7 @@ def _write_git_files(
     ):
       continue
 
-    archive_name = os.path.join(archive_prefix, relative_path)
+    archive_name = posixpath.join(archive_prefix, relative_path)
     if os.path.isdir(file_path) and not os.path.islink(file_path):
       nested_files = _list_git_files(file_path)
       if nested_files is not None:
@@ -98,6 +101,7 @@ def zip_working_dir(
   """
   exclude_paths = exclude_paths or set()
   normalized_excludes = {os.path.normpath(p) for p in exclude_paths}
+  base_dir = os.path.abspath(base_dir)
   git_files = _list_git_files(base_dir)
 
   with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
