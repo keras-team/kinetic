@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import tempfile
 from unittest import mock
 from unittest.mock import MagicMock
@@ -355,6 +356,27 @@ class TestJobHandleMethods(absltest.TestCase):
 
     self.assertEqual(call_order, ["ensure_credentials", "CoreV1Api"])
 
+  def test_result_non_dict_payload_raises_clearly_and_keeps_artifacts(self):
+    """A corrupted result.pkl must not surface as a bare AttributeError."""
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", side_effect=[JobStatus.SUCCEEDED]),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value=["not", "a", "dict"],
+      ),
+      mock.patch.object(handle, "cleanup") as mock_cleanup,
+      mock.patch("kinetic.jobs.time.sleep"),
+      self.assertRaisesRegex(RuntimeError, "invalid result payload.*got list"),
+    ):
+      handle.result()
+
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
+
   def test_result_returns_value_and_cleans_up(self):
     handle = self._make_handle()
 
@@ -626,6 +648,209 @@ class TestJobHandleMethods(absltest.TestCase):
 
     mock_k8s.assert_not_called()
     mock_gcs.assert_called_once()
+
+
+class TestResultFailurePaths(absltest.TestCase):
+  """Package G: result-path hardening and artifact-preserving cleanup."""
+
+  def _make_handle(self):
+    return JobHandle(
+      job_id="job-a1b2",
+      backend="gke",
+      project="proj",
+      cluster_name="cluster",
+      zone="us-central1-a",
+      namespace="default",
+      bucket_name="proj-kn-cluster-jobs",
+      k8s_name="kinetic-job-a1b2",
+      image_uri="image:tag",
+      accelerator="cpu",
+      func_name="train",
+      display_name="kinetic-train-job-a1b2",
+      created_at="2026-03-25T10:00:00Z",
+    )
+
+  def test_unloadable_result_wrapped_with_artifact_uri(self):
+    handle = self._make_handle()
+    tmpdir = tempfile.mkdtemp()
+    self.addCleanup(shutil.rmtree, tmpdir, True)
+    result_path = os.path.join(tmpdir, "result.pkl")
+    with open(result_path, "wb") as f:
+      f.write(b"\x80\x05not-a-valid-pickle")
+
+    with (
+      mock.patch(
+        "kinetic.jobs.storage.download_result", return_value=result_path
+      ),
+      self.assertRaises(RuntimeError) as raised,
+    ):
+      handle._download_result_payload()
+
+    message = str(raised.exception)
+    self.assertIn("job-a1b2", message)
+    self.assertIn(
+      "gs://proj-kn-cluster-jobs/job-a1b2/result.pkl",
+      message,
+    )
+    self.assertIn("Artifacts were NOT deleted", message)
+    self.assertIsNotNone(raised.exception.__cause__)
+    self.assertFalse(os.path.exists(result_path))
+
+  def test_unloadable_result_keeps_gcs_artifacts(self):
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.SUCCEEDED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        side_effect=RuntimeError("Could not deserialize the result"),
+      ),
+      mock.patch.object(handle, "cleanup") as mock_cleanup,
+      self.assertRaisesRegex(RuntimeError, "Could not deserialize"),
+    ):
+      handle.result()
+
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
+
+  def test_serialization_failed_payload_surfaces_repr_and_keeps_artifacts(self):
+    handle = self._make_handle()
+    remote_error = RuntimeError("Result serialization failed: nope")
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.FAILED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={
+          "success": False,
+          "exception": remote_error,
+          "traceback": "Traceback: remote dump failure",
+          "serialization_failed": True,
+          "result_repr": "<Model object at 0x7f00>",
+          "phase": "result_serialization",
+        },
+      ),
+      mock.patch.object(handle, "cleanup") as mock_cleanup,
+      self.assertRaises(RuntimeError) as raised,
+    ):
+      handle.result()
+
+    notes = "\n".join(raised.exception.__notes__)
+    self.assertIn("<Model object at 0x7f00>", notes)
+    self.assertIn("gs://proj-kn-cluster-jobs/job-a1b2/result.pkl", notes)
+    self.assertIn("result_serialization", notes)
+    self.assertIn("Remote traceback:", notes)
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
+
+  def test_serialization_failed_with_success_true_is_still_a_failure(self):
+    """Defensive: a truthy success flag must not win over the failure flag."""
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.SUCCEEDED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={
+          "success": True,
+          "result": None,
+          "serialization_failed": True,
+          "result_repr": "unpicklable",
+        },
+      ),
+      mock.patch.object(handle, "cleanup") as mock_cleanup,
+      self.assertRaises(RuntimeError),
+    ):
+      handle.result()
+
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
+
+  def test_remote_failure_keeps_gcs_artifacts(self):
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.FAILED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={
+          "success": False,
+          "exception": ValueError("boom"),
+          "traceback": "Traceback: remote boom",
+        },
+      ),
+      mock.patch.object(handle, "cleanup") as mock_cleanup,
+      self.assertRaisesRegex(ValueError, "boom"),
+    ):
+      handle.result()
+
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=False, cleanup_timeout=180, cleanup_poll_interval=2
+    )
+
+  def test_non_exception_payload_raises_runtime_error(self):
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.FAILED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={
+          "success": False,
+          "exception": "boom happened",
+          "traceback": "Traceback: remote boom",
+        },
+      ),
+      mock.patch.object(handle, "cleanup"),
+      self.assertRaises(RuntimeError) as raised,
+    ):
+      handle.result()
+
+    message = str(raised.exception)
+    self.assertIn("no usable exception object", message)
+    self.assertIn("boom happened", message)
+
+  def test_missing_exception_key_raises_runtime_error(self):
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.FAILED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={"success": False},
+      ),
+      mock.patch.object(handle, "cleanup"),
+      self.assertRaisesRegex(RuntimeError, "no usable exception object"),
+    ):
+      handle.result()
+
+  def test_legacy_payload_without_new_keys_still_succeeds(self):
+    """Old runners write only success/result — cleanup must delete GCS."""
+    handle = self._make_handle()
+
+    with (
+      mock.patch.object(handle, "status", return_value=JobStatus.SUCCEEDED),
+      mock.patch.object(
+        handle,
+        "_download_result_payload_with_backoff",
+        return_value={"success": True, "result": "legacy"},
+      ),
+      mock.patch.object(handle, "cleanup") as mock_cleanup,
+    ):
+      self.assertEqual(handle.result(), "legacy")
+
+    mock_cleanup.assert_called_once_with(
+      k8s=True, gcs=True, cleanup_timeout=180, cleanup_poll_interval=2
+    )
 
 
 class TestResultLogStreaming(absltest.TestCase):

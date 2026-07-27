@@ -8,6 +8,7 @@ import hashlib
 import itertools
 import os
 import posixpath
+import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -102,6 +103,8 @@ class Data:
     self._raw_path = path
     self._fuse = fuse
     self._hf_trust_remote_code = hf_trust_remote_code
+    self._cached_content_hash: str | None = None
+    self._hash_lock = threading.Lock()
 
     if self.is_hf and self._fuse:
       raise ValueError(
@@ -162,14 +165,39 @@ class Data:
     to prevent infinite recursion from circular symlinks. Symlinked
     files are read and their resolved contents are hashed, so the
     hash reflects the actual data visible at runtime.
+
+    Snapshot semantics: the hash is computed once per `Data` instance
+    and cached for its lifetime, so a single instance always refers to
+    the same snapshot of the data even if the files change underneath
+    it (submitting the same instance N times — e.g. via
+    `kinetic.map` — therefore reads the dataset once instead of N
+    times). Construct a new `Data` object to pick up on-disk changes.
     """
     if self.is_gcs or self.is_hf:
       raise ValueError(
         f"Cannot compute content hash for cloud URI: {self.path}"
       )
-    if os.path.isdir(self._resolved_path):
-      return self._content_hash_dir()
-    return self._content_hash_file()
+    # Double-checked locking: concurrent submissions of the same instance
+    # (collections.map fan-out) must not each re-read the dataset.
+    if self._cached_content_hash is None:
+      with self._hash_lock:
+        if self._cached_content_hash is None:
+          if os.path.isdir(self._resolved_path):
+            self._cached_content_hash = self._content_hash_dir()
+          else:
+            self._cached_content_hash = self._content_hash_file()
+    return self._cached_content_hash
+
+  def __getstate__(self):
+    # Locks cannot be pickled; Data can end up inside a pickled payload
+    # (e.g. nested in a user object). Ship the cached hash, not the lock.
+    state = self.__dict__.copy()
+    del state["_hash_lock"]
+    return state
+
+  def __setstate__(self, state):
+    self.__dict__.update(state)
+    self._hash_lock = threading.Lock()
 
   def _content_hash_file(self) -> str:
     h = hashlib.sha256()

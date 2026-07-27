@@ -65,6 +65,19 @@ def attach_remote_traceback(
   return exception
 
 
+def _attach_note(exception: BaseException, note: str) -> BaseException:
+  """Attach a diagnostic note to an exception when the runtime supports it.
+
+  The hasattr guard is pure defensiveness: requires-python is >=3.11, where
+  ``add_note`` always exists. There is deliberately no fallback that edits
+  ``exception.args`` — mutating args can corrupt exceptions whose
+  reconstruction or ``__str__`` depends on their shape.
+  """
+  if note and hasattr(exception, "add_note"):
+    exception.add_note(note)
+  return exception
+
+
 @dataclass
 class JobHandle:
   """Durable description of a submitted remote job.
@@ -195,8 +208,19 @@ class JobHandle:
       poll_interval=poll_interval,
     )
 
+  def _result_uri(self) -> str:
+    """Return the GCS URI of this job's result payload."""
+    return f"gs://{self.bucket_name}/{self.job_id}/result.pkl"
+
   def _download_result_payload(self) -> dict[str, Any]:
-    """Download and deserialize the remote result payload."""
+    """Download and deserialize the remote result payload.
+
+    Raises:
+      RuntimeError: If the downloaded payload cannot be deserialized in
+        this client (missing modules, renamed classes, version skew).
+        The GCS artifacts are left in place so the result stays
+        recoverable from an environment that can import its types.
+    """
     result_path = storage.download_result(
       self.bucket_name,
       self.job_id,
@@ -205,6 +229,15 @@ class JobHandle:
     try:
       with open(result_path, "rb") as f:
         return cloudpickle.load(f)
+    except Exception as e:
+      raise RuntimeError(
+        f"Could not deserialize the result of job {self.job_id}: "
+        f"{type(e).__name__}: {e}. The result references types from your "
+        "project or environment that this client cannot import — reattach "
+        "from the project directory (or an environment with the same "
+        "packages). Artifacts were NOT deleted: "
+        f"{self._result_uri()}"
+      ) from e
     finally:
       try:
         os.remove(result_path)
@@ -233,7 +266,7 @@ class JobHandle:
 
   def _missing_result_error(self, status: JobStatus) -> RuntimeError:
     """Return a clear failure for terminal jobs without a result payload."""
-    result_uri = f"gs://{self.bucket_name}/{self.job_id}/result.pkl"
+    result_uri = self._result_uri()
     if status == JobStatus.NOT_FOUND:
       return RuntimeError(
         "Job resource was not found and no result payload exists at "
@@ -246,6 +279,28 @@ class JobHandle:
     return RuntimeError(
       f"Job completed but no result payload was found at {result_uri}"
     )
+
+  def _remote_failure(self, result_payload: dict[str, Any]) -> BaseException:
+    """Return the exception to raise for a non-successful result payload."""
+    exception = result_payload.get("exception")
+    if not isinstance(exception, BaseException):
+      exception = RuntimeError(
+        f"Job {self.job_id} failed but its result payload carried no usable "
+        f"exception object (got {type(exception).__name__}: {exception!r}). "
+        f"Artifacts were kept for inspection: {self._result_uri()}"
+      )
+    if result_payload.get("serialization_failed"):
+      result_repr = result_payload.get("result_repr") or "<unavailable>"
+      _attach_note(
+        exception,
+        "The remote function completed but its return value could not be "
+        f"serialized, so it cannot be retrieved. repr(result):\n{result_repr}\n"
+        f"Artifacts were kept for inspection: {self._result_uri()}",
+      )
+    phase = result_payload.get("phase")
+    if phase:
+      _attach_note(exception, f"Failed during kinetic phase: {phase}")
+    return attach_remote_traceback(exception, result_payload.get("traceback"))
 
   def _stream_logs(self) -> None:
     """Stream logs to stdout via LogStreamer (blocking)."""
@@ -338,8 +393,12 @@ class JobHandle:
       timeout: Maximum seconds to wait.  `None` means wait forever.
         If reached, `TimeoutError` is raised but the job keeps
         running and the handle remains valid.
-      cleanup: When *True*, delete the k8s resource and GCS artifacts
-        after a result payload is successfully downloaded.  Defaults
+      cleanup: When *True*, delete the k8s resource once the job is
+        terminal.  GCS artifacts are only deleted when the job actually
+        succeeded and its result was retrievable — a failed job, a
+        missing result payload, a result that could not be serialized
+        remotely, and a result that could not be deserialized locally
+        all keep their artifacts for post-mortem debugging.  Defaults
         to *True* for normal jobs and *False* for debug jobs.
       cleanup_timeout: Maximum seconds to wait for the k8s resource
         deletion to be confirmed.
@@ -359,7 +418,8 @@ class JobHandle:
 
     Raises:
       TimeoutError: If *timeout* is exceeded.
-      RuntimeError: If the job failed without uploading a result.
+      RuntimeError: If the job failed without uploading a result, or if
+        the downloaded result payload cannot be deserialized locally.
       Exception: Re-raised from the remote function on user failure.
     """
     if cleanup is None:
@@ -407,24 +467,31 @@ class JobHandle:
         time.sleep(_RESULT_POLL_INTERVAL_SECONDS)
 
     result_payload = None
+    collected = False
     try:
       try:
         result_payload = self._download_result_payload_with_backoff(deadline)
       except google_exceptions.NotFound:
         raise self._missing_result_error(observed_status) from None
 
-      if result_payload["success"]:
+      if not isinstance(result_payload, dict):
+        raise RuntimeError(
+          f"Job {self.job_id} returned an invalid result payload "
+          f"(expected dict, got {type(result_payload).__name__}). The "
+          f"artifact may be corrupted; it was kept for inspection: "
+          f"{self._result_uri()}"
+        )
+      succeeded = bool(result_payload.get("success"))
+      collected = succeeded and not result_payload.get("serialization_failed")
+      if collected:
         return result_payload["result"]
-      raise attach_remote_traceback(
-        result_payload["exception"],
-        result_payload.get("traceback"),
-      )
+      raise self._remote_failure(result_payload)
     finally:
       if cleanup:
         try:
           self.cleanup(
             k8s=True,
-            gcs=result_payload is not None,
+            gcs=collected,
             cleanup_timeout=cleanup_timeout,
             cleanup_poll_interval=cleanup_poll_interval,
           )

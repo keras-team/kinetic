@@ -3,6 +3,8 @@
 import os
 import pathlib
 import tempfile
+import threading
+import time
 from unittest import mock
 
 from absl.testing import absltest
@@ -375,6 +377,114 @@ class TestContentHash(absltest.TestCase):
       f"Peak live file count ({peak_alive}) equals total files "
       f"({total_files}); the full file list was materialised.",
     )
+
+
+class TestContentHashMemoization(absltest.TestCase):
+  """content_hash() is a per-instance snapshot computed exactly once."""
+
+  def test_directory_hash_computed_once_per_instance(self):
+    tmp = _make_temp_path(self)
+    d = tmp / "dataset"
+    d.mkdir()
+    (d / "a.txt").write_text("a")
+
+    data = Data(str(d))
+    with mock.patch.object(
+      Data, "_content_hash_dir", wraps=data._content_hash_dir
+    ) as spy:
+      first = data.content_hash()
+      second = data.content_hash()
+
+    self.assertEqual(first, second)
+    spy.assert_called_once()
+
+  def test_concurrent_hash_computed_once(self):
+    """Racing threads must not each re-read the dataset (review, PR #298)."""
+    tmp = _make_temp_path(self)
+    d = tmp / "dataset"
+    d.mkdir()
+    (d / "a.txt").write_text("a")
+
+    data = Data(str(d))
+    real = data._content_hash_dir
+    started = threading.Event()
+    release = threading.Event()
+
+    # Without the lock, every thread that checks the cache while the first
+    # computation is parked on `release` also enters slow_hash, so the spy
+    # records multiple calls; with the lock they queue and reuse the cache.
+    def slow_hash():
+      started.set()
+      release.wait(timeout=10)
+      return real()
+
+    results = []
+    with mock.patch.object(
+      Data, "_content_hash_dir", side_effect=slow_hash
+    ) as spy:
+      threads = [
+        threading.Thread(target=lambda: results.append(data.content_hash()))
+        for _ in range(3)
+      ]
+      for t in threads:
+        t.start()
+      started.wait(timeout=10)
+      time.sleep(0.3)
+      release.set()
+      for t in threads:
+        t.join(timeout=10)
+
+    self.assertEqual(len(results), 3)
+    self.assertEqual(len(set(results)), 1)
+    spy.assert_called_once()
+
+  def test_data_with_lock_still_pickles(self):
+    """The hash lock must not break pickling of Data instances."""
+    import pickle
+
+    tmp = _make_temp_path(self)
+    f = tmp / "a.txt"
+    f.write_text("a")
+
+    data = Data(str(f))
+    first = data.content_hash()
+    clone = pickle.loads(pickle.dumps(data))
+
+    self.assertEqual(clone.content_hash(), first)
+    self.assertEqual(clone.path, data.path)
+
+  def test_file_hash_computed_once_per_instance(self):
+    tmp = _make_temp_path(self)
+    f = tmp / "a.txt"
+    f.write_text("a")
+
+    data = Data(str(f))
+    with mock.patch.object(
+      Data, "_content_hash_file", wraps=data._content_hash_file
+    ) as spy:
+      data.content_hash()
+      data.content_hash()
+
+    spy.assert_called_once()
+
+  def test_instance_hash_is_a_snapshot(self):
+    tmp = _make_temp_path(self)
+    d = tmp / "dataset"
+    d.mkdir()
+    (d / "train.csv").write_text("original")
+
+    data = Data(str(d))
+    first = data.content_hash()
+    (d / "train.csv").write_text("modified")
+
+    self.assertEqual(data.content_hash(), first)
+    self.assertNotEqual(Data(str(d)).content_hash(), first)
+
+  def test_cloud_uri_still_raises_on_repeat_calls(self):
+    data = Data("gs://bucket/data/")
+    for _ in range(2):
+      with self.assertRaises(ValueError):
+        data.content_hash()
 
 
 class TestMakeDataRef(absltest.TestCase):
