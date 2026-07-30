@@ -482,6 +482,8 @@ class TestWaitForJob(absltest.TestCase):
   def _make_terminated(self, exit_code):
     t = MagicMock()
     t.exit_code = exit_code
+    t.reason = None
+    t.message = None
     return t
 
   def test_immediate_success_phase(self):
@@ -496,6 +498,72 @@ class TestWaitForJob(absltest.TestCase):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod("Failed")
     with self.assertRaisesRegex(RuntimeError, "failed"):
       wait_for_job("j1")
+
+  def test_worker_failure_not_marked_success(self):
+    # Leader Succeeded but a worker pod Failed: must not report success.
+    leader = self._make_pod("Succeeded")
+    leader.metadata.name = "keras-pathways-j1-0"
+    worker = self._make_pod("Failed", container_statuses=None)
+    worker.metadata.name = "keras-pathways-j1-1"
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self.mock_core.list_namespaced_pod.return_value.items = [leader, worker]
+    with self.assertRaisesRegex(RuntimeError, "failed"):
+      wait_for_job("j1")
+
+  def _succeed_leader_with(self, worker):
+    leader = self._make_pod("Succeeded")
+    leader.metadata.name = "keras-pathways-j1-0"
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self.mock_core.list_namespaced_pod.return_value.items = [leader, worker]
+
+  def test_all_workers_succeeded_reports_success(self):
+    # Leader and workers all Succeeded: job is successful.
+    worker = self._make_pod("Succeeded", container_statuses=None)
+    worker.metadata.name = "keras-pathways-j1-1"
+    self._succeed_leader_with(worker)
+    self.assertEqual(wait_for_job("j1"), "success")
+
+  def test_worker_still_running_reports_success(self):
+    # A worker that is still Running (not Failed) when the leader Succeeds
+    # is not a failure, e.g. a normal teardown window.
+    worker = self._make_pod("Running", container_statuses=None)
+    worker.metadata.name = "keras-pathways-j1-1"
+    self._succeed_leader_with(worker)
+    self.assertEqual(wait_for_job("j1"), "success")
+
+  def test_worker_verification_api_exception_degrades_gracefully(self):
+    # If listing pods fails with ApiException, log a warning and still
+    # report success rather than failing the wait loop on a transient error.
+    leader = self._make_pod("Succeeded")
+    leader.metadata.name = "keras-pathways-j1-0"
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self.mock_core.list_namespaced_pod.side_effect = ApiException(
+      status=500, reason="Internal Server Error"
+    )
+    self.assertEqual(wait_for_job("j1"), "success")
+
+  def test_worker_with_none_status_not_marked_failed(self):
+    # A pod whose .status is None (e.g. just created) must not be treated
+    # as a failure.
+    worker = MagicMock()
+    worker.status = None
+    worker.metadata.name = "keras-pathways-j1-1"
+    self._succeed_leader_with(worker)
+    self.assertEqual(wait_for_job("j1"), "success")
+
+  def test_worker_running_with_prior_nonzero_exit_not_marked_failed(self):
+    # Deliberate tradeoff: a worker whose container exited non-zero but
+    # whose pod phase is still Running (e.g. mid-restart under
+    # RecreateGroupOnPodRestart) is NOT treated as a failure. Only a
+    # terminal Failed phase counts, to avoid failing a succeeding job
+    # during a normal group recreate/teardown.
+    cs = self._make_container_status(
+      last_state_terminated=self._make_terminated(1)
+    )
+    worker = self._make_pod("Running", container_statuses=[cs])
+    worker.metadata.name = "keras-pathways-j1-1"
+    self._succeed_leader_with(worker)
+    self.assertEqual(wait_for_job("j1"), "success")
 
   def test_pending_calls_check_scheduling(self):
     pending = self._make_pod("Pending", container_statuses=None)
@@ -668,6 +736,38 @@ class TestAsyncObservationHelpers(absltest.TestCase):
     status = get_job_status("keras-pathways-job-1")
 
     self.assertEqual(status, JobStatus.SUCCEEDED)
+
+  def test_get_job_status_failed_when_worker_failed(self):
+    # Leader Succeeded but a worker Failed: status must be FAILED (#239).
+    leader = self._make_pod("Succeeded")
+    worker = self._make_pod("Failed")
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self.mock_core.list_namespaced_pod.return_value.items = [leader, worker]
+
+    status = get_job_status("keras-pathways-job-1")
+
+    self.assertEqual(status, JobStatus.FAILED)
+
+  def test_get_job_status_succeeded_when_workers_ok(self):
+    leader = self._make_pod("Succeeded")
+    worker = self._make_pod("Succeeded")
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self.mock_core.list_namespaced_pod.return_value.items = [leader, worker]
+
+    status = get_job_status("keras-pathways-job-1")
+
+    self.assertEqual(status, JobStatus.SUCCEEDED)
+
+  def test_get_job_status_failed_when_worker_failed_via_container_exit(self):
+    # Leader's container exited 0, but a worker Failed -> FAILED.
+    leader = self._make_pod("Running", exit_code=0)
+    worker = self._make_pod("Failed")
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self.mock_core.list_namespaced_pod.return_value.items = [leader, worker]
+
+    status = get_job_status("keras-pathways-job-1")
+
+    self.assertEqual(status, JobStatus.FAILED)
 
   def test_get_job_status_failed_from_terminated_container(self):
     self.mock_core.read_namespaced_pod.return_value = self._make_pod(
