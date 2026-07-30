@@ -38,6 +38,7 @@ Asynchronous execution. Returns a `JobHandle` immediately.
 def my_func(arg1):
   return "result"
 
+
 job = my_func.run_async("val")
 print(job.job_id)
 ```
@@ -51,6 +52,7 @@ print(job.job_id)
 ```python
 # As argument
 train(Data("./dataset"))
+
 
 # As volume mount
 @kinetic.run(volumes={"/data": Data("./dataset")})

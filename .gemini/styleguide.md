@@ -41,8 +41,7 @@ We design for the end-to-end user intent ("run this function on a TPU"):
 ```python
 # Good: Workflow-centric
 @kinetic.run(accelerator="v3-8")
-def my_function():
-    ...
+def my_function(): ...
 ```
 
 ---

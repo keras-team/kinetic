@@ -62,8 +62,9 @@ jobs with the same `requirements.txt` reuse the same cached image.
 ```python
 @kinetic.run(accelerator="tpu-v6e-8")
 def train():
-    import keras
-    ...
+  import keras
+
+  ...
 ```
 
 **Startup expectations:**
@@ -87,8 +88,7 @@ dependencies at pod startup.
 
 ```python
 @kinetic.run(accelerator="tpu-v6e-8", container_image="prebuilt")
-def train():
-    ...
+def train(): ...
 ```
 
 :::{warning}
@@ -121,11 +121,10 @@ image is responsible for every dependency your function needs.
 
 ```python
 @kinetic.run(
-    accelerator="tpu-v6e-8",
-    container_image="us-docker.pkg.dev/my-project/kinetic/my-image:v1.0",
+  accelerator="tpu-v6e-8",
+  container_image="us-docker.pkg.dev/my-project/kinetic/my-image:v1.0",
 )
-def train():
-    ...
+def train(): ...
 ```
 
 **Requirements:** the image must

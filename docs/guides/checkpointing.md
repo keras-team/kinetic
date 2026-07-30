@@ -20,14 +20,15 @@ import os
 
 import kinetic
 
+
 @kinetic.run(accelerator="cpu")
 def train():
-    # Remote: KINETIC_OUTPUT_DIR resolves to gs://.../outputs/<job_id>.
-    # Local: fall back to a filesystem path under /tmp so the same code
-    # works when you run the function directly for testing.
-    output_dir = os.environ.get("KINETIC_OUTPUT_DIR", "/tmp/local_checkpoints")
-    # ... train and write checkpoints/artifacts under output_dir ...
-    return f"saved to {output_dir}"
+  # Remote: KINETIC_OUTPUT_DIR resolves to gs://.../outputs/<job_id>.
+  # Local: fall back to a filesystem path under /tmp so the same code
+  # works when you run the function directly for testing.
+  output_dir = os.environ.get("KINETIC_OUTPUT_DIR", "/tmp/local_checkpoints")
+  # ... train and write checkpoints/artifacts under output_dir ...
+  return f"saved to {output_dir}"
 ```
 
 For full Orbax-managed auto-resume with JAX or Keras, the canonical

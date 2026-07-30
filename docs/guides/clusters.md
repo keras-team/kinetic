@@ -27,8 +27,7 @@ You can target a specific cluster from your code using the `cluster` parameter o
 
 ```python
 @kinetic.run(accelerator="a100", cluster="gpu-cluster")
-def train_on_gpu():
-    ...
+def train_on_gpu(): ...
 ```
 
 ### Using Environment Variables

@@ -12,16 +12,18 @@ below.
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v5litepod-8")
 def jax_computation():
-    import jax
-    import jax.numpy as jnp
+  import jax
+  import jax.numpy as jnp
 
-    print(f"Devices: {jax.devices()}")
+  print(f"Devices: {jax.devices()}")
 
-    x = jnp.ones((1000, 1000))
-    result = jnp.dot(x, x)
-    return float(result[0, 0])
+  x = jnp.ones((1000, 1000))
+  result = jnp.dot(x, x)
+  return float(result[0, 0])
+
 
 print(jax_computation())  # 1000.0
 ```
@@ -31,28 +33,28 @@ A standard JAX training loop with `jax.grad` runs without modification:
 ```python
 @kinetic.run(accelerator="tpu-v6e-8")
 def train():
-    import jax
-    import jax.numpy as jnp
+  import jax
+  import jax.numpy as jnp
 
-    def loss_fn(params, x, y):
-        pred = x @ params["w"] + params["b"]
-        return jnp.mean((pred - y) ** 2)
+  def loss_fn(params, x, y):
+    pred = x @ params["w"] + params["b"]
+    return jnp.mean((pred - y) ** 2)
 
-    grad_fn = jax.grad(loss_fn)
+  grad_fn = jax.grad(loss_fn)
 
-    key = jax.random.PRNGKey(0)
-    params = {"w": jax.random.normal(key, (10, 1)), "b": jnp.zeros(1)}
-    x = jax.random.normal(key, (512, 10))
-    y = x @ jnp.ones((10, 1)) + 0.1 * jax.random.normal(key, (512, 1))
+  key = jax.random.PRNGKey(0)
+  params = {"w": jax.random.normal(key, (10, 1)), "b": jnp.zeros(1)}
+  x = jax.random.normal(key, (512, 10))
+  y = x @ jnp.ones((10, 1)) + 0.1 * jax.random.normal(key, (512, 1))
 
-    lr = 0.01
-    for step in range(200):
-        grads = grad_fn(params, x, y)
-        params = {k: params[k] - lr * grads[k] for k in params}
-        if step % 50 == 0:
-            print(f"step {step}: loss={loss_fn(params, x, y):.4f}")
+  lr = 0.01
+  for step in range(200):
+    grads = grad_fn(params, x, y)
+    params = {k: params[k] - lr * grads[k] for k in params}
+    if step % 50 == 0:
+      print(f"step {step}: loss={loss_fn(params, x, y):.4f}")
 
-    return float(loss_fn(params, x, y))
+  return float(loss_fn(params, x, y))
 ```
 
 Imports for `jax`, `jaxlib`, and any other heavy library go **inside**
@@ -84,19 +86,19 @@ devices on a single host:
 ```python
 @kinetic.run(accelerator="tpu-v5litepod-8")
 def parallel_computation():
-    import jax
-    import jax.numpy as jnp
+  import jax
+  import jax.numpy as jnp
 
-    n_devices = jax.local_device_count()
-    print(f"Running on {n_devices} devices")
+  n_devices = jax.local_device_count()
+  print(f"Running on {n_devices} devices")
 
-    @jax.pmap
-    def parallel_matmul(x):
-        return jnp.dot(x, x.T)
+  @jax.pmap
+  def parallel_matmul(x):
+    return jnp.dot(x, x.T)
 
-    data = jnp.ones((n_devices, 256, 256))
-    result = parallel_matmul(data)
-    return float(result[0, 0, 0])
+  data = jnp.ones((n_devices, 256, 256))
+  result = parallel_matmul(data)
+  return float(result[0, 0, 0])
 ```
 
 ## Scaling beyond a single host
@@ -108,9 +110,10 @@ the Pathways backend:
 ```python
 @kinetic.run(accelerator="tpu-v5litepod-2x4", backend="pathways")
 def train_distributed():
-    import jax
-    # jax.process_count() > 1 here; pmap/sharding work cross-host.
-    ...
+  import jax
+
+  # jax.process_count() > 1 here; pmap/sharding work cross-host.
+  ...
 ```
 
 Without `backend="pathways"`, multi-host JAX collectives won't have a
@@ -129,12 +132,15 @@ function only ever sees a `str` path:
 import kinetic
 from kinetic import Data
 
+
 @kinetic.run(accelerator="tpu-v6e-8")
 def train(data_dir):
-    # `data_dir` is a local filesystem path on the remote pod.
-    import os
-    files = os.listdir(data_dir)
-    ...
+  # `data_dir` is a local filesystem path on the remote pod.
+  import os
+
+  files = os.listdir(data_dir)
+  ...
+
 
 # Local directory:
 train(Data("./my_dataset/"))

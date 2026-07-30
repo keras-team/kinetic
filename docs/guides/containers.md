@@ -44,14 +44,14 @@ Bundled mode builds a custom container image via Cloud Build with all your depen
 ```python
 import kinetic
 
+
 # Bundled mode — these are equivalent:
 @kinetic.run(accelerator="tpu-v6e-8")
-def train():
-    ...
+def train(): ...
+
 
 @kinetic.run(accelerator="tpu-v6e-8", container_image="bundled")
-def train():
-    ...
+def train(): ...
 ```
 
 ### Tradeoffs
@@ -66,8 +66,7 @@ Prebuilt mode uses a pre-published base image that already contains the accelera
 
 ```python
 @kinetic.run(accelerator="tpu-v6e-8", container_image="prebuilt")
-def train():
-    ...
+def train(): ...
 ```
 
 ### How it works
@@ -101,9 +100,10 @@ export KINETIC_BASE_IMAGE_REPO=us-docker.pkg.dev/my-project/kinetic-base
 Or pass it directly to the decorator:
 
 ```python
-@kinetic.run(accelerator="l4", base_image_repo="us-docker.pkg.dev/my-project/kinetic-base")
-def train():
-    ...
+@kinetic.run(
+  accelerator="l4", base_image_repo="us-docker.pkg.dev/my-project/kinetic-base"
+)
+def train(): ...
 ```
 
 See [`kinetic build-image`](#kinetic-build-image) for the full command reference.
@@ -114,11 +114,10 @@ Provide a full container image URI to use your own image. Kinetic skips all buil
 
 ```python
 @kinetic.run(
-    accelerator="tpu-v6e-8",
-    container_image="us-docker.pkg.dev/my-project/kinetic/my-image:v1.0"
+  accelerator="tpu-v6e-8",
+  container_image="us-docker.pkg.dev/my-project/kinetic/my-image:v1.0",
 )
-def train():
-    ...
+def train(): ...
 ```
 
 ### Requirements for custom images

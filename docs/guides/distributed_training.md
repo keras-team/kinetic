@@ -16,12 +16,14 @@ Pick a multi-host accelerator:
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v6e-16")
 def train_distributed():
-    import jax
-    print(f"Total devices across all hosts: {jax.device_count()}")
-    print(f"This host: {jax.process_index()} of {jax.process_count()}")
-    # ... your training code ...
+  import jax
+
+  print(f"Total devices across all hosts: {jax.device_count()}")
+  print(f"This host: {jax.process_index()} of {jax.process_count()}")
+  # ... your training code ...
 ```
 
 Whether a slice is multi-host depends on the topology and the per-VM
@@ -44,21 +46,21 @@ shortening the iteration loop before you scale up.
 ```python
 @kinetic.run(accelerator="tpu-v6e-16")
 def train_data_parallel():
-    import keras
+  import keras
 
-    devices = keras.distribution.list_devices()
-    device_mesh = keras.distribution.DeviceMesh(
-        shape=(len(devices),),
-        axis_names=["batch"],
-        devices=devices,
-    )
-    keras.distribution.set_distribution(
-        keras.distribution.DataParallel(device_mesh=device_mesh)
-    )
+  devices = keras.distribution.list_devices()
+  device_mesh = keras.distribution.DeviceMesh(
+    shape=(len(devices),),
+    axis_names=["batch"],
+    devices=devices,
+  )
+  keras.distribution.set_distribution(
+    keras.distribution.DataParallel(device_mesh=device_mesh)
+  )
 
-    model = keras.Sequential([...])
-    model.compile(...)
-    model.fit(...)
+  model = keras.Sequential([...])
+  model.compile(...)
+  model.fit(...)
 ```
 
 For a richer end-to-end example using a real model, see
@@ -137,7 +139,7 @@ print statements with `jax.process_index()`:
 import jax
 
 if jax.process_index() == 0:
-    print(f"epoch {epoch}: loss={loss}")
+  print(f"epoch {epoch}: loss={loss}")
 ```
 
 For non-leader hosts, fetch logs directly from the per-host pods.

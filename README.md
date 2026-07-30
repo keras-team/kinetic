@@ -9,12 +9,15 @@ Run Keras and JAX workloads on cloud TPUs and GPUs with a simple decorator. No i
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v5e-1")
 def train_model():
-    import keras
-    model = keras.Sequential([...])
-    model.fit(x_train, y_train)
-    return model.history.history["loss"][-1]
+  import keras
+
+  model = keras.Sequential([...])
+  model.fit(x_train, y_train)
+  return model.history.history["loss"][-1]
+
 
 # Executes on a TPU v5e-1 slice, returns the result locally
 final_loss = train_model()

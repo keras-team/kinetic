@@ -72,12 +72,8 @@ By default, Kinetic uses **custom bundled images** (`container_image="bundled"`)
 To save build time and Cloud Build execution charges, you can explicitly request prebuilt base configurations via `container_image="prebuilt"` in `@kinetic.run()`:
 
 ```python
-@kinetic.run(
-  accelerator="l4",
-  container_image="prebuilt"
-)
-def train():
-    ...
+@kinetic.run(accelerator="l4", container_image="prebuilt")
+def train(): ...
 ```
 
 ### Why `"prebuilt"` reduces GCP expenses:

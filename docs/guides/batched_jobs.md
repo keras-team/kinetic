@@ -28,14 +28,18 @@ submitted in the background.
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v5e-1")
 def train(lr):
-    import keras
-    model = keras.Sequential([keras.layers.Dense(64, activation="relu"),
-                              keras.layers.Dense(1)])
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr), loss="mse")
-    history = model.fit(x_train, y_train, epochs=10, verbose=0)
-    return history.history["loss"][-1]
+  import keras
+
+  model = keras.Sequential(
+    [keras.layers.Dense(64, activation="relu"), keras.layers.Dense(1)]
+  )
+  model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr), loss="mse")
+  history = model.fit(x_train, y_train, epochs=10, verbose=0)
+  return history.history["loss"][-1]
+
 
 batch = train.run_async_map([0.001, 0.01, 0.1])
 losses = batch.results()
@@ -69,12 +73,12 @@ unpacked as keyword arguments:
 
 ```python
 @kinetic.run(accelerator="tpu-v5e-1")
-def train(lr, batch_size):
-    ...
+def train(lr, batch_size): ...
+
 
 configs = [
-    {"lr": 0.001, "batch_size": 32},
-    {"lr": 0.01,  "batch_size": 64},
+  {"lr": 0.001, "batch_size": 32},
+  {"lr": 0.01, "batch_size": 64},
 ]
 batch = train.run_async_map(configs)
 ```
@@ -87,7 +91,8 @@ If your function takes a list or dict as a single argument, use
 ```python
 @kinetic.run(accelerator="cpu")
 def process(items):
-    return sum(items)
+  return sum(items)
+
 
 batch = process.run_async_map([[1, 2, 3], [4, 5, 6]], input_mode="single")
 ```
@@ -107,7 +112,7 @@ You can inspect progress at any time through the `BatchHandle`.
 ```python
 # Per-job status
 for idx, status in batch.statuses():
-    print(f"Job {idx}: {status.value}")
+  print(f"Job {idx}: {status.value}")
 
 # Aggregate counts
 print(batch.status_counts())
@@ -168,8 +173,8 @@ order.
 
 ```python
 for job in batch.as_completed():
-    result = job.result()
-    print(f"{job.job_id} finished: {result}")
+  result = job.result()
+  print(f"{job.job_id} finished: {result}")
 ```
 
 `as_completed()` streams results even while submission is still in
@@ -190,12 +195,14 @@ When any job fails and `return_exceptions=False` (the default),
 
 ```python
 try:
-    results = batch.results()
+  results = batch.results()
 except kinetic.BatchError as e:
-    print(f"Batch {e.group_id}: {len(e.failures)} of {len(e.partial_results)} jobs failed")
-    for job in e.failures:
-        print(f"  {job.job_id}: {job.status().value}")
-    # e.partial_results has results at successful positions, None at failed ones
+  print(
+    f"Batch {e.group_id}: {len(e.failures)} of {len(e.partial_results)} jobs failed"
+  )
+  for job in e.failures:
+    print(f"  {job.job_id}: {job.status().value}")
+  # e.partial_results has results at successful positions, None at failed ones
 ```
 
 `BatchError` provides three attributes:
@@ -213,10 +220,10 @@ positions contain the exception object.
 ```python
 results = batch.results(return_exceptions=True)
 for i, r in enumerate(results):
-    if isinstance(r, Exception):
-        print(f"Job {i} failed: {r}")
-    else:
-        print(f"Job {i}: {r}")
+  if isinstance(r, Exception):
+    print(f"Job {i} failed: {r}")
+  else:
+    print(f"Job {i}: {r}")
 ```
 
 ### Inspecting failures
@@ -229,7 +236,7 @@ inspection.
 
 ```python
 for job in batch.failures():
-    print(f"{job.job_id}: {job.tail(n=20)}")
+  print(f"{job.job_id}: {job.tail(n=20)}")
 ```
 
 ## Retries
@@ -303,9 +310,9 @@ happens when a job fails.
 ```python
 # Stop the batch as soon as any job fails, cancel all running siblings
 batch = train.run_async_map(
-    configs,
-    fail_fast=True,
-    cancel_running_on_fail=True,
+  configs,
+  fail_fast=True,
+  cancel_running_on_fail=True,
 )
 ```
 

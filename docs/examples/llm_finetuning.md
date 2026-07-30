@@ -9,15 +9,16 @@ When fine-tuning models from Keras Hub or Kaggle, you often need to provide cred
 ```python
 import kinetic
 
+
 @kinetic.run(
-    accelerator="tpu-v5litepod-1",
-    capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"]
+  accelerator="tpu-v5litepod-1", capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"]
 )
 def train_gemma():
-    import keras_hub
-    # Credentials are automatically available in the remote environment
-    gemma_lm = keras_hub.models.Gemma3CausalLM.from_preset("gemma3_1b")
-    # ...
+  import keras_hub
+
+  # Credentials are automatically available in the remote environment
+  gemma_lm = keras_hub.models.Gemma3CausalLM.from_preset("gemma3_1b")
+  # ...
 ```
 
 ## Low-Rank Adaptation (LoRA)
@@ -27,16 +28,17 @@ Fine-tuning large models often requires massive memory. LoRA significantly reduc
 ```python
 @kinetic.run(accelerator="tpu-v5litepod-8")
 def train_lora():
-    import keras_hub
-    gemma_lm = keras_hub.models.GemmaCausalLM.from_preset("gemma_2b_en")
-    
-    # Enable LoRA (rank=4)
-    print("Enabling LoRA...")
-    gemma_lm.backbone.enable_lora(rank=4)
-    
-    # Train as usual
-    gemma_lm.fit(train_data, epochs=3)
-    return "Training complete!"
+  import keras_hub
+
+  gemma_lm = keras_hub.models.GemmaCausalLM.from_preset("gemma_2b_en")
+
+  # Enable LoRA (rank=4)
+  print("Enabling LoRA...")
+  gemma_lm.backbone.enable_lora(rank=4)
+
+  # Train as usual
+  gemma_lm.fit(train_data, epochs=3)
+  return "Training complete!"
 ```
 
 ## Distributed Fine-tuning
@@ -44,15 +46,12 @@ def train_lora():
 For larger models or datasets, use the Pathways backend to distribute training across multiple TPU hosts.
 
 ```python
-@kinetic.run(
-    accelerator="tpu-v6e-8",
-    backend="pathways"
-)
+@kinetic.run(accelerator="tpu-v6e-8", backend="pathways")
 def train_distributed():
-    import keras
-    import jax
-    # Multi-host TPU environment is auto-initialized
-    # ...
+  import keras
+  import jax
+  # Multi-host TPU environment is auto-initialized
+  # ...
 ```
 
 See the [Distributed Training](../guides/distributed_training.md) guide for more details on scaling your workloads.

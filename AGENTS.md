@@ -76,8 +76,10 @@ The `Data` class (`kinetic.Data`) declares data dependencies for remote function
 
 ```python
 @kinetic.run(accelerator="v3-8")
-def train(data_dir, config_path):
-    ...  # data_dir and config_path are plain strings
+def train(
+  data_dir, config_path
+): ...  # data_dir and config_path are plain strings
+
 
 train(Data("./dataset/"), Data("./config.json"))
 ```
@@ -87,7 +89,7 @@ train(Data("./dataset/"), Data("./config.json"))
 ```python
 @kinetic.run(accelerator="v3-8", volumes={"/data": Data("./dataset/")})
 def train():
-    files = os.listdir("/data")  # available at mount path
+  files = os.listdir("/data")  # available at mount path
 ```
 
 Both patterns can be combined. `Data` objects can also be nested inside lists, dicts, and other containers — they are recursively discovered and resolved.
@@ -246,10 +248,10 @@ Images are tagged with `SHA256(base_image + accelerator_type + requirements.txt 
 
 ```python
 {
-    "success": bool,
-    "result": Any,       # if success=True
-    "exception": Exception,  # if success=False
-    "traceback": str,        # if success=False
+  "success": bool,
+  "result": Any,  # if success=True
+  "exception": Exception,  # if success=False
+  "traceback": str,  # if success=False
 }
 ```
 

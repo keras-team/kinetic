@@ -11,22 +11,26 @@ restructure your training loop.
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v6e-8")
 def train_model():
-    import keras
-    import numpy as np
+  import keras
+  import numpy as np
 
-    model = keras.Sequential([
-        keras.layers.Dense(64, activation="relu", input_shape=(10,)),
-        keras.layers.Dense(1),
-    ])
-    model.compile(optimizer="adam", loss="mse")
+  model = keras.Sequential(
+    [
+      keras.layers.Dense(64, activation="relu", input_shape=(10,)),
+      keras.layers.Dense(1),
+    ]
+  )
+  model.compile(optimizer="adam", loss="mse")
 
-    x_train = np.random.randn(1000, 10)
-    y_train = np.random.randn(1000, 1)
+  x_train = np.random.randn(1000, 10)
+  y_train = np.random.randn(1000, 1)
 
-    history = model.fit(x_train, y_train, epochs=5, verbose=0)
-    return history.history["loss"][-1]
+  history = model.fit(x_train, y_train, epochs=5, verbose=0)
+  return history.history["loss"][-1]
+
 
 final_loss = train_model()
 print(f"Final loss: {final_loss}")
@@ -72,8 +76,7 @@ runtime to talk to:
 
 ```python
 @kinetic.run(accelerator="tpu-v5litepod-2x4", backend="pathways")
-def train_distributed():
-    ...
+def train_distributed(): ...
 ```
 
 See [Distributed Training](../guides/distributed_training.md) for the full
@@ -93,11 +96,14 @@ function only ever sees a `str` path:
 import kinetic
 from kinetic import Data
 
+
 @kinetic.run(accelerator="tpu-v6e-8")
 def train(data_dir):
-    # `data_dir` is a local filesystem path on the remote pod.
-    import keras
-    ...
+  # `data_dir` is a local filesystem path on the remote pod.
+  import keras
+
+  ...
+
 
 # Local directory:
 train(Data("./my_dataset/"))

@@ -9,15 +9,17 @@ Use the `capture_env_vars` parameter in the `@kinetic.run()` decorator. It accep
 ```python
 import kinetic
 
+
 @kinetic.run(
-    accelerator="tpu-v5litepod-1",
-    capture_env_vars=["KAGGLE_USERNAME", "KAGGLE_KEY", "WANDB_*"]
+  accelerator="tpu-v5litepod-1",
+  capture_env_vars=["KAGGLE_USERNAME", "KAGGLE_KEY", "WANDB_*"],
 )
 def train_model():
-    import os
-    # These are available in the remote process
-    user = os.environ.get("KAGGLE_USERNAME")
-    # ...
+  import os
+
+  # These are available in the remote process
+  user = os.environ.get("KAGGLE_USERNAME")
+  # ...
 ```
 
 ## Wildcard Support

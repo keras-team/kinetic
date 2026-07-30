@@ -18,38 +18,40 @@ Kinetic will install these in the remote container automatically. See [Managing 
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="gpu-l4")
 def train():
-    import torch
-    import torch.nn as nn
+  import torch
+  import torch.nn as nn
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training on: {device}")
+  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  print(f"Training on: {device}")
 
-    # Simple feedforward network
-    model = nn.Sequential(
-        nn.Linear(10, 64),
-        nn.ReLU(),
-        nn.Linear(64, 1),
-    ).to(device)
+  # Simple feedforward network
+  model = nn.Sequential(
+    nn.Linear(10, 64),
+    nn.ReLU(),
+    nn.Linear(64, 1),
+  ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.MSELoss()
+  optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+  loss_fn = nn.MSELoss()
 
-    # Dummy data
-    x = torch.randn(512, 10, device=device)
-    y = torch.randn(512, 1, device=device)
+  # Dummy data
+  x = torch.randn(512, 10, device=device)
+  y = torch.randn(512, 1, device=device)
 
-    for epoch in range(20):
-        pred = model(x)
-        loss = loss_fn(pred, y)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        if epoch % 5 == 0:
-            print(f"epoch {epoch}: loss={loss.item():.4f}")
+  for epoch in range(20):
+    pred = model(x)
+    loss = loss_fn(pred, y)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    if epoch % 5 == 0:
+      print(f"epoch {epoch}: loss={loss.item():.4f}")
 
-    return loss.item()
+  return loss.item()
+
 
 final_loss = train()
 ```
@@ -61,35 +63,36 @@ For nodes with multiple GPUs, use `torch.nn.DataParallel` to split batches acros
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="gpu-a100x4")
 def train_multi_gpu():
-    import torch
-    import torch.nn as nn
+  import torch
+  import torch.nn as nn
 
-    device = torch.device("cuda")
-    print(f"GPUs available: {torch.cuda.device_count()}")
+  device = torch.device("cuda")
+  print(f"GPUs available: {torch.cuda.device_count()}")
 
-    model = nn.Sequential(
-        nn.Linear(10, 128),
-        nn.ReLU(),
-        nn.Linear(128, 1),
-    )
-    model = nn.DataParallel(model).to(device)
+  model = nn.Sequential(
+    nn.Linear(10, 128),
+    nn.ReLU(),
+    nn.Linear(128, 1),
+  )
+  model = nn.DataParallel(model).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.MSELoss()
+  optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+  loss_fn = nn.MSELoss()
 
-    x = torch.randn(2048, 10, device=device)
-    y = torch.randn(2048, 1, device=device)
+  x = torch.randn(2048, 10, device=device)
+  y = torch.randn(2048, 1, device=device)
 
-    for epoch in range(20):
-        pred = model(x)
-        loss = loss_fn(pred, y)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+  for epoch in range(20):
+    pred = model(x)
+    loss = loss_fn(pred, y)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
-    return loss.item()
+  return loss.item()
 ```
 
 ## GPU Selection
@@ -100,8 +103,7 @@ Use `spot=True` to reduce costs for fault-tolerant workloads:
 
 ```python
 @kinetic.run(accelerator="gpu-a100", spot=True)
-def train():
-    ...
+def train(): ...
 ```
 
 ## Related pages

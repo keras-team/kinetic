@@ -15,11 +15,14 @@ FUSE-mounted dataset too large to fit on disk.
 import kinetic
 from kinetic import Data
 
+
 @kinetic.run(accelerator="cpu")
 def process_data(data_path):
-    import os
-    print(f"Reading from: {data_path}")
-    return sorted(os.listdir(data_path))
+  import os
+
+  print(f"Reading from: {data_path}")
+  return sorted(os.listdir(data_path))
+
 
 # Local directory
 process_data(Data("./my_dataset/"))
@@ -33,13 +36,14 @@ a value in the `volumes={...}` decorator argument:
 
 ```python
 @kinetic.run(
-    accelerator="tpu-v5e-4",
-    volumes={"/data": Data("./dataset/")},
+  accelerator="tpu-v5e-4",
+  volumes={"/data": Data("./dataset/")},
 )
 def train():
-    import pandas as pd
-    df = pd.read_csv("/data/train.csv")
-    return len(df)
+  import pandas as pd
+
+  df = pd.read_csv("/data/train.csv")
+  return len(df)
 ```
 
 Use `volumes={...}` when your training script has hardcoded absolute
@@ -97,12 +101,12 @@ path; reads stream on demand from GCS.
 
 ```python
 @kinetic.run(
-    accelerator="tpu-v5e-4",
-    volumes={"/data": Data("gs://my-bucket/imagenet/", fuse=True)},
+  accelerator="tpu-v5e-4",
+  volumes={"/data": Data("gs://my-bucket/imagenet/", fuse=True)},
 )
 def train():
-    # Only files you open() are fetched from GCS
-    ...
+  # Only files you open() are fetched from GCS
+  ...
 ```
 
 FUSE works with both `volumes={...}` and function arguments, with both
@@ -112,8 +116,9 @@ a file path, not a directory:
 ```python
 @kinetic.run(accelerator="cpu")
 def read_config(config_path):
-    with open(config_path) as f:
-        return json.load(f)
+  with open(config_path) as f:
+    return json.load(f)
+
 
 read_config(Data("./config.json", fuse=True))
 ```
@@ -122,14 +127,14 @@ You can mix FUSE-mounted and downloaded data in the same job:
 
 ```python
 @kinetic.run(
-    accelerator="tpu-v5e-4",
-    volumes={
-        "/data": Data("gs://my-bucket/large-dataset/", fuse=True),
-        "/config": Data("./small-config/"),
-    },
+  accelerator="tpu-v5e-4",
+  volumes={
+    "/data": Data("gs://my-bucket/large-dataset/", fuse=True),
+    "/config": Data("./small-config/"),
+  },
 )
-def train(extra_data):
-    ...
+def train(extra_data): ...
+
 
 train(Data("./labels.csv"))  # downloaded function-argument data
 ```
@@ -175,11 +180,11 @@ a serializable `__data_ref__` dict:
 
 ```python
 {
-    "__data_ref__": True,
-    "gcs_uri": "gs://bucket/namespace/data-cache/abc123",
-    "is_dir": True,
-    "mount_path": "/data",      # None for function-argument Data
-    "fuse": False,              # True when fuse=True was passed
+  "__data_ref__": True,
+  "gcs_uri": "gs://bucket/namespace/data-cache/abc123",
+  "is_dir": True,
+  "mount_path": "/data",  # None for function-argument Data
+  "fuse": False,  # True when fuse=True was passed
 }
 ```
 

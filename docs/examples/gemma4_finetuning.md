@@ -43,12 +43,12 @@ Kaggle credentials must be present in the remote pod to download the model weigh
 ```python
 import kinetic
 
+
 @kinetic.run(
-    accelerator="tpu-v5litepod-8",
-    capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"],
+  accelerator="tpu-v5litepod-8",
+  capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"],
 )
-def fine_tune_gemma4():
-    ...
+def fine_tune_gemma4(): ...
 ```
 
 This pattern is covered in depth in the [Environment Variables](../guides/env_vars.md) guide.
@@ -88,109 +88,120 @@ import kinetic
 
 
 def _make_layout_map(keras):
-    """Build the ModelParallel layout map for Gemma4 26B-A4B."""
-    import numpy as np
+  """Build the ModelParallel layout map for Gemma4 26B-A4B."""
+  import numpy as np
 
-    devices = keras.distribution.list_devices()
-    mesh = keras.distribution.DeviceMesh(
-        shape=(1, len(devices)),
-        axis_names=["batch", "model"],
-        devices=np.array(devices).reshape(1, len(devices)),
+  devices = keras.distribution.list_devices()
+  mesh = keras.distribution.DeviceMesh(
+    shape=(1, len(devices)),
+    axis_names=["batch", "model"],
+    devices=np.array(devices).reshape(1, len(devices)),
+  )
+  layout_map = keras.distribution.LayoutMap(mesh)
+  layout_map[".*moe_expert_bank/gate_proj"] = (None, None, "model")
+  layout_map[".*moe_expert_bank/up_proj"] = (None, None, "model")
+  layout_map[".*moe_expert_bank/down_proj"] = (None, None, "model")
+  layout_map[".*query/kernel"] = ("model", None, None)
+  layout_map[".*key/kernel"] = (None, "model", None)
+  layout_map[".*value/kernel"] = (None, "model", None)
+  layout_map[".*attention_output/kernel"] = ("model", None, None)
+  layout_map[".*ffw_gating/kernel"] = (None, "model")
+  layout_map[".*ffw_gating_2/kernel"] = (None, "model")
+  layout_map[".*ffw_linear/kernel"] = ("model", None)
+  layout_map[".*per_layer_input_gate/kernel"] = (None, "model")
+  layout_map[".*per_layer_up_proj/kernel"] = (None, "model")
+  layout_map[".*token_embedding/embeddings"] = ("model", None)
+  keras.distribution.set_distribution(
+    keras.distribution.ModelParallel(
+      layout_map=layout_map, batch_dim_name="batch"
     )
-    layout_map = keras.distribution.LayoutMap(mesh)
-    layout_map[".*moe_expert_bank/gate_proj"] = (None, None, "model")
-    layout_map[".*moe_expert_bank/up_proj"] = (None, None, "model")
-    layout_map[".*moe_expert_bank/down_proj"] = (None, None, "model")
-    layout_map[".*query/kernel"] = ("model", None, None)
-    layout_map[".*key/kernel"] = (None, "model", None)
-    layout_map[".*value/kernel"] = (None, "model", None)
-    layout_map[".*attention_output/kernel"] = ("model", None, None)
-    layout_map[".*ffw_gating/kernel"] = (None, "model")
-    layout_map[".*ffw_gating_2/kernel"] = (None, "model")
-    layout_map[".*ffw_linear/kernel"] = ("model", None)
-    layout_map[".*per_layer_input_gate/kernel"] = (None, "model")
-    layout_map[".*per_layer_up_proj/kernel"] = (None, "model")
-    layout_map[".*token_embedding/embeddings"] = ("model", None)
-    keras.distribution.set_distribution(
-        keras.distribution.ModelParallel(layout_map=layout_map, batch_dim_name="batch")
-    )
+  )
 
 
 @kinetic.run(
-    accelerator="tpu-v5litepod-8",
-    capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"],
+  accelerator="tpu-v5litepod-8",
+  capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"],
 )
 def fine_tune_gemma4():
-    import h5py
-    import io
+  import h5py
+  import io
 
-    import jax
-    import keras
-    import keras_hub
-    import kagglehub
-    import numpy as np
+  import jax
+  import keras
+  import keras_hub
+  import kagglehub
+  import numpy as np
 
-    prompts = [
-        "<start_of_turn>user\nExplain what a transformer is in one paragraph.<end_of_turn>\n<start_of_turn>model\n",
-        "<start_of_turn>user\nWrite a Python function that reverses a string.<end_of_turn>\n<start_of_turn>model\n",
-        # ... more examples
-    ]
-    responses = [
-        "A transformer is a neural network architecture...",
-        "def reverse_string(s: str) -> str:\n    return s[::-1]",
-        # ...
-    ]
+  prompts = [
+    "<start_of_turn>user\nExplain what a transformer is in one paragraph.<end_of_turn>\n<start_of_turn>model\n",
+    "<start_of_turn>user\nWrite a Python function that reverses a string.<end_of_turn>\n<start_of_turn>model\n",
+    # ... more examples
+  ]
+  responses = [
+    "A transformer is a neural network architecture...",
+    "def reverse_string(s: str) -> str:\n    return s[::-1]",
+    # ...
+  ]
 
-    keras.mixed_precision.set_global_policy("bfloat16")
-    _make_layout_map(keras)
+  keras.mixed_precision.set_global_policy("bfloat16")
+  _make_layout_map(keras)
 
-    print("Loading Gemma 4 Instruct 26B weights (~52 GB, this may take several minutes)...")
-    model = keras_hub.models.Gemma4CausalLM.from_preset(
-        "gemma4_instruct_26b_a4b",
-        load_weights=False,
-    )
-    model_path = kagglehub.model_download("keras/gemma4/keras/gemma4_instruct_26b_a4b")
-    _load_sharded_weights(model.backbone, os.path.join(model_path, "model.weights.json"))
+  print(
+    "Loading Gemma 4 Instruct 26B weights (~52 GB, this may take several minutes)..."
+  )
+  model = keras_hub.models.Gemma4CausalLM.from_preset(
+    "gemma4_instruct_26b_a4b",
+    load_weights=False,
+  )
+  model_path = kagglehub.model_download(
+    "keras/gemma4/keras/gemma4_instruct_26b_a4b"
+  )
+  _load_sharded_weights(
+    model.backbone, os.path.join(model_path, "model.weights.json")
+  )
 
-    model.backbone.enable_lora(rank=4)
-    print(f"Trainable parameters: {model.count_params():,}")
+  model.backbone.enable_lora(rank=4)
+  print(f"Trainable parameters: {model.count_params():,}")
 
-    model.preprocessor.sequence_length = 128
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=5e-5))
-    model.fit(x={"prompts": prompts, "responses": responses}, epochs=1, batch_size=1)
+  model.preprocessor.sequence_length = 128
+  model.compile(optimizer=keras.optimizers.Adam(learning_rate=5e-5))
+  model.fit(
+    x={"prompts": prompts, "responses": responses}, epochs=1, batch_size=1
+  )
 
-    output_dir = os.environ.get("KINETIC_OUTPUT_DIR", "/tmp/gemma4_lora")
-    weights_path = f"{output_dir}/gemma4_lora.weights.h5"
+  output_dir = os.environ.get("KINETIC_OUTPUT_DIR", "/tmp/gemma4_lora")
+  weights_path = f"{output_dir}/gemma4_lora.weights.h5"
 
-    buffer = io.BytesIO()
-    with h5py.File(buffer, "w") as f:
-        for var in model.trainable_variables:
-            val = np.asarray(jax.device_get(var.value), dtype=np.float32)
-            f.create_dataset(var.path, data=val)
+  buffer = io.BytesIO()
+  with h5py.File(buffer, "w") as f:
+    for var in model.trainable_variables:
+      val = np.asarray(jax.device_get(var.value), dtype=np.float32)
+      f.create_dataset(var.path, data=val)
 
-    if weights_path.startswith("gs://"):
-        from google.cloud import storage as gcs_storage
-        without_scheme = weights_path[5:]
-        bucket_name, _, blob_name = without_scheme.partition("/")
-        blob = gcs_storage.Client().bucket(bucket_name).blob(blob_name)
-        buffer.seek(0)
-        blob.upload_from_file(buffer, content_type="application/x-hdf5")
-    else:
-        os.makedirs(output_dir, exist_ok=True)
-        with open(weights_path, "wb") as out_f:
-            out_f.write(buffer.getvalue())
+  if weights_path.startswith("gs://"):
+    from google.cloud import storage as gcs_storage
 
-    print(f"LoRA weights saved to: {weights_path}")
-    return weights_path
+    without_scheme = weights_path[5:]
+    bucket_name, _, blob_name = without_scheme.partition("/")
+    blob = gcs_storage.Client().bucket(bucket_name).blob(blob_name)
+    buffer.seek(0)
+    blob.upload_from_file(buffer, content_type="application/x-hdf5")
+  else:
+    os.makedirs(output_dir, exist_ok=True)
+    with open(weights_path, "wb") as out_f:
+      out_f.write(buffer.getvalue())
+
+  print(f"LoRA weights saved to: {weights_path}")
+  return weights_path
 
 
 if __name__ == "__main__":
-    os.environ["KERAS_BACKEND"] = "jax"
-    os.environ["GOOGLE_CLOUD_PROJECT"] = "your-project-id"
-    os.environ["GOOGLE_CLOUD_ZONE"] = "us-central1-a"
+  os.environ["KERAS_BACKEND"] = "jax"
+  os.environ["GOOGLE_CLOUD_PROJECT"] = "your-project-id"
+  os.environ["GOOGLE_CLOUD_ZONE"] = "us-central1-a"
 
-    weights_path = fine_tune_gemma4()
-    print(f"Training complete. Weights at: {weights_path}")
+  weights_path = fine_tune_gemma4()
+  print(f"Training complete. Weights at: {weights_path}")
 ```
 
 Only the LoRA adapter variables (a few MB) are saved — not the full 26B backbone. `KINETIC_OUTPUT_DIR` is automatically set to a unique GCS path (e.g. `gs://your-bucket/job-abc123/output/`) for every job. The full path is printed to your terminal so you can pass it to the inference job below.
@@ -241,67 +252,74 @@ import kinetic
 
 
 @kinetic.run(
-    accelerator="tpu-v5litepod-8",
-    capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"],
+  accelerator="tpu-v5litepod-8",
+  capture_env_vars=["KAGGLE_*", "GOOGLE_CLOUD_*"],
 )
 def run_inference(weights_path: str):
-    import h5py
-    import io
+  import h5py
+  import io
 
-    import keras
-    import keras_hub
-    import kagglehub
-    import numpy as np
+  import keras
+  import keras_hub
+  import kagglehub
+  import numpy as np
 
-    keras.mixed_precision.set_global_policy("bfloat16")
-    _make_layout_map(keras)
+  keras.mixed_precision.set_global_policy("bfloat16")
+  _make_layout_map(keras)
 
-    print("Loading Gemma 4 Instruct 26B weights (~52 GB)...")
-    model = keras_hub.models.Gemma4CausalLM.from_preset(
-        "gemma4_instruct_26b_a4b",
-        load_weights=False,
+  print("Loading Gemma 4 Instruct 26B weights (~52 GB)...")
+  model = keras_hub.models.Gemma4CausalLM.from_preset(
+    "gemma4_instruct_26b_a4b",
+    load_weights=False,
+  )
+  model_path = kagglehub.model_download(
+    "keras/gemma4/keras/gemma4_instruct_26b_a4b"
+  )
+  _load_sharded_weights(
+    model.backbone, os.path.join(model_path, "model.weights.json")
+  )
+
+  model.backbone.enable_lora(rank=4)
+  print(f"Loading LoRA weights from: {weights_path}")
+
+  if weights_path.startswith("gs://"):
+    from google.cloud import storage as gcs_storage
+
+    without_scheme = weights_path[5:]
+    bucket_name, _, blob_name = without_scheme.partition("/")
+    buffer = io.BytesIO()
+    gcs_storage.Client().bucket(bucket_name).blob(blob_name).download_to_file(
+      buffer
     )
-    model_path = kagglehub.model_download("keras/gemma4/keras/gemma4_instruct_26b_a4b")
-    _load_sharded_weights(model.backbone, os.path.join(model_path, "model.weights.json"))
+    buffer.seek(0)
+    h5_source = buffer
+  else:
+    h5_source = weights_path
 
-    model.backbone.enable_lora(rank=4)
-    print(f"Loading LoRA weights from: {weights_path}")
+  path_to_var = {var.path: var for var in model.trainable_variables}
+  with h5py.File(h5_source, "r") as f:
+    for path, var in path_to_var.items():
+      if path in f:
+        var.assign(np.array(f[path]))
 
-    if weights_path.startswith("gs://"):
-        from google.cloud import storage as gcs_storage
-        without_scheme = weights_path[5:]
-        bucket_name, _, blob_name = without_scheme.partition("/")
-        buffer = io.BytesIO()
-        gcs_storage.Client().bucket(bucket_name).blob(blob_name).download_to_file(buffer)
-        buffer.seek(0)
-        h5_source = buffer
-    else:
-        h5_source = weights_path
-
-    path_to_var = {var.path: var for var in model.trainable_variables}
-    with h5py.File(h5_source, "r") as f:
-        for path, var in path_to_var.items():
-            if path in f:
-                var.assign(np.array(f[path]))
-
-    prompt = (
-        "<start_of_turn>user\n"
-        "Explain what a transformer is in one paragraph."
-        "<end_of_turn>\n<start_of_turn>model\n"
-    )
-    output = model.generate([prompt], max_length=256)
-    return output[0]
+  prompt = (
+    "<start_of_turn>user\n"
+    "Explain what a transformer is in one paragraph."
+    "<end_of_turn>\n<start_of_turn>model\n"
+  )
+  output = model.generate([prompt], max_length=256)
+  return output[0]
 
 
 if __name__ == "__main__":
-    os.environ["KERAS_BACKEND"] = "jax"
-    os.environ["GOOGLE_CLOUD_PROJECT"] = "your-project-id"
-    os.environ["GOOGLE_CLOUD_ZONE"] = "us-central1-a"
+  os.environ["KERAS_BACKEND"] = "jax"
+  os.environ["GOOGLE_CLOUD_PROJECT"] = "your-project-id"
+  os.environ["GOOGLE_CLOUD_ZONE"] = "us-central1-a"
 
-    # Replace with the path printed at the end of the fine-tuning job.
-    weights_path = "gs://your-bucket/job-abc123/output/gemma4_lora.weights.h5"
-    response = run_inference(weights_path)
-    print(response)
+  # Replace with the path printed at the end of the fine-tuning job.
+  weights_path = "gs://your-bucket/job-abc123/output/gemma4_lora.weights.h5"
+  response = run_inference(weights_path)
+  print(response)
 ```
 
 ## Cleaning Up

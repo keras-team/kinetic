@@ -31,8 +31,9 @@ pandas
 ```python
 @kinetic.run(accelerator="tpu-v6e-8")
 def train():
-    import pandas as pd  # installed automatically on the remote
-    ...
+  import pandas as pd  # installed automatically on the remote
+
+  ...
 ```
 
 `pyproject.toml` works equally well — Kinetic reads

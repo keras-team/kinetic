@@ -25,11 +25,14 @@ Example:
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v5e-1")
 def train():
   import keras
+
   # ... training code ...
   return history.history
+
 
 job = train.run_async()
 ```
@@ -49,6 +52,7 @@ Use `kinetic.Data` to pass local or GCS data to your remote functions.
 def train(data_dir):
   # ...
   pass
+
 
 train(kinetic.Data("./my_dataset/"))
 ```

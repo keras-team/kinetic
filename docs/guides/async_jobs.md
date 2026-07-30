@@ -20,10 +20,12 @@ from Python and from the `kinetic jobs` CLI.
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v5e-1")
 def train_model():
-    # Long-running training code
-    return {"final_loss": 0.123}
+  # Long-running training code
+  return {"final_loss": 0.123}
+
 
 job = train_model.run_async()
 print(f"Submitted: {job.job_id}")
@@ -141,7 +143,7 @@ If you don't remember the ID, list everything currently on the cluster:
 
 ```python
 for j in kinetic.list_jobs():
-    print(f"{j.job_id}  {j.func_name}  {j.status().value}")
+  print(f"{j.job_id}  {j.func_name}  {j.status().value}")
 ```
 
 The CLI equivalent is `kinetic jobs list`.
@@ -153,11 +155,11 @@ bound the wait:
 
 ```python
 try:
-    final = job.result(timeout=3600)
+  final = job.result(timeout=3600)
 except TimeoutError:
-    # Job is still running — handle is still valid; you can call .result()
-    # again, .tail(), .cancel(), or just walk away.
-    print(job.tail(n=50))
+  # Job is still running — handle is still valid; you can call .result()
+  # again, .tail(), .cancel(), or just walk away.
+  print(job.tail(n=50))
 ```
 
 By default `result()` cleans up after success: the k8s Job/pod and the
@@ -165,7 +167,7 @@ GCS artifacts are deleted. Two ways to opt out:
 
 ```python
 final = job.result(cleanup=False)  # keep everything
-job.cleanup(k8s=True, gcs=False)   # later: delete pod, keep artifacts
+job.cleanup(k8s=True, gcs=False)  # later: delete pod, keep artifacts
 ```
 
 Failed jobs are not auto-cleaned, so logs survive until you delete them.

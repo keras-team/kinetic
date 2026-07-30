@@ -18,12 +18,15 @@ Add `debug=True` to `@kinetic.run()`:
 ```python
 import kinetic
 
+
 @kinetic.run(accelerator="tpu-v5e-2x2", debug=True)
 def train():
-    import jax
-    breakpoint()  # debugger will pause here
-    x = jax.numpy.arange(16)
-    return x.sum()
+  import jax
+
+  breakpoint()  # debugger will pause here
+  x = jax.numpy.arange(16)
+  return x.sum()
+
 
 train()
 ```
@@ -59,9 +62,11 @@ from the CLI:
 ```python
 @kinetic.run(accelerator="tpu-v5e-2x2", debug=True)
 def train():
-    import jax
-    breakpoint()
-    ...
+  import jax
+
+  breakpoint()
+  ...
+
 
 job = train()
 print(job.job_id)
@@ -87,9 +92,9 @@ from kinetic.debug import cleanup_port_forward
 job = kinetic.attach("<job_id>")
 pf = job.debug_attach(local_port=5678)
 try:
-    job.result()  # or job.status() in a loop
+  job.result()  # or job.status() in a loop
 finally:
-    cleanup_port_forward(pf)
+  cleanup_port_forward(pf)
 ```
 
 ## Port conflicts
