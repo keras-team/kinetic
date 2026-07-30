@@ -77,6 +77,7 @@ class JobContext:
   image_uri: Optional[str] = None
   payload_sha256: Optional[str] = None
   context_sha256: Optional[str] = None
+  signed_urls: Optional[dict[str, str]] = None
 
   def __post_init__(self):
     self.bucket_name = build_bucket_name(self.project, self.cluster_name)
@@ -203,6 +204,7 @@ class GKEBackend(BaseK8sBackend):
       debug=ctx.debug,
       payload_sha256=ctx.payload_sha256,
       context_sha256=ctx.context_sha256,
+      signed_urls=ctx.signed_urls,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -261,6 +263,7 @@ class PathwaysBackend(BaseK8sBackend):
       debug=ctx.debug,
       payload_sha256=ctx.payload_sha256,
       context_sha256=ctx.context_sha256,
+      signed_urls=ctx.signed_urls,
     )
 
   def wait_for_job(self, job: Any, ctx: JobContext) -> None:
@@ -575,6 +578,27 @@ def _upload_artifacts(ctx: JobContext) -> bool:
     project=ctx.project,
     requirements_content=requirements_content,
   )
+
+  # Generate signed URLs for the job (with fallback to legacy GCS access)
+  signer_email = f"kn-{ctx.cluster_name}-signer@{ctx.project}.iam.gserviceaccount.com"
+  try:
+    ctx.signed_urls = storage.generate_job_signed_urls(
+        bucket_name=ctx.bucket_name,
+        job_id=ctx.job_id,
+        project=ctx.project,
+        signer_sa_email=signer_email,
+        has_requirements=has_requirements,
+        debug=ctx.debug,
+    )
+    logging.info("Successfully generated Signed URLs for secure job isolation.")
+  except Exception as e:
+    logging.warning(
+        "Failed to generate Signed URLs (likely due to missing 'signer' GSA or lack of "
+        "impersonation permissions). Falling back to legacy GCS access. "
+        "Error: %s", e
+    )
+    ctx.signed_urls = None
+
   return has_requirements
 
 

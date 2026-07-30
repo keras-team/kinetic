@@ -6,6 +6,8 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import urllib.request
+import urllib.error
 import zipfile
 from unittest import mock
 from unittest.mock import MagicMock
@@ -1091,6 +1093,97 @@ class TestMainHashVerification(absltest.TestCase):
 
     # Should exit with 1 on verification failure
     self.assertEqual(cm.exception.code, 1)
+
+
+class TestHttpOperations(absltest.TestCase):
+  """Verify that download and upload helpers support Signed URLs."""
+
+  @mock.patch("kinetic.runner.remote_runner.urllib.request.urlretrieve")
+  def test_download_from_signed_url(self, mock_urlretrieve):
+    # If it's a signed URL (starts with http/https), it should use urlretrieve
+    _download_from_gcs(
+        client=None,
+        gcs_path="https://storage.googleapis.com/bucket/job/payload.pkl?sig=123",
+        local_path="/tmp/local.pkl"
+    )
+    mock_urlretrieve.assert_called_once_with(
+        "https://storage.googleapis.com/bucket/job/payload.pkl?sig=123",
+        "/tmp/local.pkl"
+    )
+
+  @mock.patch("kinetic.runner.remote_runner.urllib.request.urlopen")
+  def test_upload_to_signed_url(self, mock_urlopen):
+    # Mock urlopen response
+    mock_response = mock.MagicMock()
+    mock_response.status = 200
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    # Create a dummy file to upload
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+      f.write(b"test data")
+      temp_file_path = f.name
+    self.addCleanup(os.unlink, temp_file_path)
+
+    _upload_to_gcs(
+        client=None,
+        local_path=temp_file_path,
+        gcs_path="https://storage.googleapis.com/bucket/job/result.pkl?sig=123"
+    )
+
+    # Verify urlopen was called with a PUT request containing the file data
+    mock_urlopen.assert_called_once()
+    req = mock_urlopen.call_args[0][0]
+    self.assertIsInstance(req, urllib.request.Request)
+    self.assertEqual(req.full_url, "https://storage.googleapis.com/bucket/job/result.pkl?sig=123")
+    self.assertEqual(req.method, "PUT")
+    self.assertEqual(req.data, b"test data")
+
+
+class TestSentinels(absltest.TestCase):
+  """Verify sentinel upload and wait operations using Signed URLs."""
+
+  @mock.patch("kinetic.runner.remote_runner.urllib.request.urlopen")
+  def test_upload_sentinel(self, mock_urlopen):
+    mock_response = mock.MagicMock()
+    mock_response.status = 200
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    from kinetic.runner.remote_runner import _upload_sentinel
+    _upload_sentinel("https://signed-url/sentinel")
+
+    mock_urlopen.assert_called_once()
+    req = mock_urlopen.call_args[0][0]
+    self.assertEqual(req.full_url, "https://signed-url/sentinel")
+    self.assertEqual(req.method, "PUT")
+    self.assertEqual(req.data, b"")
+
+  @mock.patch("kinetic.runner.remote_runner.urllib.request.urlopen")
+  @mock.patch("kinetic.runner.remote_runner.time.sleep") # speed up test
+  def test_wait_for_sentinel_success(self, mock_sleep, mock_urlopen):
+    mock_response = mock.MagicMock()
+    mock_response.status = 200
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    from kinetic.runner.remote_runner import _wait_for_sentinel
+    # Should return immediately if 200 OK
+    _wait_for_sentinel("https://signed-url/sentinel", timeout=10)
+    mock_urlopen.assert_called_once()
+
+  @mock.patch("kinetic.runner.remote_runner.urllib.request.urlopen")
+  @mock.patch("kinetic.runner.remote_runner.time.sleep")
+  def test_wait_for_sentinel_timeout(self, mock_sleep, mock_urlopen):
+    # Simulate 404 Not Found on every check
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        url="https://signed-url/sentinel",
+        code=404,
+        msg="Not Found",
+        hdrs=None,
+        fp=None
+    )
+
+    from kinetic.runner.remote_runner import _wait_for_sentinel
+    with self.assertRaises(RuntimeError):
+      _wait_for_sentinel("https://signed-url/sentinel", timeout=2) # low timeout for test
 
 
 if __name__ == "__main__":

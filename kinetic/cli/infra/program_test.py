@@ -236,5 +236,95 @@ class TestClusterResourceLabels(absltest.TestCase):
     )
 
 
+class TestServiceAccountsAndIAM(absltest.TestCase):
+  """Verify that the split GSA architecture and restricted IAM are created."""
+
+  def _run_program(self, config=None):
+    config = config or _make_config()
+    with (
+      mock.patch.object(program, "pulumi") as pulumi_mock,
+      mock.patch.object(program, "command"),
+      mock.patch.object(program, "gcp") as gcp_mock,
+      mock.patch.object(program, "k8s") as k8s_mock,
+    ):
+      # Mock client config for deployer email
+      gcp_mock.organizations.get_client_config.return_value = mock.MagicMock(
+          email="deployer@google.com"
+      )
+      program.create_program(config)()
+    return gcp_mock, k8s_mock, pulumi_mock
+
+  def test_creates_four_service_accounts(self):
+    gcp_mock, _, _ = self._run_program()
+    
+    sa_calls = gcp_mock.serviceaccount.Account.call_args_list
+    # Expect: nodes, workers, signer, builds
+    self.assertLen(sa_calls, 4)
+    
+    sa_names = {call.kwargs["account_id"] for call in sa_calls}
+    self.assertIn("kn-test-cluster-nodes", sa_names)
+    self.assertIn("kn-test-cluster-workers", sa_names)
+    self.assertIn("kn-test-cluster-signer", sa_names)
+    self.assertIn("kn-test-cluster-builds", sa_names)
+
+  def test_worker_sa_has_restricted_gcs_access(self):
+    gcp_mock, _, pulumi_mock = self._run_program()
+    
+    # Check BucketIAMMember calls
+    iam_calls = gcp_mock.storage.BucketIAMMember.call_args_list
+    
+    # Find calls for the worker SA
+    worker_calls = [
+        c for c in iam_calls 
+        if "worker-sa" in c.args[0] or "workers" in c.args[0]
+    ]
+    
+    # Worker should have read-only (objectViewer) access
+    viewer_calls = [c for c in worker_calls if c.kwargs.get("role") == "roles/storage.objectViewer"]
+    self.assertLen(viewer_calls, 1)
+    
+    # Verify condition expression via pulumi.Output.format calls
+    format_calls = pulumi_mock.Output.format.call_args_list
+    self.assertTrue(any("default/data-cache/" in call.args[0] for call in format_calls))
+
+    # Worker should NOT have objectAdmin
+    admin_calls = [c for c in worker_calls if c.kwargs.get("role") == "roles/storage.objectAdmin"]
+    self.assertEmpty(admin_calls)
+
+  def test_signer_sa_has_admin_access_and_impersonation(self):
+    gcp_mock, _, pulumi_mock = self._run_program()
+    
+    # Signer GSA should have objectAdmin on the jobs bucket (1 call, not 2)
+    iam_calls = gcp_mock.storage.BucketIAMMember.call_args_list
+    signer_gcs_calls = [
+        c for c in iam_calls 
+        if "signer-sa" in c.args[0] and c.kwargs.get("role") == "roles/storage.objectAdmin"
+    ]
+    self.assertLen(signer_gcs_calls, 1)
+    
+    # Deployer should have Token Creator on signer GSA
+    sa_iam_calls = gcp_mock.serviceaccount.IAMMember.call_args_list
+    impersonation_calls = [
+        c for c in sa_iam_calls 
+        if "signer" in c.args[0] and c.kwargs.get("role") == "roles/iam.serviceAccountTokenCreator"
+    ]
+    self.assertLen(impersonation_calls, 1)
+    
+    # Verify member format call
+    format_calls = pulumi_mock.Output.format.call_args_list
+    self.assertTrue(any("user:{0}" in call.args[0] for call in format_calls))
+
+  def test_node_sa_has_no_gcs_access(self):
+    gcp_mock, _, _ = self._run_program()
+    
+    iam_calls = gcp_mock.storage.BucketIAMMember.call_args_list
+    node_gcs_calls = [
+        c for c in iam_calls 
+        if "node-sa" in c.args[0]
+    ]
+    # Nodes SA should have NO GCS bucket bindings now
+    self.assertEmpty(node_gcs_calls)
+
+
 if __name__ == "__main__":
   absltest.main()
