@@ -247,7 +247,7 @@ class JobHandle:
       f"Job completed but no result payload was found at {result_uri}"
     )
 
-  def _stream_logs(self) -> None:
+  def _stream_logs(self, resume: bool = True) -> None:
     """Stream logs to stdout via LogStreamer (blocking)."""
     self._ensure_credentials()
     core_v1 = client.CoreV1Api()
@@ -257,7 +257,9 @@ class JobHandle:
         f"No pod found for job {self.job_id} — "
         "it may have been deleted or has not started yet."
       )
-    with LogStreamer(core_v1, self.namespace) as streamer:
+    with LogStreamer(
+      core_v1, self.namespace, job_id=self.job_id, resume=resume
+    ) as streamer:
       streamer.start(pod_name)
       if streamer._thread is not None:
         streamer._thread.join()
@@ -270,11 +272,18 @@ class JobHandle:
     """Return the current execution status of the job."""
     return self._get_status()
 
-  def logs(self, follow: bool = False) -> str | None:
-    """Return logs or stream them to stdout until the job terminates."""
+  def logs(self, follow: bool = False, resume: bool = True) -> str | None:
+    """Return logs or stream them to stdout until the job terminates.
+
+    When ``follow`` is true the stream is resilient to transient network
+    drops. ``resume=True`` (default) also persists a small cursor under
+    ``~/.kinetic/streams/`` so a later ``--follow`` invocation in a
+    fresh shell picks up where the previous one left off; pass
+    ``resume=False`` to re-stream from the start.
+    """
     if not follow:
       return self._get_logs()
-    self._stream_logs()
+    self._stream_logs(resume=resume)
     return None
 
   def tail(self, n: int = 100) -> str:
@@ -374,7 +383,9 @@ class JobHandle:
 
     if stream_logs:
       self._ensure_credentials()
-      streamer_ctx = LogStreamer(client.CoreV1Api(), self.namespace)
+      streamer_ctx = LogStreamer(
+        client.CoreV1Api(), self.namespace, job_id=self.job_id
+      )
 
     with streamer_ctx if streamer_ctx is not None else contextlib.nullcontext():
       while True:

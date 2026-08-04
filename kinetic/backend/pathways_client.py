@@ -174,7 +174,7 @@ def wait_for_job(job_id, namespace="default", timeout=3600, poll_interval=10):
   leader_pod_name = _get_leader_pod_name(job_name)
 
   logged_pending = set()
-  with LogStreamer(core_v1, namespace) as streamer:
+  with LogStreamer(core_v1, namespace, job_id=job_id) as streamer:
     while True:
       elapsed = time.time() - start_time
       if elapsed > timeout:

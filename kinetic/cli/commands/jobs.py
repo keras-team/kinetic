@@ -90,16 +90,26 @@ def status(job_id, project, zone, cluster_name):
   default=None,
   help="Show the last N log lines instead of the full log.",
 )
+@click.option(
+  "--no-resume",
+  is_flag=True,
+  help=(
+    "With --follow, re-stream from the start instead of picking up "
+    "where a previous follow left off."
+  ),
+)
 @common_options
-def logs(job_id, follow, tail, project, zone, cluster_name):
+def logs(job_id, follow, tail, no_resume, project, zone, cluster_name):
   """Show or stream logs for a job."""
   if follow and tail is not None:
     raise click.ClickException("Use either --follow or --tail, not both.")
+  if no_resume and not follow:
+    raise click.ClickException("--no-resume only applies with --follow.")
 
   handle = _attach(job_id, project, cluster_name)
 
   if follow:
-    handle.logs(follow=True)
+    handle.logs(follow=True, resume=not no_resume)
     return
 
   if tail is not None:
