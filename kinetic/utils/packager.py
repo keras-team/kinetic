@@ -5,6 +5,7 @@ payload with cloudpickle, and extracting/replacing Data objects in
 arbitrarily nested arg structures.
 """
 
+import json
 import os
 import posixpath
 import subprocess
@@ -86,7 +87,10 @@ def _write_git_files(
 
 
 def zip_working_dir(
-  base_dir: str, output_path: str, exclude_paths: set[str] | None = None
+  base_dir: str,
+  output_path: str,
+  exclude_paths: set[str] | None = None,
+  plan_json: dict[str, Any] | None = None,
 ) -> None:
   """Zip source files from a working directory.
 
@@ -98,6 +102,8 @@ def zip_working_dir(
       base_dir: Root directory to zip.
       output_path: Destination path for the ZIP file.
       exclude_paths: Absolute paths to skip during archiving.
+      plan_json: Optional packaging plan, written into the archive at the
+          reserved path ``.kinetic/plan.json`` for the remote runner.
   """
   exclude_paths = exclude_paths or set()
   normalized_excludes = {os.path.normpath(p) for p in exclude_paths}
@@ -107,23 +113,25 @@ def zip_working_dir(
   with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
     if git_files is not None:
       _write_git_files(zipf, base_dir, git_files, normalized_excludes)
-      return
+    else:
+      for root, dirs, files in os.walk(base_dir):
+        # Exclude .git, __pycache__, and Data-referenced directories
+        dirs[:] = [
+          d
+          for d in dirs
+          if d not in [".git", "__pycache__"]
+          and os.path.normpath(os.path.join(root, d)) not in normalized_excludes
+        ]
 
-    for root, dirs, files in os.walk(base_dir):
-      # Exclude .git, __pycache__, and Data-referenced directories
-      dirs[:] = [
-        d
-        for d in dirs
-        if d not in [".git", "__pycache__"]
-        and os.path.normpath(os.path.join(root, d)) not in normalized_excludes
-      ]
+        for file in files:
+          file_path = os.path.join(root, file)
+          if _path_is_excluded(file_path, normalized_excludes):
+            continue
+          archive_name = os.path.relpath(file_path, base_dir)
+          zipf.write(file_path, archive_name)
 
-      for file in files:
-        file_path = os.path.join(root, file)
-        if _path_is_excluded(file_path, normalized_excludes):
-          continue
-        archive_name = os.path.relpath(file_path, base_dir)
-        zipf.write(file_path, archive_name)
+    if plan_json:
+      zipf.writestr(".kinetic/plan.json", json.dumps(plan_json))
 
 
 def save_payload(
