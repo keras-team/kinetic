@@ -217,6 +217,10 @@ def zip_working_dir(
 ) -> None:
   """Zip a directory into a ZIP archive, excluding common non-source files.
 
+  When in a git repository, respects ``.gitignore`` and uses git ls-files
+  to determine which files to include. Falls back to directory traversal
+  with ``.kineticignore`` patterns when not in a git repo.
+
   Symlinked directories are followed (with a cycle guard), empty
   directories are preserved, and files that cannot be archived (broken
   symlinks, unreadable files) are skipped with a warning instead of
@@ -254,6 +258,51 @@ def zip_working_dir(
   with zipfile.ZipFile(
     output_path, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
   ) as zipf:
+    # Try git ls-files first if in a git repository
+    git_files = _list_git_files(base_dir)
+    if git_files is not None:
+      for relative_path in git_files:
+        file_path = os.path.join(base_dir, relative_path)
+        if _path_is_excluded(file_path, normalized_excludes) or not os.path.lexists(
+          file_path
+        ):
+          continue
+
+        archive_name = relative_path
+        if os.path.isdir(file_path) and not os.path.islink(file_path):
+          # Empty directories are preserved in git mode
+          rel_dir = archive_name.replace(os.sep, "/")
+          info = zipfile.ZipInfo(rel_dir + "/")
+          info.external_attr = (0o40755 << 16) | 0x10
+          zipf.writestr(info, b"")
+          continue
+
+        try:
+          size = os.path.getsize(file_path)
+          zipf.write(file_path, archive_name)
+          archived.append((size, archive_name))
+          if _is_secret_name(os.path.basename(file_path)):
+            secrets.append(archive_name)
+        except (OSError, ValueError, UnicodeEncodeError) as e:
+          logging.warning("Skipping %s: %s", file_path, e)
+
+      if plan_json is not None:
+        zipf.writestr(
+          _PLAN_ARCHIVE_NAME, json.dumps(plan_json, indent=2, default=str)
+        )
+      _report_context_size(output_path, archived)
+      if secrets:
+        logging.warning(
+          "Credential-shaped files are being uploaded with your code: %s. They "
+          "will be stored in the job's Cloud Storage bucket. Add them to a "
+          "%s file at %s to keep them out of the archive.",
+          ", ".join(sorted(secrets)),
+          _KINETICIGNORE,
+          base_dir,
+        )
+      return
+
+    # Fall back to directory traversal with os.walk
     for root, dirs, files in os.walk(base_dir, followlinks=True):
       kept_dirs = []
       for name in dirs:
