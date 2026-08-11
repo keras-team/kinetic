@@ -78,7 +78,7 @@ class TestZipWorkingDir(absltest.TestCase):
 
     names = self._zip_and_list(src, tmp_path)
     self.assertIn("top.py", names)
-    self.assertIn(os.path.join("pkg", "sub", "deep.py"), names)
+    self.assertIn("pkg/sub/deep.py", names)
 
   def test_empty_directory(self):
     tmp_path = _make_temp_path(self)
@@ -420,3 +420,50 @@ class TestReplaceDataWithRefs(absltest.TestCase):
 
 if __name__ == "__main__":
   absltest.main()
+
+
+def test_list_git_files_respects_gitignore():
+  """Test that git ls-files respects .gitignore."""
+  import tempfile
+  import os
+  
+  with tempfile.TemporaryDirectory() as tmpdir:
+    # Initialize git repo
+    os.system(f"cd {tmpdir} && git init > /dev/null 2>&1")
+    os.system(f"cd {tmpdir} && git config user.email 'test@test.com' > /dev/null 2>&1")
+    os.system(f"cd {tmpdir} && git config user.name 'Test' > /dev/null 2>&1")
+    
+    # Create files
+    open(f"{tmpdir}/tracked.py", "w").close()
+    open(f"{tmpdir}/ignored.log", "w").close()
+    open(f"{tmpdir}/.gitignore", "w").write("*.log\n")
+    
+    # Stage files
+    os.system(f"cd {tmpdir} && git add . > /dev/null 2>&1")
+    os.system(f"cd {tmpdir} && git commit -m 'test' > /dev/null 2>&1")
+    
+    # Get git files
+    files = packager._list_git_files(tmpdir)
+    
+    assert files is not None
+    assert "tracked.py" in files
+    assert "ignored.log" not in files  # Should be ignored
+
+
+def test_write_git_files_excludes_paths():
+  """Test that git files are excluded properly."""
+  import tempfile
+  import zipfile
+  
+  with tempfile.TemporaryDirectory() as tmpdir:
+    # Create zip
+    zip_path = os.path.join(tmpdir, "test.zip")
+    exclude_paths = {os.path.join(tmpdir, "excluded")}
+    
+    with zipfile.ZipFile(zip_path, "w") as zf:
+      packager._write_git_files(
+        zf,
+        tmpdir,
+        ["file1.py", "excluded/file2.py"],
+        exclude_paths
+      )
