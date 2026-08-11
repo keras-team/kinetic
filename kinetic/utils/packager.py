@@ -88,10 +88,11 @@ def _write_git_files(
 def zip_working_dir(
   base_dir: str, output_path: str, exclude_paths: set[str] | None = None
 ) -> None:
-  """Zip a directory into a ZIP archive, excluding common non-source files.
+  """Zip a directory into a ZIP archive, respecting .gitignore.
 
   Excludes ``.git``, ``__pycache__``, and any paths in *exclude_paths*
-  (which may be files or directories).
+  (which may be files or directories). Uses git ls-files when available
+  to respect .gitignore, otherwise falls back to directory traversal.
 
   Args:
       base_dir: Root directory to zip.
@@ -99,9 +100,16 @@ def zip_working_dir(
       exclude_paths: Absolute paths to skip during archiving.
   """
   exclude_paths = exclude_paths or set()
-  normalized_excludes = {os.path.normpath(p) for p in exclude_paths}
 
   with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+    # Try to use git ls-files to respect .gitignore
+    git_files = _list_git_files(base_dir)
+    if git_files is not None:
+      _write_git_files(zipf, base_dir, git_files, exclude_paths)
+      return
+
+    # Fallback to directory traversal if git is not available
+    normalized_excludes = {os.path.normpath(p) for p in exclude_paths}
     for root, dirs, files in os.walk(base_dir):
       # Exclude .git, __pycache__, and Data-referenced directories
       dirs[:] = [
