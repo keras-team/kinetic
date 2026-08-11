@@ -3,6 +3,14 @@
 Handles zipping the user's working directory, serializing the function
 payload with cloudpickle, and extracting/replacing Data objects in
 arbitrarily nested arg structures.
+
+## Git-aware packaging
+
+When zip_working_dir is called on a git repository, it automatically uses
+git ls-files to respect .gitignore rules. This provides a cleaner packaging
+experience by excluding ignored files and directories. For directories that
+are not git repositories, the function falls back to directory traversal
+with .kineticignore pattern matching.
 """
 
 import contextlib
