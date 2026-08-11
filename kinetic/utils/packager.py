@@ -9,6 +9,8 @@ import contextlib
 import fnmatch
 import json
 import os
+import posixpath
+import subprocess
 import sys
 import zipfile
 from collections import defaultdict
@@ -49,6 +51,77 @@ _KINETICIGNORE = ".kineticignore"
 
 # Reserved archive path carrying the client's packaging plan.
 _PLAN_ARCHIVE_NAME = ".kinetic/plan.json"
+
+
+def _list_git_files(base_dir: str) -> list[str] | None:
+  """List tracked and non-ignored untracked files under ``base_dir``."""
+  try:
+    result = subprocess.run(
+      [
+        "git",
+        "-C",
+        base_dir,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ".",
+      ],
+      check=True,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.DEVNULL,
+    )
+  except (OSError, subprocess.CalledProcessError):
+    return None
+
+  return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]
+
+
+def _path_is_excluded(path: str, exclude_paths: set[str]) -> bool:
+  """Check if a path should be excluded from archiving."""
+  if not exclude_paths:
+    return False
+  normalized_path = os.path.normpath(path)
+  return any(
+    normalized_path == excluded or normalized_path.startswith(excluded + os.sep)
+    for excluded in exclude_paths
+  )
+
+
+def _write_git_files(
+  zipf: zipfile.ZipFile,
+  base_dir: str,
+  git_files: list[str],
+  exclude_paths: set[str],
+  archive_prefix: str = "",
+) -> None:
+  """Write files from git ls-files to ZIP, respecting exclusions."""
+  for relative_path in git_files:
+    file_path = os.path.join(base_dir, relative_path)
+    if _path_is_excluded(file_path, exclude_paths) or not os.path.lexists(
+      file_path
+    ):
+      continue
+
+    archive_name = posixpath.join(archive_prefix, relative_path)
+    if os.path.isdir(file_path) and not os.path.islink(file_path):
+      nested_files = _list_git_files(file_path)
+      if nested_files is not None:
+        _write_git_files(
+          zipf,
+          file_path,
+          nested_files,
+          exclude_paths,
+          archive_prefix=archive_name,
+        )
+      continue
+    try:
+      zipf.write(file_path, archive_name)
+    except OSError as e:
+      logging.warning("Could not archive %s: %s", file_path, e)
+
 
 _MB = 1024 * 1024
 _DEFAULT_CONTEXT_SIZE_WARN_MB = 100.0
