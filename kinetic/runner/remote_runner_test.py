@@ -566,7 +566,14 @@ class TestDownloadSingleObject(_EmulatorTestCase):
     self.assertEqual(sorted(os.listdir(target)), ["weights.h5"])
 
   def test_uploaded_file_still_resolves_through_its_hash_dir(self):
-    """The client's own single-file URI names a directory, not an object."""
+    """The client's own single-file URI names a directory, not an object.
+
+    The exact listing is the assertion that matters: the direct object
+    attempt 404s here, and ``download_to_filename`` opens the
+    destination before it learns that. Were the empty file to survive,
+    ``resolve_data_refs`` would see two entries and hand back the
+    directory instead of the file.
+    """
     bucket = self.seeded_data_bucket(
       ["ns/data-cache/abc123/config.json", "ns/data-cache/def456/other.json"],
       content=b"{}",
@@ -580,6 +587,23 @@ class TestDownloadSingleObject(_EmulatorTestCase):
     )
 
     self.assertEqual(sorted(os.listdir(target)), ["config.json"])
+
+  def test_uploaded_file_ref_resolves_to_the_file_after_the_fallback(self):
+    """End to end: the miss-then-list path still yields a file path."""
+    tmp = _make_temp_path(self)
+    bucket = self.seeded_data_bucket(
+      ["ns/data-cache/abc123/config.json"], content=b"{}"
+    )
+    ref = _data_ref(
+      f"gs://{bucket}/ns/data-cache/abc123", is_dir=False, mount_path=None
+    )
+
+    args, _ = resolve_data_refs(
+      (ref,), {}, self.real_client(), str(tmp / "data")
+    )
+
+    self.assertTrue(os.path.isfile(args[0]))
+    self.assertEqual(os.path.basename(args[0]), "config.json")
 
   def test_missing_object_raises_with_the_uri(self):
     bucket = self.seeded_data_bucket(self.SIBLINGS)

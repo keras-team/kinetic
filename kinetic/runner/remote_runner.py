@@ -1420,13 +1420,18 @@ def _download_object(
 
   The object keeps its own name inside *target_dir*.  Returns whether
   an object was found, so callers can fall back to a prefix listing.
+
+  Attempting the download is one round-trip; an existence check first
+  would be two.  ``download_to_filename`` opens the destination before
+  it learns the object is missing, and deletes it again on `NotFound`
+  (google-cloud-storage >= 3.10), so a miss leaves *target_dir* clean
+  for the caller's fallback listing.
   """
-  blob = bucket.blob(blob_name)
-  if not blob.exists():
+  destination = os.path.join(target_dir, posixpath.basename(blob_name))
+  try:
+    bucket.blob(blob_name).download_to_filename(destination)
+  except cloud_exceptions.NotFound:
     return False
-  blob.download_to_filename(
-    os.path.join(target_dir, posixpath.basename(blob_name))
-  )
   return True
 
 
