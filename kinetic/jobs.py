@@ -382,7 +382,8 @@ class JobHandle:
     Args:
       local_port: Local port to forward debugpy traffic to.
       working_dir: Local working directory for VS Code path mappings.
-          If None, a placeholder is used.
+          The pod mirrors this path, so the printed mapping is the
+          identity. If None, no pathMappings entry is printed.
 
     Returns:
       The ``subprocess.Popen`` handle for the kubectl port-forward

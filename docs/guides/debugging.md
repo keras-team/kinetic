@@ -121,14 +121,24 @@ match.
 
 ## Path mappings and source files
 
-Kinetic fills in `pathMappings` in the printed `launch.json` so
-breakpoints set in your local files hit the matching remote files —
-no "unverified breakpoint" warnings, no file mismatch.
+The pod uses the same source paths as your machine. The runner
+extracts the workspace into a temporary directory, then makes a
+symlink to it at the directory you submitted from. Your files thus
+have one path on both sides.
 
-If you attach from a directory that isn't your project root, pass
-`working_dir=` to `debug_attach()` (or replace `${workspaceFolder}` in
-the printed snippet) so the mapping points at the sources you actually
-have open.
+Because the paths agree, the printed `launch.json` uses an identity
+`pathMappings` entry: `localRoot` and `remoteRoot` are the same
+directory. Breakpoints in your local files hit the matching remote
+files, with no "unverified breakpoint" warnings.
+
+`kinetic jobs debug <job_id>` does not know which directory you
+submitted from, so it prints no `pathMappings` entry. Unmapped paths
+are what debugpy assumes, which is correct here.
+
+Add or edit the mapping only if you open the sources from a different
+directory than the one you submitted from. Set `localRoot` to the
+directory you have open, and `remoteRoot` to the directory you
+submitted from.
 
 ## Timeouts and the attach window
 
@@ -141,6 +151,14 @@ environment before submitting:
 ```bash
 export KINETIC_DEBUG_WAIT_TIMEOUT=1800  # 30 minutes
 ```
+
+Kinetic reads the variable when you submit, and puts the value into
+the pod. The client and the pod thus wait for the same time. Set the
+variable before you submit: a change after that has no effect on a job
+that is already on the cluster.
+
+The value must be a positive whole number of seconds. Kinetic ignores
+a different value, logs a warning, and uses 10 minutes.
 
 ## Multi-host debugging
 

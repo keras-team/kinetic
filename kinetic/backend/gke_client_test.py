@@ -1,5 +1,6 @@
 """Tests for kinetic.backend.gke_client — K8s job submission and monitoring."""
 
+import os
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -22,6 +23,7 @@ from kinetic.backend.k8s_utils import (
   GCSFUSE_CSI_DRIVER,
   GCSFUSE_VOLUMES_ANNOTATION,
 )
+from kinetic.debug import DEBUG_WAIT_TIMEOUT_ENV
 from kinetic.job_status import JobStatus
 
 
@@ -245,6 +247,40 @@ class TestCreateJobSpec(absltest.TestCase):
     # Should mount the parent directory "data", not the file path.
     self.assertIn("only-dir=data", vol.csi.volume_attributes["mountOptions"])
     self.assertNotIn("weights.h5", vol.csi.volume_attributes["mountOptions"])
+
+  def _debug_env(self, job):
+    container = job.spec.template.spec.containers[0]
+    return {e.name: e.value for e in container.env}
+
+  def _make_debug_job(self):
+    return _create_job_spec(
+      job_name="debug-job",
+      container_uri="img",
+      accel_config=self._make_cpu_config(),
+      job_id="j",
+      bucket_name="b",
+      namespace="ns",
+      debug=True,
+    )
+
+  def test_debug_wait_timeout_defaults_to_ten_minutes(self):
+    with mock.patch.dict(os.environ, {}, clear=False):
+      os.environ.pop(DEBUG_WAIT_TIMEOUT_ENV, None)
+      env = self._debug_env(self._make_debug_job())
+
+    self.assertEqual(env["KINETIC_DEBUG_WAIT_TIMEOUT"], "600")
+
+  def test_debug_wait_timeout_propagates_user_value_to_pod(self):
+    """A client-side override must reach the pod, or the two disagree.
+
+    The pod stops waiting at its own window. If it kept the default
+    while the user asked for longer, the pod would run the function
+    before the user finished attaching.
+    """
+    with mock.patch.dict(os.environ, {DEBUG_WAIT_TIMEOUT_ENV: "1800"}):
+      env = self._debug_env(self._make_debug_job())
+
+    self.assertEqual(env["KINETIC_DEBUG_WAIT_TIMEOUT"], "1800")
 
 
 class TestWaitForJob(absltest.TestCase):

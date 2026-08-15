@@ -13,7 +13,7 @@ from kinetic.backend import k8s_utils
 from kinetic.backend.log_streaming import LogStreamer
 from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.credentials import invalidate_credential_cache
-from kinetic.debug import DEBUG_WAIT_TIMEOUT, DEBUGPY_PORT
+from kinetic.debug import DEBUGPY_PORT, resolve_debug_wait_timeout
 from kinetic.job_status import JobStatus
 
 # Guards the last-seen kubeconfig context used to invalidate the
@@ -427,7 +427,7 @@ def _create_job_spec(
         client.V1EnvVar(name="PYTHONBREAKPOINT", value="debugpy.breakpoint"),
         client.V1EnvVar(
           name="KINETIC_DEBUG_WAIT_TIMEOUT",
-          value=str(DEBUG_WAIT_TIMEOUT),
+          value=str(resolve_debug_wait_timeout()),
         ),
         client.V1EnvVar(name="KINETIC_DEBUG_PORT", value=str(DEBUGPY_PORT)),
       ]

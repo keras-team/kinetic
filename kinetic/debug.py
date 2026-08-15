@@ -5,6 +5,7 @@ including port-forwarding orchestration and VS Code attach configuration.
 """
 
 import contextlib
+import json
 import os
 import subprocess
 import tempfile
@@ -23,11 +24,12 @@ from kinetic.utils import storage
 # of the box.
 DEBUGPY_PORT = 5678
 
-# Single source of truth for the debugger attach timeout (seconds).
-# Covers pod scheduling + debugpy install + time for the user to
-# attach.  Propagated to the pod via the KINETIC_DEBUG_WAIT_TIMEOUT
-# env var so remote_runner.py uses the same value.
-DEBUG_WAIT_TIMEOUT = 600
+# Environment variable that overrides the debugger attach window.
+DEBUG_WAIT_TIMEOUT_ENV = "KINETIC_DEBUG_WAIT_TIMEOUT"
+
+# Default debugger attach timeout (seconds).  Covers pod scheduling +
+# debugpy install + time for the user to attach.
+DEFAULT_DEBUG_WAIT_TIMEOUT = 600
 
 _TERMINAL_STATUSES = frozenset(
   {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.NOT_FOUND}
@@ -35,6 +37,37 @@ _TERMINAL_STATUSES = frozenset(
 
 # Grace period (seconds) to verify kubectl port-forward started successfully.
 _PORT_FORWARD_STARTUP_SECONDS = 2
+
+
+def resolve_debug_wait_timeout():
+  """Return the debugger attach window in seconds.
+
+  Single source of truth for both sides of a debug session: the client
+  uses the value for its own wait in ``wait_for_debug_server``, and the
+  backends put it in the pod's ``KINETIC_DEBUG_WAIT_TIMEOUT`` env var so
+  remote_runner.py waits for exactly as long.
+
+  Returns:
+      The value of ``KINETIC_DEBUG_WAIT_TIMEOUT`` when it is a positive
+      whole number of seconds, ``DEFAULT_DEBUG_WAIT_TIMEOUT`` otherwise.
+  """
+  raw = os.environ.get(DEBUG_WAIT_TIMEOUT_ENV)
+  if not raw:
+    return DEFAULT_DEBUG_WAIT_TIMEOUT
+  try:
+    seconds = int(raw)
+  except ValueError:
+    seconds = 0
+  if seconds > 0:
+    return seconds
+  logging.warning(
+    "Ignoring invalid %s=%r (expected a positive whole number of seconds); "
+    "using %ds.",
+    DEBUG_WAIT_TIMEOUT_ENV,
+    raw,
+    DEFAULT_DEBUG_WAIT_TIMEOUT,
+  )
+  return DEFAULT_DEBUG_WAIT_TIMEOUT
 
 
 def start_port_forward(pod_name, namespace, local_port, remote_port):
@@ -115,12 +148,38 @@ def start_port_forward(pod_name, namespace, local_port, remote_port):
 def print_attach_instructions(local_port, working_dir=None):
   """Print VS Code launch.json snippet for attaching to the remote debugger.
 
+  The pod reconstructs the client's own working-directory path (the
+  runner symlinks it to the extracted workspace), so source files carry
+  identical paths on both sides and the mapping is the identity.  When
+  the working directory is unknown the mapping is left out entirely,
+  which is what debugpy already does with unmapped paths.
+
   Args:
       local_port: Local port where debugpy is forwarded.
       working_dir: Local working directory for path mappings. If None,
-          uses a placeholder.
+          no pathMappings entry is emitted.
   """
-  local_root = working_dir or "${workspaceFolder}"
+  config_lines = [
+    '    "name": "Kinetic Debug",',
+    '    "type": "debugpy",',
+    '    "request": "attach",',
+    f'    "connect": {{"host": "localhost", "port": {local_port}}}',
+  ]
+  if working_dir:
+    # json.dumps so a Windows path (backslashes) stays valid JSON.
+    root = json.dumps(working_dir)
+    config_lines[-1] += ","
+    config_lines.extend(
+      [
+        '    "pathMappings": [',
+        "      {",
+        f'        "localRoot": {root},',
+        f'        "remoteRoot": {root}',
+        "      }",
+        "    ]",
+      ]
+    )
+
   # Use print() rather than logging.info() — these are user-facing
   # instructions that must appear exactly once on stdout.  The logging
   # subsystem can duplicate messages when multiple handlers are
@@ -138,31 +197,45 @@ def print_attach_instructions(local_port, working_dir=None):
     '"create a launch.json file", then replace its contents.',
     "",
     "  {",
-    '    "name": "Kinetic Debug",',
-    '    "type": "debugpy",',
-    '    "request": "attach",',
-    f'    "connect": {{"host": "localhost", "port": {local_port}}},',
-    '    "pathMappings": [',
-    "      {",
-    f'        "localRoot": "{local_root}",',
-    '        "remoteRoot": "/tmp/workspace"',
-    "      }",
-    "    ]",
+    *config_lines,
     "  }",
     "",
-    "Set your breakpoints, then start debugging with F5 or",
-    "via the menu: Run > Start Debugging.",
-    "",
-    "The debugger will pause inside the Kinetic runner before",
-    "your function is called. Press Step Into (F11) to enter",
-    "your function, or Step Over (F10) to run it directly.",
-    "=" * 50,
-    "",
   ]
+  if working_dir:
+    lines.extend(
+      [
+        "Kinetic mirrors your local paths on the pod, so localRoot",
+        "and remoteRoot are the same directory. Edit both if you",
+        "open the sources from somewhere else.",
+        "",
+      ]
+    )
+  else:
+    lines.extend(
+      [
+        "The remote paths match your local ones, so no pathMappings",
+        "entry is needed. If your sources are somewhere else, add a",
+        'mapping with "localRoot" set to that directory and',
+        '"remoteRoot" set to the directory you submitted from.',
+        "",
+      ]
+    )
+  lines.extend(
+    [
+      "Set your breakpoints, then start debugging with F5 or",
+      "via the menu: Run > Start Debugging.",
+      "",
+      "The debugger will pause inside the Kinetic runner before",
+      "your function is called. Press Step Into (F11) to enter",
+      "your function, or Step Over (F10) to run it directly.",
+      "=" * 50,
+      "",
+    ]
+  )
   print("\n".join(lines))  # noqa: T201
 
 
-def wait_for_debug_server(handle, timeout=DEBUG_WAIT_TIMEOUT, poll_interval=5):
+def wait_for_debug_server(handle, timeout=None, poll_interval=5):
   """Poll GCS sentinel until the debugpy server confirms readiness.
 
   Logs progress as the job transitions through states so the user
@@ -170,13 +243,22 @@ def wait_for_debug_server(handle, timeout=DEBUG_WAIT_TIMEOUT, poll_interval=5):
 
   Args:
       handle: A JobHandle instance.
-      timeout: Maximum seconds to wait.
+      timeout: Maximum seconds to wait.  Defaults to the window from
+          ``resolve_debug_wait_timeout()``, so raising
+          ``KINETIC_DEBUG_WAIT_TIMEOUT`` extends this wait and the pod's
+          attach wait together rather than only one of the two.  The two
+          waits are consecutive: this one covers pod scheduling and the
+          debugpy install, and ends when the pod publishes its readiness
+          sentinel; the pod's own window for the debugger to attach
+          starts there.
       poll_interval: Seconds between log polls.
 
   Raises:
       TimeoutError: If the signal is not found within timeout.
       RuntimeError: If the job reaches a terminal state before the signal.
   """
+  if timeout is None:
+    timeout = resolve_debug_wait_timeout()
   deadline = time.monotonic() + timeout
   last_status = None
   while time.monotonic() < deadline:
