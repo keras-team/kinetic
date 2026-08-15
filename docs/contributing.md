@@ -41,52 +41,137 @@ This project follows
    pre-commit install
    ```
 
-### Code quality and testing
+### Code quality
 
-Before submitting a pull request, please ensure your changes pass linting and unit tests.
+We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. Run it before submitting a pull request:
 
-- **Linting:** We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. Run it with:
-  ```bash
-  ruff check .
-  ```
-- **Unit tests:** We use [Pytest](https://docs.pytest.org/) for unit tests. Run them with:
+```bash
+ruff check . && ruff format --check .
+```
 
-  ```bash
-  pytest
-  ```
+### Testing
 
-- **E2E tests:** End-to-end tests run real workloads against a GKE cluster. They live in `tests/e2e/` and are skipped by default unless explicitly enabled.
+Kinetic's tests are organised as a ladder of tiers. Each tier is more
+realistic than the one below it and needs one more thing installed. Every
+tier **skips itself cleanly** when its prerequisite is missing, so a fresh
+checkout always gets a green run — just a less thorough one. Install
+what you can; CI runs tiers 0 and 1 on every pull request.
 
-  **Prerequisites:**
-  - A GCP project with a provisioned GKE cluster.
-  - Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
-  - GKE credentials configured: `gcloud container clusters get-credentials <KINETIC_CLUSTER> --zone <KINETIC_ZONE> --project <KINETIC_PROJECT>`
-  - Test dependencies installed: `uv pip install -e ".[test]"`
+| Tier | What it exercises | Needs | Runtime |
+| ---- | ----------------- | ----- | ------- |
+| Unit | Pure logic, orchestration above mocked seams | nothing | seconds |
+| 0 — emulator | Real GCS wire protocol via [fake-gcs-server](https://github.com/fsouza/fake-gcs-server) | the `fake-gcs-server` binary | seconds |
+| 1 — docker | The real runner image, run with the exact command the Job spec generates | Tier 0 + a Docker daemon | ~2 min cold, ~15 s warm |
+| e2e | Real workloads on a real GKE cluster | a GCP project (see below) | minutes |
 
-  **Required environment variables:**
+Install test dependencies first:
 
-  | Variable          | Required | Default         | Description                    |
-  | ----------------- | -------- | --------------- | ------------------------------ |
-  | `E2E_TESTS`       | Yes      | —               | Set to `1` to enable e2e tests |
-  | `KINETIC_PROJECT` | Yes      | —               | Google Cloud project ID        |
-  | `KINETIC_ZONE`    | No       | `us-central1-a` | GKE cluster zone               |
-  | `KINETIC_CLUSTER` | No       | `kinetic-cluster` | GKE cluster name             |
+```bash
+uv pip install -e ".[test]"
+```
 
-  **Run all e2e tests:**
+#### Tier 0: the GCS emulator
 
-  ```bash
-  E2E_TESTS=1 KINETIC_PROJECT=my-project python -m pytest tests/e2e/ -v -n auto
-  ```
+`fake-gcs-server` is the **canonical transport for every test that touches
+Cloud Storage** — there are no hand-written GCS mocks. It is a single
+static Go binary, not a Python package, so `pip` will not fetch it:
 
-  **Run a specific test file:**
+```bash
+brew install fake-gcs-server
+```
 
-  ```bash
-  E2E_TESTS=1 KINETIC_PROJECT=my-project python -m pytest tests/e2e/cpu_execution_test.py -v
-  ```
+Alternatives: `go install github.com/fsouza/fake-gcs-server@latest`, or
+download a [release tarball](https://github.com/fsouza/fake-gcs-server/releases)
+and point `FAKE_GCS_SERVER_BIN` at the extracted binary.
 
-  :::{tip}
-  Drop `-n auto` to run tests serially to make it easier to debug.
-  :::
+The test fixture (`kinetic/utils/fake_gcs_fixture.py`) finds the binary on
+your `PATH`, starts it on a free port, and stops it at exit — nothing to
+configure. Then run the unit and integration suites:
+
+```bash
+python -m unittest discover -s kinetic -p "*_test.py"
+```
+
+```bash
+python -m unittest discover -s tests/integration -t . -p "*_test.py"
+```
+
+Without the binary, emulator-backed tests skip with a message pointing
+here; everything else still runs.
+
+:::{note}
+The fixture exports `STORAGE_EMULATOR_HOST` for the whole process, so it
+refuses to start when `E2E_TESTS` is set. Run the e2e suite in a
+separate process, as CI does.
+:::
+
+#### Tier 1: the docker roundtrip
+
+This tier builds the actual runner image through kinetic's own build
+machinery and executes it with `docker run`, using the command line
+derived from the real Job spec, against the emulator. It needs Docker
+Desktop (or any Docker daemon) running:
+
+```bash
+python -m unittest discover -s tests/docker -t . -p "*_test.py"
+```
+
+The first run builds the image (a base pull plus the JAX/Keras/kinetic
+install); later runs reuse it by content hash until `remote_runner.py`
+or the Dockerfile template changes.
+
+:::{note}
+The image installs the *released* `keras-kinetic` version from PyPI —
+exactly what Cloud Build does — so a `version.py` bump past the latest
+release fails this tier's build until that version is published.
+:::
+
+#### E2E tests
+
+End-to-end tests run real workloads against a GKE cluster. They live in
+`tests/e2e/` and are skipped unless explicitly enabled.
+
+**Prerequisites:**
+- A GCP project with a provisioned GKE cluster.
+- Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
+- GKE credentials configured: `gcloud container clusters get-credentials <KINETIC_CLUSTER> --zone <KINETIC_ZONE> --project <KINETIC_PROJECT>`
+
+**Required environment variables:**
+
+| Variable          | Required | Default         | Description                    |
+| ----------------- | -------- | --------------- | ------------------------------ |
+| `E2E_TESTS`       | Yes      | —               | Set to `1` to enable e2e tests |
+| `KINETIC_PROJECT` | Yes      | —               | Google Cloud project ID        |
+| `KINETIC_ZONE`    | No       | `us-central1-a` | GKE cluster zone               |
+| `KINETIC_CLUSTER` | No       | `kinetic-cluster` | GKE cluster name             |
+
+**Run all e2e tests:**
+
+```bash
+E2E_TESTS=1 KINETIC_PROJECT=my-project python -m pytest tests/e2e/ -v -n auto
+```
+
+**Run a specific test file:**
+
+```bash
+E2E_TESTS=1 KINETIC_PROJECT=my-project python -m pytest tests/e2e/cpu_execution_test.py -v
+```
+
+:::{tip}
+Drop `-n auto` to run tests serially to make it easier to debug.
+:::
+
+#### Writing new tests
+
+- Anything that touches Cloud Storage should use the emulator fixture
+  (`FakeGcsTestCase` or `shared_server()`), seed real blobs, and assert on
+  emulator state — never on log text.
+- Patching is fine for **fault injection** (simulating an outage or a
+  `Forbidden`) and for **spies** that record calls while the real code
+  runs. Do not patch to replace transport.
+- Tests above the storage seam (job polling, cleanup routing, batch
+  fan-out) may mock kinetic's own `storage` functions as collaborators;
+  the seam itself is covered for real by `tests/integration/`.
 
 ### Submitting changes
 
