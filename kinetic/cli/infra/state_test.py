@@ -1,14 +1,17 @@
 """Tests for kinetic.cli.infra.state — centralized state loading."""
 
+import uuid
 from unittest import mock
 
 import click
 from absl.testing import absltest
+from google.cloud import storage
 from pulumi.automation import errors as pulumi_errors
 
 from kinetic.cli.config import NodePoolConfig
 from kinetic.cli.infra import state
 from kinetic.core.accelerators import GpuConfig
+from kinetic.utils.fake_gcs_fixture import FakeGcsTestCase
 
 
 def _make_mock_stack(pools=None):
@@ -273,72 +276,97 @@ class ApplyDestroyTest(absltest.TestCase):
     self.assertTrue(result)
 
 
-class ListClustersTest(absltest.TestCase):
+class ListClustersTest(FakeGcsTestCase):
   """Regression for Codex P2: list_clusters must work for collaborators
   with only object-level (not bucket-level) IAM on the state bucket.
+
+  Discovery runs against a real state bucket in the emulator: stack
+  files are seeded as real blobs and listed by real prefix query.
   """
 
-  def setUp(self):
-    super().setUp()
-    self.mock_client_cls = self.enterContext(
-      mock.patch("kinetic.cli.infra.state.storage.Client")
-    )
-    self.mock_client = self.mock_client_cls.return_value
+  def _seed_state_bucket(self, project, blob_names):
+    """Create ``{project}-kinetic-state`` holding *blob_names*."""
+    bucket = f"{project}-kinetic-state"
+    self.server.create_bucket(bucket)
+    for name in blob_names:
+      self.server.write_blob(bucket, name, b"{}")
+    return bucket
 
-  def _set_blob_names(self, names):
-    blobs = []
-    for n in names:
-      # MagicMock's `name` constructor kwarg is special, so set the
-      # attribute after construction.
-      blob = mock.MagicMock()
-      blob.name = n
-      blobs.append(blob)
-    self.mock_client.list_blobs.return_value = blobs
+  def _project(self):
+    return f"proj-{uuid.uuid4().hex[:12]}"
 
   def test_does_not_call_bucket_exists(self):
     """The bucket.exists() precheck required storage.buckets.get IAM that
     object-only collaborators don't have. Confirm we skip it entirely.
     """
-    self._set_blob_names(
+    project = self._project()
+    self._seed_state_bucket(
+      project,
       [
-        ".pulumi/stacks/kinetic/my-proj-dev-tpu.json",
-        ".pulumi/stacks/kinetic/my-proj-team-x.json",
-      ]
+        f".pulumi/stacks/kinetic/{project}-dev-tpu.json",
+        f".pulumi/stacks/kinetic/{project}-team-x.json",
+      ],
     )
-    clusters = state.list_clusters("my-proj")
-    self.assertEqual(clusters, ["dev-tpu", "team-x"])
-    self.mock_client.bucket.assert_not_called()
 
-  def test_uses_list_blobs_with_kinetic_prefix(self):
-    self._set_blob_names([])
-    state.list_clusters("my-proj")
-    self.mock_client.list_blobs.assert_called_once_with(
-      "my-proj-kinetic-state", prefix=".pulumi/stacks/kinetic/"
+    with mock.patch.object(
+      storage.Bucket, "exists", autospec=True
+    ) as bucket_exists:
+      clusters = state.list_clusters(project)
+
+    self.assertEqual(clusters, ["dev-tpu", "team-x"])
+    bucket_exists.assert_not_called()
+
+  def test_lists_only_under_the_kinetic_stacks_prefix(self):
+    project = self._project()
+    self._seed_state_bucket(
+      project,
+      [
+        f".pulumi/stacks/kinetic/{project}-real.json",
+        # Same shape under a different Pulumi project prefix: not ours.
+        f".pulumi/stacks/other/{project}-decoy.json",
+        # Unrelated object at the bucket root.
+        f"{project}-decoy.json",
+      ],
     )
+
+    self.assertEqual(state.list_clusters(project), ["real"])
+
+  def test_missing_bucket_returns_empty(self):
+    """A genuinely absent bucket raises NotFound on list; collapses to []."""
+    self.assertEqual(state.list_clusters(self._project()), [])
 
   def test_returns_empty_when_list_blobs_raises(self):
-    """Missing bucket, Forbidden, etc. all collapse to []."""
-    self.mock_client.list_blobs.side_effect = Exception("any cloud error")
-    self.assertEqual(state.list_clusters("my-proj"), [])
+    """Forbidden and other cloud errors also collapse to []."""
+    # Fault injection: the emulator has no IAM, so Forbidden is simulated.
+    with mock.patch.object(
+      storage.Client, "list_blobs", side_effect=Exception("any cloud error")
+    ):
+      self.assertEqual(state.list_clusters(self._project()), [])
 
   def test_skips_pulumi_backup_files(self):
-    self._set_blob_names(
+    project = self._project()
+    self._seed_state_bucket(
+      project,
       [
-        ".pulumi/stacks/kinetic/my-proj-good.json",
-        ".pulumi/stacks/kinetic/my-proj-stale.bak.json",
-      ]
+        f".pulumi/stacks/kinetic/{project}-good.json",
+        f".pulumi/stacks/kinetic/{project}-stale.bak.json",
+      ],
     )
-    self.assertEqual(state.list_clusters("my-proj"), ["good"])
+
+    self.assertEqual(state.list_clusters(project), ["good"])
 
   def test_filters_by_project_prefix(self):
     """A bucket may contain stacks from other projects; list only ours."""
-    self._set_blob_names(
+    project = self._project()
+    self._seed_state_bucket(
+      project,
       [
-        ".pulumi/stacks/kinetic/my-proj-mine.json",
+        f".pulumi/stacks/kinetic/{project}-mine.json",
         ".pulumi/stacks/kinetic/other-proj-theirs.json",
-      ]
+      ],
     )
-    self.assertEqual(state.list_clusters("my-proj"), ["mine"])
+
+    self.assertEqual(state.list_clusters(project), ["mine"])
 
 
 if __name__ == "__main__":
