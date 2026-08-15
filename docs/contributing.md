@@ -132,30 +132,37 @@ End-to-end tests run real workloads against a GKE cluster. They live in
 `tests/e2e/` and are skipped unless explicitly enabled.
 
 **Prerequisites:**
-- A GCP project with a provisioned GKE cluster.
-- Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`)
-- GKE credentials configured: `gcloud container clusters get-credentials <KINETIC_CLUSTER> --zone <KINETIC_ZONE> --project <KINETIC_PROJECT>`
+- A GCP project with a provisioned Kinetic cluster and an active
+  profile — i.e. you have run `kinetic init` (which provisions or joins a
+  cluster and saves the profile).
+- Google Cloud SDK authenticated (`gcloud auth login` and `gcloud auth application-default login`).
+  Kinetic fetches the cluster's kubeconfig itself on first use.
 
-**Required environment variables:**
-
-| Variable          | Required | Default         | Description                    |
-| ----------------- | -------- | --------------- | ------------------------------ |
-| `E2E_TESTS`       | Yes      | —               | Set to `1` to enable e2e tests |
-| `KINETIC_PROJECT` | Yes      | —               | Google Cloud project ID        |
-| `KINETIC_ZONE`    | No       | `us-central1-a` | GKE cluster zone               |
-| `KINETIC_CLUSTER` | No       | `kinetic-cluster` | GKE cluster name             |
-
-**Run all e2e tests:**
+The tests submit jobs through `@kinetic.run`, so they resolve project,
+zone, and cluster exactly the way user code does: explicit argument,
+then `KINETIC_*` environment variable, then the active profile, then
+the built-in default. With a profile set, the only variable you need is
+`E2E_TESTS`:
 
 ```bash
-E2E_TESTS=1 KINETIC_PROJECT=my-project python -m pytest tests/e2e/ -v -n auto
+E2E_TESTS=1 python -m pytest tests/e2e/ -v -n auto
 ```
 
 **Run a specific test file:**
 
 ```bash
-E2E_TESTS=1 KINETIC_PROJECT=my-project python -m pytest tests/e2e/cpu_execution_test.py -v
+E2E_TESTS=1 python -m pytest tests/e2e/cpu_execution_test.py -v
 ```
+
+**Optional overrides** — useful for pointing the suite at a cluster other
+than your active profile's (this is how CI runs it, with no profile on
+the runner):
+
+| Variable          | Overrides           | Default without a profile |
+| ----------------- | ------------------- | ------------------------- |
+| `KINETIC_PROJECT` | profile project     | `GOOGLE_CLOUD_PROJECT`, else required |
+| `KINETIC_ZONE`    | profile zone        | `us-central1-a`           |
+| `KINETIC_CLUSTER` | profile cluster     | `kinetic-cluster`         |
 
 :::{tip}
 Drop `-n auto` to run tests serially to make it easier to debug.
