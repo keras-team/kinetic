@@ -5,7 +5,6 @@ from unittest import mock
 
 import click
 from absl.testing import absltest
-from google.cloud import storage
 from pulumi.automation import errors as pulumi_errors
 
 from kinetic.cli.config import NodePoolConfig
@@ -309,7 +308,7 @@ class ListClustersTest(FakeGcsTestCase):
     )
 
     with mock.patch.object(
-      storage.Bucket, "exists", autospec=True
+      state.storage.Bucket, "exists", autospec=True
     ) as bucket_exists:
       clusters = state.list_clusters(project)
 
@@ -339,7 +338,9 @@ class ListClustersTest(FakeGcsTestCase):
     """Forbidden and other cloud errors also collapse to []."""
     # Fault injection: the emulator has no IAM, so Forbidden is simulated.
     with mock.patch.object(
-      storage.Client, "list_blobs", side_effect=Exception("any cloud error")
+      state.storage.Client,
+      "list_blobs",
+      side_effect=Exception("any cloud error"),
     ):
       self.assertEqual(state.list_clusters(self._project()), [])
 

@@ -49,12 +49,13 @@ class EnsureGcsBackendTest(FakeGcsTestCase):
 
   def test_requests_uniform_bucket_level_access(self):
     # The emulator does not persist UBLA, so assert it on the request.
-    # The real create_bucket reloads the bucket from the server's reply
-    # (dropping the flag), so snapshot the requested config at call time
-    # and then let the real call proceed.
+    # A plain `wraps=` spy cannot do this: the real create_bucket
+    # reloads the bucket from the server's reply, so by the time
+    # call_args is inspected the flag reads False again. Snapshot the
+    # requested config at call time, then let the real call proceed.
     project = self._project()
     requested = {}
-    real_create = storage.Client.create_bucket
+    real_create = state_backend.storage.Client.create_bucket
 
     def spy(client, bucket, *args, **kwargs):
       requested["ubla"] = (
@@ -63,7 +64,7 @@ class EnsureGcsBackendTest(FakeGcsTestCase):
       requested["versioning"] = bucket.versioning_enabled
       return real_create(client, bucket, *args, **kwargs)
 
-    with mock.patch.object(storage.Client, "create_bucket", spy):
+    with mock.patch.object(state_backend.storage.Client, "create_bucket", spy):
       state_backend.ensure_gcs_backend(project)
 
     self.assertEqual(requested, {"ubla": True, "versioning": True})
@@ -71,7 +72,7 @@ class EnsureGcsBackendTest(FakeGcsTestCase):
   def test_storage_client_pinned_to_project(self):
     project = self._project()
     with mock.patch.object(
-      storage, "Client", wraps=storage.Client
+      state_backend.storage, "Client", wraps=state_backend.storage.Client
     ) as client_cls:
       state_backend.ensure_gcs_backend(project)
     client_cls.assert_called_once_with(project=project)
@@ -93,13 +94,15 @@ class EnsureGcsBackendTest(FakeGcsTestCase):
     # Fault injection: the emulator has no IAM, so a Forbidden create
     # can only be simulated.
     with mock.patch.object(
-      storage.Client, "create_bucket", side_effect=gax.Forbidden("nope")
+      state_backend.storage.Client,
+      "create_bucket",
+      side_effect=gax.Forbidden("nope"),
     ):
       state_backend.ensure_gcs_backend(self._project())  # no exception
 
   def test_permission_denied_swallowed(self):
     with mock.patch.object(
-      storage.Client,
+      state_backend.storage.Client,
       "create_bucket",
       side_effect=gax.PermissionDenied("nope"),
     ):
