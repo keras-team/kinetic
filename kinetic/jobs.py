@@ -372,7 +372,7 @@ class JobHandle:
   def debug_attach(
     self,
     local_port: int = DEBUGPY_PORT,
-    working_dir: str | None = None,
+    working_dir: str | os.PathLike[str] | None = None,
   ) -> subprocess.Popen:
     """Wait for debugpy, start port-forward, and print VS Code config.
 

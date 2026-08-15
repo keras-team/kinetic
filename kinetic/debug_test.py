@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 from unittest import mock
 
 from absl.testing import absltest, parameterized
@@ -37,7 +38,7 @@ def _launch_config(output):
   return json.loads("\n".join(lines[start : end + 1]))
 
 
-class TestPrintAttachInstructions(absltest.TestCase):
+class TestPrintAttachInstructions(parameterized.TestCase):
   """The printed pathMappings must match what the runner actually does.
 
   Regression test for the snippet that hardcoded
@@ -76,14 +77,37 @@ class TestPrintAttachInstructions(absltest.TestCase):
     # to whatever folder happens to be open — not the submit directory.
     self.assertNotIn("${workspaceFolder}", output)
 
-  def test_windows_working_dir_stays_valid_json(self):
-    """Backslashes must be escaped, not pasted raw into the snippet."""
-    working_dir = r"C:\Users\dev\project"
+  @parameterized.named_parameters(
+    ("backslash", "/home/dev/we\\ird"),
+    ("double_quote", '/home/dev/we"ird'),
+    ("windows_style", r"C:\Users\dev\project"),
+  )
+  def test_path_needing_escapes_stays_valid_json(self, working_dir):
+    """A raw path would break the snippet the user has to paste.
+
+    POSIX allows a backslash and a quote in a directory name, so this
+    is not only about Windows clients.
+    """
     config = _launch_config(_capture(working_dir=working_dir))
 
     self.assertEqual(
       config["pathMappings"],
       [{"localRoot": working_dir, "remoteRoot": working_dir}],
+    )
+
+  def test_pathlib_working_dir_is_accepted(self):
+    """debug_attach() is public API, so a caller can pass a Path.
+
+    json.dumps() cannot serialize a Path. A raise here would abort
+    debug_attach() after start_port_forward() launched kubectl, which
+    leaks the port-forward subprocess with no handle to clean it up.
+    """
+    working_dir = pathlib.Path("/Users/dev/project")
+    config = _launch_config(_capture(working_dir=working_dir))
+
+    self.assertEqual(
+      config["pathMappings"],
+      [{"localRoot": str(working_dir), "remoteRoot": str(working_dir)}],
     )
 
   def test_snippet_carries_the_forwarded_port(self):

@@ -166,8 +166,12 @@ def print_attach_instructions(local_port, working_dir=None):
     f'    "connect": {{"host": "localhost", "port": {local_port}}}',
   ]
   if working_dir:
-    # json.dumps so a Windows path (backslashes) stays valid JSON.
-    root = json.dumps(working_dir)
+    # os.fspath because debug_attach() is public API and a caller can
+    # hand it a pathlib.Path, which json.dumps cannot serialize.  This
+    # runs after start_port_forward(), so raising here would leak the
+    # kubectl subprocess.  json.dumps then keeps a path that holds a
+    # backslash or a quote valid in the printed snippet.
+    root = json.dumps(os.fspath(working_dir))
     config_lines[-1] += ","
     config_lines.extend(
       [
