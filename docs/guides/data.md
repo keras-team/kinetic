@@ -31,6 +31,33 @@ process_data(Data("./my_dataset/"))
 process_data(Data("gs://my-bucket/training-set/"))
 ```
 
+A `Data` object that names one file resolves to a file path, not to a
+directory. This applies to local files and to single GCS objects:
+
+```python
+@kinetic.run(accelerator="cpu")
+def load_weights(weights_path):
+  import h5py
+
+  with h5py.File(weights_path) as f:
+    return list(f.keys())
+
+
+# Local file
+load_weights(Data("./weights.h5"))
+
+# Single GCS object: no trailing slash
+load_weights(Data("gs://my-bucket/checkpoints/weights.h5"))
+```
+
+:::{important}
+For a GCS URI, the trailing slash tells Kinetic which of the two you
+mean. `Data("gs://my-bucket/dataset/")` is a directory. Without the
+slash, the same URI names one object. Kinetic shows a warning at submit
+time if a URI has no trailing slash and its last segment has no file
+extension.
+:::
+
 `Data` works as a function argument, as a value inside a list/dict, and as
 a value in the `volumes={...}` decorator argument:
 
@@ -121,7 +148,15 @@ def read_config(config_path):
 
 
 read_config(Data("./config.json", fuse=True))
+
+# A single GCS object works the same way
+read_config(Data("gs://my-bucket/configs/model.json", fuse=True))
 ```
+
+GCS FUSE can mount directories only. For a single object, Kinetic thus
+mounts the parent directory of that object. Your function receives the
+path of the object in that mount. The mount also shows the other objects
+in the directory, but Kinetic reads no data from them.
 
 You can mix FUSE-mounted and downloaded data in the same job:
 
@@ -264,6 +299,25 @@ For single files, the blob is stored at `{hash}/{filename}`. For
 directories, the full tree is preserved under `{hash}/`. The returned
 GCS URI always points to the hash prefix directory, not individual files.
 
+A GCS-hosted `Data` object does not use this pipeline. `upload_data()`
+returns the URI that you gave. An `is_dir=False` ref thus has one of two
+forms, and `_download_data()` in `remote_runner.py` must accept both:
+
+| Source                         | Ref `uri`                          | The URI names |
+| ------------------------------ | ---------------------------------- | ------------- |
+| Uploaded local file            | `gs://bucket/ns/data-cache/{hash}` | a directory   |
+| `Data("gs://bucket/dir/f.h5")` | `gs://bucket/dir/f.h5`             | the object    |
+
+Only the second form names a blob. The download thus first tries to get
+that object. If the bucket has no such object, the download lists the
+URI as a prefix. Both branches put the file into the target directory
+with its own name. `resolve_data_refs()` then gives your function that
+file path.
+
+If an `is_dir=False` ref matches no object and no prefix, the runner
+raises `FileNotFoundError`. The message contains the URI. The ref does
+not resolve to an empty directory.
+
 ### FUSE mount implementation
 
 GCS FUSE can only mount directories, not individual files. The system
@@ -287,3 +341,20 @@ volume. The `only-dir` mount option scopes the mount to a specific GCS
 prefix. For single files (`is_dir=False`), the parent directory is
 mounted. The pod receives a `gke-gcsfuse/volumes: "true"` annotation to
 trigger the GCS FUSE sidecar injection.
+
+**File selection in the mount:** `_resolve_fuse_single_file()` in
+`remote_runner.py` changes the mounted directory into a file path. It
+reads the last segment of the ref URI. Then it searches the mount for
+that name. The two ref forms above use different branches, but both
+branches are exact:
+
+- A GCS-native ref names the object. The parent mount shows this object
+  and the other objects in the directory, and the search finds the
+  correct one.
+- An uploaded file has a ref that names its hash directory, and the
+  search thus finds nothing. That directory contains only one object,
+  and that object is the file.
+
+If the mount contains more than one entry and the named object is not
+there, the runner raises `FileNotFoundError`. The runner does not select
+a different object.

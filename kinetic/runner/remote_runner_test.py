@@ -540,6 +540,113 @@ class TestDownloadData(_EmulatorTestCase):
     self.spy_download.assert_not_called()
 
 
+class TestDownloadSingleObject(_EmulatorTestCase):
+  """A ``is_dir=False`` ref, addressing either an object or a hash dir.
+
+  ``Data("gs://bucket/dir/file.h5")`` names the object itself, while an
+  uploaded local file gets the content-hash directory holding it. Both
+  arrive as ``is_dir=False`` and must land as one file in the target.
+  """
+
+  # Siblings prove the download is addressed, not "whatever is nearby".
+  SIBLINGS = [
+    "datasets/weights.h5",
+    "datasets/notes.txt",
+    "datasets/other.h5",
+    "datasets/nested/deep.bin",
+  ]
+
+  def test_gcs_native_object_downloads_beside_its_siblings(self):
+    bucket = self.seeded_data_bucket(self.SIBLINGS, content=b"weights")
+    target = _make_temp_path(self) / "output"
+
+    _download_data(
+      _data_ref(f"gs://{bucket}/datasets/weights.h5", is_dir=False),
+      str(target),
+      self.real_client(),
+    )
+
+    self.assertEqual(sorted(os.listdir(target)), ["weights.h5"])
+    self.assertEqual((target / "weights.h5").read_bytes(), b"weights")
+
+  def test_object_at_the_bucket_root_downloads(self):
+    bucket = self.seeded_data_bucket(["weights.h5", "notes.txt"])
+    target = _make_temp_path(self) / "output"
+
+    _download_data(
+      _data_ref(f"gs://{bucket}/weights.h5", is_dir=False),
+      str(target),
+      self.real_client(),
+    )
+
+    self.assertEqual(sorted(os.listdir(target)), ["weights.h5"])
+
+  def test_uploaded_file_still_resolves_through_its_hash_dir(self):
+    """The client's own single-file URI names a directory, not an object.
+
+    The exact listing is the assertion that matters: the direct object
+    attempt 404s here, and ``download_to_filename`` opens the
+    destination before it learns that. Were the empty file to survive,
+    ``resolve_data_refs`` would see two entries and hand back the
+    directory instead of the file.
+    """
+    bucket = self.seeded_data_bucket(
+      ["ns/data-cache/abc123/config.json", "ns/data-cache/def456/other.json"],
+      content=b"{}",
+    )
+    target = _make_temp_path(self) / "output"
+
+    _download_data(
+      _data_ref(f"gs://{bucket}/ns/data-cache/abc123", is_dir=False),
+      str(target),
+      self.real_client(),
+    )
+
+    self.assertEqual(sorted(os.listdir(target)), ["config.json"])
+
+  def test_uploaded_file_ref_resolves_to_the_file_after_the_fallback(self):
+    """End to end: the miss-then-list path still yields a file path."""
+    tmp = _make_temp_path(self)
+    bucket = self.seeded_data_bucket(
+      ["ns/data-cache/abc123/config.json"], content=b"{}"
+    )
+    ref = _data_ref(
+      f"gs://{bucket}/ns/data-cache/abc123", is_dir=False, mount_path=None
+    )
+
+    args, _ = resolve_data_refs(
+      (ref,), {}, self.real_client(), str(tmp / "data")
+    )
+
+    self.assertTrue(os.path.isfile(args[0]))
+    self.assertEqual(os.path.basename(args[0]), "config.json")
+
+  def test_missing_object_raises_with_the_uri(self):
+    bucket = self.seeded_data_bucket(self.SIBLINGS)
+    uri = f"gs://{bucket}/datasets/absent.h5"
+    target = str(_make_temp_path(self) / "output")
+
+    with self.assertRaises(FileNotFoundError) as cm:
+      _download_data(_data_ref(uri, is_dir=False), target, self.real_client())
+
+    self.assertIn(uri, str(cm.exception))
+
+  def test_directory_ref_without_trailing_slash_still_lists(self):
+    """A prefix that only *looks* like a file falls back to the listing."""
+    bucket = self.seeded_data_bucket(
+      ["datasets/train.v2/a.csv", "datasets/train.v2/b.csv"]
+    )
+    target = _make_temp_path(self) / "output"
+
+    _download_data(
+      _data_ref(f"gs://{bucket}/datasets/train.v2", is_dir=False),
+      str(target),
+      self.real_client(),
+    )
+
+    self.assertEqual(sorted(os.listdir(target)), ["a.csv", "b.csv"])
+
+
 class TestDownloadHfData(parameterized.TestCase):
   @parameterized.named_parameters(
     ("trusted", "hf://imdb?split=train", True),
@@ -626,6 +733,29 @@ class TestResolveDataRefs(_EmulatorTestCase):
 
     self.assertTrue(args[0].endswith("config.json"))
 
+  def test_gcs_native_object_returns_that_objects_path(self):
+    """``Data("gs://b/dir/file.h5")`` resolves to the file, not its siblings."""
+    tmp = _make_temp_path(self)
+    bucket = self.seeded_data_bucket(
+      [
+        "datasets/weights.h5",
+        "datasets/notes.txt",
+        "datasets/other.h5",
+      ],
+      content=b"weights",
+    )
+    ref = _data_ref(
+      f"gs://{bucket}/datasets/weights.h5", is_dir=False, mount_path=None
+    )
+
+    args, _ = resolve_data_refs(
+      (ref,), {}, self.real_client(), str(tmp / "data")
+    )
+
+    self.assertTrue(os.path.isfile(args[0]))
+    self.assertEqual(os.path.basename(args[0]), "weights.h5")
+    self.assertEqual(pathlib.Path(args[0]).read_bytes(), b"weights")
+
   def test_duplicate_uri_downloaded_once(self):
     tmp = _make_temp_path(self)
     ref = self._seeded_ref(["cache/hash/part.txt"], mount_path=None)
@@ -651,11 +781,17 @@ class TestResolveDataRefs(_EmulatorTestCase):
     self.assertEqual(args[0], {"key": "value"})
     self.assertEqual(kwargs["x"], 1)
 
-  def test_fuse_single_file_resolves_to_file_path(self):
-    """FUSE-mounted single file ref resolves to the actual file, not dir."""
+  def _fuse_mount(self, entries):
+    """A stand-in for a GCS FUSE mount holding *entries*."""
     mount_dir = _make_temp_path(self) / "fuse-mount"
     mount_dir.mkdir()
-    (mount_dir / "config.json").write_text("{}")
+    for entry in entries:
+      (mount_dir / entry).write_text(entry)
+    return mount_dir
+
+  def test_fuse_single_file_resolves_to_file_path(self):
+    """FUSE-mounted single file ref resolves to the actual file, not dir."""
+    mount_dir = self._fuse_mount(["config.json"])
     ref = _data_ref(
       "gs://b/path/to/config.json",
       is_dir=False,
@@ -667,6 +803,68 @@ class TestResolveDataRefs(_EmulatorTestCase):
 
     self.assertTrue(args[0].endswith("config.json"))
     self.assertFalse(os.path.isdir(args[0]))
+
+  def test_fuse_gcs_native_object_picked_out_of_its_siblings(self):
+    """The mounted parent holds unrelated objects; the URI names the one."""
+    mount_dir = self._fuse_mount(
+      ["notes.txt", "other.h5", "weights.h5", "zzz.bin"]
+    )
+    ref = _data_ref(
+      "gs://b/datasets/weights.h5",
+      is_dir=False,
+      mount_path=str(mount_dir),
+      fuse=True,
+    )
+
+    args, _ = resolve_data_refs((ref,), {}, None, "/tmp/data")
+
+    self.assertEqual(args[0], str(mount_dir / "weights.h5"))
+    self.assertEqual(pathlib.Path(args[0]).read_text(), "weights.h5")
+
+  def test_fuse_uploaded_file_resolves_through_its_hash_dir(self):
+    """An uploaded file's URI names the hash dir, whose lone entry it is."""
+    mount_dir = self._fuse_mount(["config.json"])
+    ref = _data_ref(
+      "gs://b/ns/data-cache/abc123",
+      is_dir=False,
+      mount_path=str(mount_dir),
+      fuse=True,
+    )
+
+    args, _ = resolve_data_refs((ref,), {}, None, "/tmp/data")
+
+    self.assertEqual(args[0], str(mount_dir / "config.json"))
+
+  def test_fuse_object_absent_from_a_populated_mount_raises(self):
+    """Guessing a sibling would silently feed the function the wrong file."""
+    mount_dir = self._fuse_mount(["notes.txt", "other.h5"])
+    ref = _data_ref(
+      "gs://b/datasets/weights.h5",
+      is_dir=False,
+      mount_path=str(mount_dir),
+      fuse=True,
+    )
+
+    with self.assertRaises(FileNotFoundError) as cm:
+      resolve_data_refs((ref,), {}, None, "/tmp/data")
+
+    message = str(cm.exception)
+    self.assertIn("gs://b/datasets/weights.h5", message)
+    self.assertIn("weights.h5", message)
+
+  def test_fuse_empty_mount_falls_back_to_the_mount_path(self):
+    """An unmounted/empty path is reported as-is, not as a bogus file."""
+    mount_dir = self._fuse_mount([])
+    ref = _data_ref(
+      "gs://b/datasets/weights.h5",
+      is_dir=False,
+      mount_path=str(mount_dir),
+      fuse=True,
+    )
+
+    args, _ = resolve_data_refs((ref,), {}, None, "/tmp/data")
+
+    self.assertEqual(args[0], str(mount_dir))
 
   def test_fuse_directory_returns_mount_path(self):
     """FUSE-mounted directory ref returns the mount path unchanged."""
