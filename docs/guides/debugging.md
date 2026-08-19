@@ -121,26 +121,47 @@ match.
 
 ## Path mappings and source files
 
-Kinetic fills in `pathMappings` in the printed `launch.json` so
-breakpoints set in your local files hit the matching remote files —
-no "unverified breakpoint" warnings, no file mismatch.
+Your source files have the same path on the pod and on your machine.
+The runner extracts the workspace into a temporary directory. Then the
+runner makes a symbolic link at the path of your client working
+directory. That link points at the workspace.
 
-If you attach from a directory that isn't your project root, pass
-`working_dir=` to `debug_attach()` (or replace `${workspaceFolder}` in
-the printed snippet) so the mapping points at the sources you actually
-have open.
+The two paths are the same, so the snippet sets `localRoot` and
+`remoteRoot` to that one directory. A breakpoint in a local file stops
+the program in the same file on the pod. VS Code does not show an
+"unverified breakpoint" warning.
+
+`kinetic jobs debug <job_id>` does not know your client working
+directory. For that command, Kinetic prints no `pathMappings` entry.
+debugpy then uses the remote paths without a change. This result is
+correct, because the paths are the same.
+
+Add a mapping only if you open your sources from a different directory
+than the directory that you submitted from. Set `localRoot` to the
+directory that you have open. Set `remoteRoot` to the directory that
+you submitted from.
 
 ## Timeouts and the attach window
 
-The pod waits up to 10 minutes for a debugger client to attach. If no
-one connects in that window, it proceeds with your function running
-normally — the job does not hang indefinitely. To extend or shorten
-that window, set `KINETIC_DEBUG_WAIT_TIMEOUT` (seconds) in your local
-environment before submitting:
+The pod waits 10 minutes for a debugger to attach. If no debugger
+attaches in that time, the pod runs your function as usual. The job
+does not wait longer than the window.
+
+To change the length of the window, set `KINETIC_DEBUG_WAIT_TIMEOUT`
+in your local environment. The unit is seconds.
 
 ```bash
 export KINETIC_DEBUG_WAIT_TIMEOUT=1800  # 30 minutes
 ```
+
+Kinetic reads the variable when you submit the job. Kinetic then puts
+the value in the pod. The client and the pod wait for the same time.
+
+Set the variable before you submit the job. A change after that time
+has no effect on a job that is already in the cluster.
+
+The value must be a positive whole number of seconds. If the value is
+not valid, Kinetic writes a warning to the log and uses 10 minutes.
 
 ## Multi-host debugging
 
@@ -149,6 +170,11 @@ leader pod; Kinetic sequences the non-leader workers so the
 distributed runtime doesn't start until you're ready. `jax.process_index()`
 semantics stay predictable, and you don't need to attach to each host
 separately.
+
+Kinetic gives the leader and the workers the same attach window. If
+you set `KINETIC_DEBUG_WAIT_TIMEOUT`, the new value applies to all the
+hosts. Each worker waits a short time more than the leader, so that
+normal write latency does not fail the job.
 
 :::{warning}
 **Avoid `spot=True` with `debug=True`.** Preemption mid-session
@@ -159,15 +185,19 @@ work.
 
 ## Automated environments
 
-`@kinetic.run(debug=True)` requires an interactive terminal — if
-`stdin` isn't a TTY (CI, `nohup`, piped input), the local client
-raises `RuntimeError` before submission so your job doesn't silently
-hang waiting for someone to attach.
+A blocking call to `@kinetic.run(debug=True)` needs an interactive
+terminal. If `stdin` is not a TTY (CI, `nohup`, or piped input), the
+client raises a `RuntimeError`. The client raises the error before it
+submits the job, so no job starts in the cluster. Without this check,
+the job waits the full window for a debugger that cannot attach. Then
+the job runs your function without a debugger.
 
-For async submission there's no TTY requirement —
-`@kinetic.run(debug=True)` works fine in any environment, and
-`kinetic jobs debug` from an interactive shell attaches whenever
-you're ready.
+To override the check, set `KINETIC_NO_TTY_DEBUG=1`. This variable is
+for automated tests.
+
+`run_async()` has no TTY requirement. Submit the job from any
+environment. Then attach with `kinetic jobs debug <job_id>` from an
+interactive shell when you are ready.
 
 ## Related pages
 

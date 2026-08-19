@@ -496,7 +496,7 @@ class JobHandle:
   def debug_attach(
     self,
     local_port: int = DEBUGPY_PORT,
-    working_dir: str | None = None,
+    working_dir: str | os.PathLike[str] | None = None,
   ) -> subprocess.Popen:
     """Wait for debugpy, start port-forward, and print VS Code config.
 
@@ -506,7 +506,8 @@ class JobHandle:
     Args:
       local_port: Local port to forward debugpy traffic to.
       working_dir: Local working directory for VS Code path mappings.
-          If None, a placeholder is used.
+          The pod mirrors this path, so the printed mapping is the
+          identity. If None, no pathMappings entry is printed.
 
     Returns:
       The ``subprocess.Popen`` handle for the kubectl port-forward

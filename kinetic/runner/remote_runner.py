@@ -896,8 +896,10 @@ def _install_debugger():
 
 
 # Fallback if KINETIC_DEBUG_WAIT_TIMEOUT env var is not set.
-# The pod spec normally propagates DEBUG_WAIT_TIMEOUT from
-# kinetic.debug as the env var, keeping both sides in sync.
+# The pod spec normally sets the env var from kinetic.debug's
+# resolve_debug_wait_timeout(), so the client and the pod wait out
+# the same window. Keep this in sync with DEFAULT_DEBUG_WAIT_TIMEOUT
+# there; the runner cannot import kinetic on the pod.
 _DEBUG_WAIT_TIMEOUT_DEFAULT = 600
 
 
