@@ -70,6 +70,17 @@ def _list_dir(path):
   return sorted(os.listdir(path))
 
 
+def _read_file(path):
+  """Report what a single-file Data ref resolved to, and its bytes."""
+  import os
+
+  return {
+    "name": os.path.basename(path),
+    "is_file": os.path.isfile(path),
+    "content": open(path).read(),
+  }
+
+
 def _probe_mount(path):
   """List *path* and report whether it rejects writes (GKE FUSE is ro)."""
   import os
@@ -294,6 +305,58 @@ class TestDockerRunnerRoundtrip(DockerTierTestCase):
 
     self.assertEqual(outcome.proc.returncode, 0, outcome.proc.stderr)
     self.assertEqual(outcome.result["result"], ["part.txt"])
+
+  def test_single_object_data_ref_downloads_as_a_file(self):
+    """``Data("gs://bucket/dir/file.h5")`` reaches the pod as that file."""
+    data_bucket = self.server.make_bucket(suffix="data")
+    for name, content in (
+      ("datasets/weights.h5", b"the weights"),
+      ("datasets/notes.txt", b"unrelated"),
+      ("datasets/other.h5", b"also unrelated"),
+    ):
+      self.server.write_blob(data_bucket, name, content)
+    ref = make_data_ref(f"gs://{data_bucket}/datasets/weights.h5", False)
+
+    outcome = self._submit(_read_file, args=(ref,))
+
+    self.assertEqual(outcome.proc.returncode, 0, outcome.proc.stderr)
+    self.assertEqual(
+      outcome.result["result"],
+      {"name": "weights.h5", "is_file": True, "content": "the weights"},
+    )
+
+  def test_fuse_single_object_resolves_out_of_its_mounted_parent(self):
+    """GCS FUSE mounts the parent; the runner picks the object by name."""
+    host_dir = tempfile.TemporaryDirectory()
+    self.addCleanup(host_dir.cleanup)
+    for name, content in (
+      ("weights.h5", b"the weights"),
+      ("notes.txt", b"unrelated"),
+      ("other.h5", b"also unrelated"),
+    ):
+      pathlib.Path(host_dir.name, name).write_bytes(content)
+    mount_path = "/mnt/kinetic-data/0"
+    gcs_uri = "gs://some-bucket/datasets/weights.h5"
+    ref = make_data_ref(gcs_uri, False, mount_path=mount_path, fuse=True)
+    fuse_spec = {
+      "gcs_uri": gcs_uri,
+      "mount_path": mount_path,
+      "is_dir": False,
+      "read_only": True,
+    }
+
+    outcome = self._submit(
+      _read_file,
+      args=(ref,),
+      fuse_volume_specs=[fuse_spec],
+      fuse_host_dirs={mount_path: host_dir.name},
+    )
+
+    self.assertEqual(outcome.proc.returncode, 0, outcome.proc.stderr)
+    self.assertEqual(
+      outcome.result["result"],
+      {"name": "weights.h5", "is_file": True, "content": "the weights"},
+    )
 
   def test_fuse_mount_from_the_job_spec_is_visible_and_read_only(self):
     """The mount path and ro flag come from the spec's volumeMounts —

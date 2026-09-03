@@ -535,6 +535,42 @@ class TestPrepareArtifactsFuse(absltest.TestCase):
     self.assertTrue(spec["read_only"])
 
   @mock.patch("kinetic.backend.execution.storage.upload_data")
+  def test_fuse_gcs_object_keeps_its_own_uri(self, mock_upload):
+    """A GCS-native object is already file-level; nothing is appended.
+
+    ``build_gcs_fuse_volumes`` mounts the object's parent, and the pod
+    picks the object back out of it by name — both need the URI to keep
+    naming the object.
+    """
+    mock_upload.side_effect = lambda bucket, data, project: data.path
+    tmp = _make_temp_path(self)
+
+    fuse_data = Data("gs://bucket/datasets/weights.h5", fuse=True)
+    ctx = self._make_ctx(args=(fuse_data,))
+    _prepare_artifacts(ctx, str(tmp))
+
+    spec = ctx.fuse_volume_specs[0]
+    self.assertEqual(spec["gcs_uri"], "gs://bucket/datasets/weights.h5")
+    self.assertFalse(spec["is_dir"])
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
+  def test_fuse_uploaded_file_uri_gains_the_filename(self, mock_upload):
+    """An uploaded file's URI is the hash dir, so the name is appended."""
+    mock_upload.return_value = "gs://bucket/ns/data-cache/abc123"
+    tmp = _make_temp_path(self)
+    config = tmp / "config.json"
+    config.write_text("{}")
+
+    ctx = self._make_ctx(args=(Data(str(config), fuse=True),))
+    _prepare_artifacts(ctx, str(tmp))
+
+    spec = ctx.fuse_volume_specs[0]
+    self.assertEqual(
+      spec["gcs_uri"], "gs://bucket/ns/data-cache/abc123/config.json"
+    )
+    self.assertFalse(spec["is_dir"])
+
+  @mock.patch("kinetic.backend.execution.storage.upload_data")
   def test_mixed_fuse_and_non_fuse_volumes(self, mock_upload):
     mock_upload.return_value = "gs://bucket/hash/"
     tmp = _make_temp_path(self)

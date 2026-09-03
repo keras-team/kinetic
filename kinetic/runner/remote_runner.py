@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import pickle
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -988,21 +989,53 @@ def resolve_volumes(
     _download_data(ref, mount_path, storage_client)
 
 
-def _resolve_fuse_single_file(mount_path: str) -> str | None:
-  """Find the single data file inside a FUSE mount directory.
+def _gcs_blob_path(uri: str) -> str:
+  """The object path of a `gs://bucket/path` URI, without the bucket."""
+  stripped = uri[len("gs://") :] if uri.startswith("gs://") else uri
+  _, _, path = stripped.partition("/")
+  return path.strip("/")
 
-  GCS FUSE mounts directories, not individual files.  For single-file
-  data refs the mount is scoped to the hash directory containing the
-  file, so a flat listing is sufficient.
 
-  Returns the file path, or `None` if no data file is found.
+def _resolve_fuse_single_file(mount_path: str, uri: str) -> str | None:
+  """Find the data file of a single-file ref inside its FUSE mount.
+
+  GCS FUSE mounts directories, not individual objects, so a single-file
+  ref is always mounted through a parent directory.  Which directory
+  that is depends on where the data came from:
+
+  - A GCS-native object (`gs://bucket/dir/file.h5`) is mounted through
+    its own parent, which usually holds unrelated sibling objects. The
+    object name taken from *uri* picks the right one.
+  - An uploaded local file is mounted through its content-hash
+    directory, which holds exactly that one file. Its *uri* names the
+    hash directory rather than the file, so no entry matches and the
+    lone entry is the file.
+
+  Returns the file path, or `None` if the mount holds no data file.
+
+  Raises:
+      FileNotFoundError: If the object named by *uri* is absent from a
+          mount holding several entries, so no entry can be picked
+          without guessing.
   """
+  name = posixpath.basename(_gcs_blob_path(uri))
+  if name:
+    candidate = os.path.join(mount_path, name)
+    if os.path.exists(candidate):
+      return candidate
   try:
     entries = os.listdir(mount_path)
   except OSError:
     return None
-  if entries:
+  if len(entries) == 1:
     return os.path.join(mount_path, entries[0])
+  if entries:
+    raise FileNotFoundError(
+      f"FUSE mount {mount_path} for {uri} holds {len(entries)} entries "
+      f"and none is named {name!r}: {sorted(entries)[:10]}. Kinetic "
+      f"mounts a single object through its parent directory and then "
+      f"picks the object out by name; check that {uri} exists."
+    )
   return None
 
 
@@ -1247,7 +1280,7 @@ def resolve_data_refs(
       # For FUSE-mounted single files, resolve to the actual file path
       # rather than returning the mount directory.
       if obj.get("fuse") and not obj.get("is_dir"):
-        resolved = _resolve_fuse_single_file(obj["mount_path"])
+        resolved = _resolve_fuse_single_file(obj["mount_path"], obj["uri"])
         if resolved:
           return resolved
       return obj["mount_path"]
@@ -1403,7 +1436,12 @@ def _download_hf_data(
 def _download_data(
   ref: dict, target_dir: str, storage_client: storage.Client
 ) -> None:
-  """Download data from a GCS URI (or HF URI) to a local directory."""
+  """Download data from a GCS URI (or HF URI) to a local directory.
+
+  *target_dir* is always a directory: a single-object ref lands in it
+  under the object's own name, which is what ``resolve_data_refs`` then
+  hands the user function as a file path.
+  """
   os.makedirs(target_dir, exist_ok=True)
   uri = ref["uri"]
 
@@ -1419,6 +1457,15 @@ def _download_data(
   bucket_name = parts[0]
   prefix = parts[1].rstrip("/") if len(parts) > 1 else ""
   bucket = storage_client.bucket(bucket_name)
+
+  # A single-file ref addresses the object itself when the data was
+  # already on GCS (`gs://bucket/dir/file.h5`), and the content-hash
+  # directory holding it when the file was uploaded from the client.
+  # Only the first form names a blob, so try that before listing.
+  is_dir = ref.get("is_dir", True)
+  if not is_dir and prefix and _download_object(bucket, prefix, target_dir):
+    logging.info("Downloaded 1 file from %s to %s", uri, target_dir)
+    return
 
   blobs = bucket.list_blobs(prefix=prefix + "/")
   total_downloaded = 0
@@ -1454,6 +1501,36 @@ def _download_data(
     logging.info(
       "Downloaded %d files from %s to %s", total_downloaded, uri, target_dir
     )
+  elif not is_dir:
+    # Neither an object nor a prefix: resolving this ref would hand the
+    # user function an empty directory, so fail with the URI instead.
+    raise FileNotFoundError(
+      f"No data found at {uri}: bucket {bucket_name!r} holds neither an "
+      f"object of that name nor any object under it. Check the URI; a "
+      f"Data path that names a directory needs a trailing slash."
+    )
+
+
+def _download_object(
+  bucket: storage.Bucket, blob_name: str, target_dir: str
+) -> bool:
+  """Download the object at *blob_name* into *target_dir*, if it exists.
+
+  The object keeps its own name inside *target_dir*.  Returns whether
+  an object was found, so callers can fall back to a prefix listing.
+
+  Attempting the download is one round-trip; an existence check first
+  would be two.  ``download_to_filename`` opens the destination before
+  it learns the object is missing, and deletes it again on `NotFound`
+  (google-cloud-storage >= 3.10), so a miss leaves *target_dir* clean
+  for the caller's fallback listing.
+  """
+  destination = os.path.join(target_dir, posixpath.basename(blob_name))
+  try:
+    bucket.blob(blob_name).download_to_filename(destination)
+  except cloud_exceptions.NotFound:
+    return False
+  return True
 
 
 def _download_from_gcs(client, gcs_path, local_path):

@@ -682,6 +682,21 @@ class TestBuildGcsFuseVolumes(absltest.TestCase):
     mount_opts = vols[0]["csi"]["volumeAttributes"]["mountOptions"]
     self.assertIn("only-dir=datasets/configs", mount_opts)
 
+  def test_bucket_root_single_file_mounts_the_whole_bucket(self):
+    """An object at the root has no parent prefix to scope the mount to."""
+    specs = [
+      {
+        "gcs_uri": "gs://bucket/model.json",
+        "mount_path": "/tmp/fuse-data/0",
+        "is_dir": False,
+        "read_only": True,
+      }
+    ]
+    _, vols, _ = build_gcs_fuse_volumes(specs)
+    mount_opts = vols[0]["csi"]["volumeAttributes"]["mountOptions"]
+    self.assertNotIn("only-dir", mount_opts)
+    self.assertEqual(vols[0]["csi"]["volumeAttributes"]["bucketName"], "bucket")
+
   def test_annotations_set(self):
     specs = [
       {
