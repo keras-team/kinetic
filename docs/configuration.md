@@ -79,6 +79,7 @@ one-off override.
 | -------- | ------- | ----------- |
 | `KINETIC_OUTPUT_DIR` | `gs://{jobs bucket}/outputs/{job_id}` | On your machine before a submit: the output directory for the job. In the pod: the resolved value, always set. See [Outputs and Checkpoints](guides/checkpointing.md). |
 | `KINETIC_BASE_IMAGE_REPO` | `kinetic` | Repository for prebuilt base images. Used only with `container_image="prebuilt"`. See [Container Images](guides/containers.md). |
+| `KINETIC_DEBUG_WAIT_TIMEOUT` | `600` | Seconds that Kinetic waits for a debugger to attach when `debug=True`. Kinetic reads the variable when you submit the job, and applies the value to the local wait and to the pod. Set the variable before you submit. The value must be a positive whole number of seconds. If the value is not valid, Kinetic uses `600`. See [Interactive Debugging](guides/debugging.md). |
 | `KINETIC_NO_TTY_DEBUG` | _(unset)_ | Set to `1` to permit a blocking call with `debug=True` when `stdin` is not a terminal. See [Interactive Debugging](guides/debugging.md). |
 
 ### Packaging

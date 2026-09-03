@@ -316,7 +316,7 @@ class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
       mock.patch(
         "kinetic.core.core.submit_remote",
         return_value=mock_handle,
-      ),
+      ) as mock_submit,
       mock.patch(
         "kinetic.core.core.JobContext.from_params",
         return_value=MagicMock(),
@@ -335,8 +335,42 @@ class TestDebugRequiresInteractiveTerminal(absltest.TestCase):
       ):
         func()
 
+      # Nothing may reach the cluster: a submitted debug job that nobody
+      # can attach to sits there for the whole attach window, then runs.
+      mock_submit.assert_not_called()
+
       # The debug attach path must not have been invoked.
       mock_handle.debug_attach.assert_not_called()
+
+  def test_run_async_debug_submits_without_tty(self):
+    """Only the blocking path needs a TTY; run_async() attaches later."""
+    mock_handle = MagicMock()
+    with (
+      mock.patch.dict(
+        os.environ,
+        _isolate_profile_env({"KINETIC_PROJECT": "proj"}),
+        clear=False,
+      ),
+      mock.patch(
+        "kinetic.core.core.submit_remote",
+        return_value=mock_handle,
+      ) as mock_submit,
+      mock.patch(
+        "kinetic.core.core.JobContext.from_params",
+        return_value=MagicMock(),
+      ),
+      mock.patch("sys.stdin.isatty", return_value=False),
+    ):
+      os.environ.pop("KINETIC_NO_TTY_DEBUG", None)
+
+      @run(accelerator="cpu", debug=True)
+      def func():
+        pass
+
+      handle = func.run_async()
+
+      self.assertIs(handle, mock_handle)
+      mock_submit.assert_called_once()
 
   def test_run_debug_allowed_when_stdin_is_tty(self):
     mock_handle = MagicMock()

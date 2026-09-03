@@ -13,7 +13,7 @@ from kinetic.backend.log_streaming import LogStreamer
 from kinetic.cli.constants import KINETIC_KSA_NAME
 from kinetic.core import accelerators
 from kinetic.credentials import invalidate_credential_cache
-from kinetic.debug import DEBUG_WAIT_TIMEOUT, DEBUGPY_PORT
+from kinetic.debug import DEBUGPY_PORT, resolve_debug_wait_timeout
 from kinetic.job_status import JobStatus
 
 LWS_GROUP = "leaderworkerset.x-k8s.io"
@@ -594,6 +594,10 @@ def _create_lws_spec(
   # hang trying to join JAX's distributed runtime while the leader is
   # paused at debugpy.
   if debug:
+    # Resolved once so the leader and its workers agree on the window
+    # even if the environment changes underneath a later call.
+    wait_timeout = str(resolve_debug_wait_timeout())
+
     leader_template = copy.deepcopy(pod_template)
     leader_container = leader_template["spec"]["containers"][0]
     leader_container["env"].extend(
@@ -602,7 +606,7 @@ def _create_lws_spec(
         {"name": "PYTHONBREAKPOINT", "value": "debugpy.breakpoint"},
         {
           "name": "KINETIC_DEBUG_WAIT_TIMEOUT",
-          "value": str(DEBUG_WAIT_TIMEOUT),
+          "value": wait_timeout,
         },
         {"name": "KINETIC_DEBUG_PORT", "value": str(DEBUGPY_PORT)},
       ]
@@ -618,7 +622,7 @@ def _create_lws_spec(
         {"name": "KINETIC_DEBUG_WAIT_LEADER", "value": "1"},
         {
           "name": "KINETIC_DEBUG_WAIT_TIMEOUT",
-          "value": str(DEBUG_WAIT_TIMEOUT),
+          "value": wait_timeout,
         },
       ]
     )

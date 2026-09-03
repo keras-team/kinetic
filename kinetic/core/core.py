@@ -232,9 +232,10 @@ def _require_interactive_terminal():
 
   ``run(debug=True)`` blocks waiting for a VS Code debugger to attach.
   Without a TTY (CI, cron, nohup, piped input), no one can attach and
-  the job hangs for ``DEBUG_WAIT_TIMEOUT`` before falling through.
-  Fail fast with a clear message instead.  Set
-  ``KINETIC_NO_TTY_DEBUG=1`` to override (useful for automated tests).
+  the job burns the whole attach window before falling through.  Called
+  before the job is submitted so nothing lands on the cluster; fails
+  fast with a clear message instead.  Set ``KINETIC_NO_TTY_DEBUG=1`` to
+  override (useful for automated tests).
   """
   if os.environ.get("KINETIC_NO_TTY_DEBUG") == "1":
     return
@@ -291,6 +292,12 @@ def _make_decorator(
   def decorator(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+      # Checked before anything is submitted: a blocking debug call that
+      # nobody can attach to would otherwise leave a job on the cluster
+      # that waits out the whole attach window and then runs anyway.
+      if sync and debug:
+        _require_interactive_terminal()
+
       env_vars = _capture_env(capture_env_vars)
       resolved_backend = _resolve_backend_name(accelerator, backend, spot=spot)
 
@@ -334,7 +341,6 @@ def _make_decorator(
 
       if sync:
         if debug:
-          _require_interactive_terminal()
           pf_proc = handle.debug_attach(working_dir=ctx.working_dir)
           try:
             return handle.result(stream_logs=False, cleanup=False)

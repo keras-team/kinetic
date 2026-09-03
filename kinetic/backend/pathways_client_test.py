@@ -1,5 +1,6 @@
 """Tests for kinetic.backend.pathways_client — LWS job submission and monitoring."""
 
+import os
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -26,6 +27,7 @@ from kinetic.backend.pathways_client import (
 from kinetic.backend.pathways_client import (
   list_jobs as list_pathways_jobs,
 )
+from kinetic.debug import DEBUG_WAIT_TIMEOUT_ENV
 from kinetic.job_status import JobStatus
 
 _MODULE = "kinetic.backend.pathways_client"
@@ -392,6 +394,34 @@ class TestCreateLwsSpecDebug(absltest.TestCase):
     env = self._env(spec["spec"]["leaderWorkerTemplate"]["leaderTemplate"])
     self.assertNotIn("KINETIC_DEBUG", env)
     self.assertNotIn("KINETIC_DEBUG_WAIT_LEADER", env)
+
+  def _debug_wait_timeouts(self):
+    lws = self._make_spec(debug=True)["spec"]["leaderWorkerTemplate"]
+    return (
+      self._env(lws["leaderTemplate"])["KINETIC_DEBUG_WAIT_TIMEOUT"],
+      self._env(lws["workerTemplate"])["KINETIC_DEBUG_WAIT_TIMEOUT"],
+    )
+
+  def test_debug_wait_timeout_defaults_to_ten_minutes(self):
+    with mock.patch.dict(os.environ, {}, clear=False):
+      os.environ.pop(DEBUG_WAIT_TIMEOUT_ENV, None)
+      leader, worker = self._debug_wait_timeouts()
+
+    self.assertEqual(leader, "600")
+    self.assertEqual(worker, "600")
+
+  def test_debug_wait_timeout_propagates_user_value_to_both_roles(self):
+    """Leader and workers must read the same window from one resolve.
+
+    A worker waits the leader's window plus a buffer. If the two roles
+    disagreed, the workers would give up while the user was still
+    attached to the leader, and fail the job.
+    """
+    with mock.patch.dict(os.environ, {DEBUG_WAIT_TIMEOUT_ENV: "1800"}):
+      leader, worker = self._debug_wait_timeouts()
+
+    self.assertEqual(leader, "1800")
+    self.assertEqual(worker, "1800")
 
 
 class TestSubmitPathwaysJob(absltest.TestCase):
