@@ -3,12 +3,22 @@
 Handles zipping the user's working directory, serializing the function
 payload with cloudpickle, and extracting/replacing Data objects in
 arbitrarily nested arg structures.
+
+## Git-aware packaging
+
+When zip_working_dir is called on a git repository, it automatically uses
+git ls-files to respect .gitignore rules. This provides a cleaner packaging
+experience by excluding ignored files and directories. For directories that
+are not git repositories, the function falls back to directory traversal
+with .kineticignore pattern matching.
 """
 
 import contextlib
 import fnmatch
 import json
 import os
+import posixpath
+import subprocess
 import sys
 import zipfile
 from collections import defaultdict
@@ -49,6 +59,77 @@ _KINETICIGNORE = ".kineticignore"
 
 # Reserved archive path carrying the client's packaging plan.
 _PLAN_ARCHIVE_NAME = ".kinetic/plan.json"
+
+
+def _list_git_files(base_dir: str) -> list[str] | None:
+  """List tracked and non-ignored untracked files under ``base_dir``."""
+  try:
+    result = subprocess.run(
+      [
+        "git",
+        "-C",
+        base_dir,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ".",
+      ],
+      check=True,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.DEVNULL,
+    )
+  except (OSError, subprocess.CalledProcessError):
+    return None
+
+  return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]
+
+
+def _path_is_excluded(path: str, exclude_paths: set[str]) -> bool:
+  """Check if a path should be excluded from archiving."""
+  if not exclude_paths:
+    return False
+  normalized_path = os.path.normpath(path)
+  return any(
+    normalized_path == excluded or normalized_path.startswith(excluded + os.sep)
+    for excluded in exclude_paths
+  )
+
+
+def _write_git_files(
+  zipf: zipfile.ZipFile,
+  base_dir: str,
+  git_files: list[str],
+  exclude_paths: set[str],
+  archive_prefix: str = "",
+) -> None:
+  """Write files from git ls-files to ZIP, respecting exclusions."""
+  for relative_path in git_files:
+    file_path = os.path.join(base_dir, relative_path)
+    if _path_is_excluded(file_path, exclude_paths) or not os.path.lexists(
+      file_path
+    ):
+      continue
+
+    archive_name = posixpath.join(archive_prefix, relative_path)
+    if os.path.isdir(file_path) and not os.path.islink(file_path):
+      nested_files = _list_git_files(file_path)
+      if nested_files is not None:
+        _write_git_files(
+          zipf,
+          file_path,
+          nested_files,
+          exclude_paths,
+          archive_prefix=archive_name,
+        )
+      continue
+    try:
+      zipf.write(file_path, archive_name)
+    except OSError as e:
+      logging.warning("Could not archive %s: %s", file_path, e)
+
 
 _MB = 1024 * 1024
 _DEFAULT_CONTEXT_SIZE_WARN_MB = 100.0
@@ -144,6 +225,10 @@ def zip_working_dir(
 ) -> None:
   """Zip a directory into a ZIP archive, excluding common non-source files.
 
+  When in a git repository, respects ``.gitignore`` and uses git ls-files
+  to determine which files to include. Falls back to directory traversal
+  with ``.kineticignore`` patterns when not in a git repo.
+
   Symlinked directories are followed (with a cycle guard), empty
   directories are preserved, and files that cannot be archived (broken
   symlinks, unreadable files) are skipped with a warning instead of
@@ -181,6 +266,51 @@ def zip_working_dir(
   with zipfile.ZipFile(
     output_path, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
   ) as zipf:
+    # Try git ls-files first if in a git repository
+    git_files = _list_git_files(base_dir)
+    if git_files is not None:
+      for relative_path in git_files:
+        file_path = os.path.join(base_dir, relative_path)
+        if _path_is_excluded(file_path, normalized_excludes) or not os.path.lexists(
+          file_path
+        ):
+          continue
+
+        archive_name = relative_path
+        if os.path.isdir(file_path) and not os.path.islink(file_path):
+          # Empty directories are preserved in git mode
+          rel_dir = archive_name.replace(os.sep, "/")
+          info = zipfile.ZipInfo(rel_dir + "/")
+          info.external_attr = (0o40755 << 16) | 0x10
+          zipf.writestr(info, b"")
+          continue
+
+        try:
+          size = os.path.getsize(file_path)
+          zipf.write(file_path, archive_name)
+          archived.append((size, archive_name))
+          if _is_secret_name(os.path.basename(file_path)):
+            secrets.append(archive_name)
+        except (OSError, ValueError, UnicodeEncodeError) as e:
+          logging.warning("Skipping %s: %s", file_path, e)
+
+      if plan_json is not None:
+        zipf.writestr(
+          _PLAN_ARCHIVE_NAME, json.dumps(plan_json, indent=2, default=str)
+        )
+      _report_context_size(output_path, archived)
+      if secrets:
+        logging.warning(
+          "Credential-shaped files are being uploaded with your code: %s. They "
+          "will be stored in the job's Cloud Storage bucket. Add them to a "
+          "%s file at %s to keep them out of the archive.",
+          ", ".join(sorted(secrets)),
+          _KINETICIGNORE,
+          base_dir,
+        )
+      return
+
+    # Fall back to directory traversal with os.walk
     for root, dirs, files in os.walk(base_dir, followlinks=True):
       kept_dirs = []
       for name in dirs:

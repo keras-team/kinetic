@@ -1093,5 +1093,76 @@ class TestReplaceDataWithRefs(absltest.TestCase):
     self.assertIsInstance(restored_kwargs["items"], ListSubclass)
 
 
+class TestGitIntegration(absltest.TestCase):
+  """Tests for git ls-files integration."""
+
+  def _make_temp_path(self):
+    td = tempfile.TemporaryDirectory()
+    self.addCleanup(td.cleanup)
+    return pathlib.Path(td.name)
+
+  def test_list_git_files_in_repo(self):
+    """Test _list_git_files works in a git repository."""
+    import subprocess
+
+    from kinetic.utils.packager import _list_git_files
+
+    tmp_path = self._make_temp_path()
+    src = tmp_path / "repo"
+    src.mkdir()
+
+    # Initialize git repo
+    subprocess.run(["git", "-C", str(src), "init"], check=True, capture_output=True)
+    subprocess.run(
+      ["git", "-C", str(src), "config", "user.email", "test@example.com"],
+      check=True,
+      capture_output=True,
+    )
+    subprocess.run(
+      ["git", "-C", str(src), "config", "user.name", "Test User"],
+      check=True,
+      capture_output=True,
+    )
+
+    # Add files
+    (src / "file1.py").write_text("code")
+    (src / "file2.txt").write_text("data")
+    (src / ".gitignore").write_text("*.pyc\n")
+
+    subprocess.run(
+      ["git", "-C", str(src), "add", "."], check=True, capture_output=True
+    )
+
+    files = _list_git_files(str(src))
+    self.assertIsNotNone(files)
+    self.assertIn("file1.py", files)
+    self.assertIn("file2.txt", files)
+    self.assertIn(".gitignore", files)
+
+  def test_list_git_files_not_in_repo(self):
+    """Test _list_git_files returns None when not in a git repository."""
+    from kinetic.utils.packager import _list_git_files
+
+    tmp_path = self._make_temp_path()
+    src = tmp_path / "not_repo"
+    src.mkdir()
+    (src / "file.py").write_text("code")
+
+    files = _list_git_files(str(src))
+    self.assertIsNone(files)
+
+  def test_path_is_excluded(self):
+    """Test _path_is_excluded checks exclude paths correctly."""
+    from kinetic.utils.packager import _path_is_excluded
+
+    exclude_paths = {"/tmp/data", "/tmp/cache"}
+
+    self.assertTrue(_path_is_excluded("/tmp/data/file.txt", exclude_paths))
+    self.assertTrue(_path_is_excluded("/tmp/data", exclude_paths))
+    self.assertTrue(_path_is_excluded("/tmp/cache/subdir/file.txt", exclude_paths))
+    self.assertFalse(_path_is_excluded("/tmp/other/file.txt", exclude_paths))
+    self.assertFalse(_path_is_excluded("/tmp/datafile.txt", exclude_paths))
+
+
 if __name__ == "__main__":
   absltest.main()
