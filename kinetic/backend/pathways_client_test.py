@@ -678,6 +678,29 @@ class TestWaitForJob(absltest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "keras-pathways-j1-1"):
       wait_for_job("j1")
 
+  def test_worker_failure_while_leader_running_fails_fast(self):
+    """A failed worker should be detected while the leader is still running."""
+    leader = self._make_pod(
+      "Running", container_statuses=None, name="keras-pathways-j1-0"
+    )
+    worker = self._make_pod(
+      "Failed", container_statuses=None, name="keras-pathways-j1-1"
+    )
+
+    self.mock_core.read_namespaced_pod.return_value = leader
+    self._set_worker_pods(leader, worker)
+
+    current_time = [0]
+
+    def advance_time(_):
+      current_time[0] = 61
+
+    self.mock_time.side_effect = lambda: current_time[0]
+    self.mock_sleep.side_effect = advance_time
+
+    with self.assertRaisesRegex(RuntimeError, "keras-pathways-j1-1"):
+      wait_for_job("j1", timeout=60)
+
   def test_success_when_all_workers_healthy(self):
     """Leader Succeeded with all workers Succeeded should return success."""
     self.mock_core.read_namespaced_pod.return_value = self._make_pod(
